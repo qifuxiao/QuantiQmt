@@ -1,0 +1,23 @@
+machine:
+  id: SM-ACCOUNT
+  initial: DISCONNECTED
+  states:
+    DISCONNECTED: {risk_snapshot_usable: false}
+    SYNCING: {risk_snapshot_usable: false}
+    READY: {risk_snapshot_usable: true}
+    STALE: {risk_snapshot_usable: false}
+    RESTRICTED: {risk_snapshot_usable: scoped}
+    INCONSISTENT: {risk_snapshot_usable: false}
+  transitions:
+    - {from: DISCONNECTED, event: BrokerConnected, to: SYNCING, guard: true}
+    - {from: SYNCING, event: Reconciled, to: READY, guard: account_and_positions_fresh}
+    - {from: SYNCING, event: DifferenceUnsafe, to: INCONSISTENT, guard: true}
+    - {from: READY, event: FreshnessExpired, to: STALE, guard: true}
+    - {from: READY, event: Restrict, to: RESTRICTED, guard: authorized_control}
+    - {from: READY, event: BrokerDisconnected, to: DISCONNECTED, guard: true}
+    - {from: STALE, event: Refresh, to: SYNCING, guard: true}
+    - {from: INCONSISTENT, event: RepairApproved, to: SYNCING, guard: reconciliation_case_approved}
+    - {from: RESTRICTED, event: RestrictionRemoved, to: SYNCING, guard: authorized_control}
+  invariants:
+    - "only READY snapshots may approve increased risk"
+    - "Broker reconnect requires SYNCING before READY"

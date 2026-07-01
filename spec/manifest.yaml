@@ -1,0 +1,90 @@
+specification:
+  name: quantiqmt
+  version: 0.1.0
+  status: accepted
+  updated: 2026-07-01
+  normative_root: spec
+  explanatory_root: docs
+
+precedence:
+  - safety_invariants
+  - accepted_adr
+  - normative_spec
+  - active_task
+  - agent_instructions
+  - explanatory_docs
+
+catalogs:
+  invariants:
+    - id: INV-TRADING
+      path: invariants/trading.md
+    - id: INV-CONSISTENCY
+      path: invariants/consistency.md
+    - id: INV-RISK
+      path: invariants/risk.md
+  contracts:
+    - id: CONTRACT-CATALOG
+      path: contracts/catalog.yaml
+    - id: CONTRACT-VALUE-TYPES
+      path: contracts/common/value-types.md
+    - id: CONTRACT-MESSAGE-ENVELOPE-V1
+      path: contracts/common/message-envelope.v1.schema.json
+    - id: CONTRACT-ORDER-INTENT-V1
+      path: contracts/commands/strategy.submit_order_intent.v1.schema.json
+    - id: CONTRACT-STRATEGY-TARGET-V1
+      path: contracts/commands/strategy.submit_target.v1.schema.json
+    - id: CONTRACT-BROKER-TRADE-V1
+      path: contracts/events/broker.trade_reported.v1.schema.json
+    - id: CONTRACT-ORDER-STATUS-V1
+      path: contracts/events/oms.order_status_changed.v1.schema.json
+    - id: CONTRACT-ERROR-CATALOG
+      path: contracts/errors/catalog.yaml
+  interfaces:
+    - id: PORTS-CORE
+      path: interfaces/core-ports.md
+    - id: PORTS-STRATEGY
+      path: interfaces/strategy-ports.md
+  state_machines:
+    - id: SM-ORDER
+      path: state-machines/order.yaml
+    - id: SM-STRATEGY
+      path: state-machines/strategy.yaml
+    - id: SM-SYSTEM-MODE
+      path: state-machines/system-mode.yaml
+    - id: SM-CONNECTION
+      path: state-machines/connection.yaml
+    - id: SM-ACCOUNT
+      path: state-machines/account.yaml
+    - id: SM-PORTFOLIO
+      path: state-machines/portfolio.yaml
+    - id: SM-RECONCILIATION-CASE
+      path: state-machines/reconciliation-case.yaml
+  workflows:
+    - id: WF-SUBMIT-ORDER
+      path: workflows/submit-order.yaml
+    - id: WF-RECOVERY
+      path: workflows/recovery.yaml
+    - id: WF-CANCEL-ORDER
+      path: workflows/cancel-order.yaml
+    - id: WF-TRADE-ACCOUNTING
+      path: workflows/trade-accounting.yaml
+    - id: WF-BROKER-RECONNECT
+      path: workflows/broker-reconnect.yaml
+    - id: WF-CONFIG-ACTIVATION
+      path: workflows/config-activation.yaml
+  repositories:
+    - id: REPO-ORDER
+      path: repositories/order-repository.md
+  storage:
+    - id: STORAGE-SOT
+      path: storage/source-of-truth.yaml
+  nfr:
+    - id: NFR-PERFORMANCE
+      path: nfr/performance.yaml
+    - id: NFR-RELIABILITY
+      path: nfr/reliability.yaml
+    - id: NFR-OBSERVABILITY
+      path: nfr/observability.yaml
+  reviews:
+    - id: REVIEW-BASELINE-0.1
+      path: reviews/BASELINE-0.1-REVIEW.md

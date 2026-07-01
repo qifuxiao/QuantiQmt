@@ -1,0 +1,24 @@
+machine:
+  id: SM-RECONCILIATION-CASE
+  initial: OPEN
+  states:
+    OPEN: {}
+    INVESTIGATING: {}
+    PROPOSED: {}
+    APPROVED: {}
+    REJECTED: {terminal: true}
+    APPLYING: {}
+    RESOLVED: {terminal: true}
+    FAILED: {}
+  transitions:
+    - {from: OPEN, event: Assign, to: INVESTIGATING, guard: owner_present}
+    - {from: INVESTIGATING, event: ProposeRepair, to: PROPOSED, guard: evidence_present}
+    - {from: PROPOSED, event: Approve, to: APPROVED, guard: approval_policy_passed}
+    - {from: PROPOSED, event: Reject, to: REJECTED, guard: authorized_reviewer}
+    - {from: APPROVED, event: Apply, to: APPLYING, guard: expected_versions_match}
+    - {from: APPLYING, event: VerifyResolved, to: RESOLVED, guard: reconciliation_clean}
+    - {from: APPLYING, event: ApplyFailed, to: FAILED, guard: true}
+    - {from: FAILED, event: Reinvestigate, to: INVESTIGATING, guard: true}
+  invariants:
+    - "P0 and P1 cannot transition directly from OPEN to RESOLVED"
+    - "repair never deletes or overwrites historical facts"

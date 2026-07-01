@@ -1,0 +1,14 @@
+workflow:
+  id: WF-TRADE-ACCOUNTING
+  input: broker.trade_reported.v1
+  correlation_key: trade_id
+  steps:
+    - {id: validate_and_deduplicate_trade, owner: OMS, unique_key: "broker+account+trading_day+trade_id"}
+    - {id: update_order_and_publish_trade_recorded, owner: OMS, transaction: "Order + Trade + Outbox"}
+    - {id: post_balanced_ledger_transaction, owner: AccountLedger, failure: HALTED_AND_P0}
+    - {id: update_position_projection, owner: PortfolioProjection, duplicate_safe: true}
+    - {id: publish_risk_snapshot_change, owner: PortfolioProjection}
+  invariants:
+    - broker_fact_is_never_rolled_back
+    - ledger_debits_equal_credits_per_currency
+    - downstream_failure_replays_from_inbox

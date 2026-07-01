@@ -1,0 +1,46 @@
+machine:
+  id: SM-ORDER
+  aggregate: Order
+  initial: REGISTERED
+  states:
+    REGISTERED: {terminal: false}
+    RISK_PENDING: {terminal: false}
+    APPROVED: {terminal: false}
+    SUBMITTING: {terminal: false}
+    SUBMIT_UNKNOWN: {terminal: false}
+    SUBMITTED: {terminal: false}
+    PARTIALLY_FILLED: {terminal: false}
+    CANCEL_PENDING: {terminal: false}
+    CANCEL_UNKNOWN: {terminal: false}
+    SUSPENDED: {terminal: false}
+    REJECTED: {terminal: true}
+    CANCELED: {terminal: true}
+    FILLED: {terminal: true}
+    EXPIRED: {terminal: true}
+    FAILED: {terminal: true}
+  transitions:
+    - {from: REGISTERED, event: StartRisk, to: RISK_PENDING, guard: snapshots_available, action: RequestRiskEvaluation}
+    - {from: RISK_PENDING, event: RiskPassed, to: APPROVED, guard: expected_version_matches, action: PersistOrderApproved}
+    - {from: RISK_PENDING, event: RiskRejected, to: REJECTED, guard: expected_version_matches, action: PersistOrderRejected}
+    - {from: APPROVED, event: Dispatch, to: SUBMITTING, guard: leader_and_trading_allowed, action: StartExecutionAttempt}
+    - {from: SUBMITTING, event: BrokerAccepted, to: SUBMITTED, guard: report_uniquely_correlated, action: MergeBrokerReport}
+    - {from: SUBMITTING, event: BrokerRejected, to: REJECTED, guard: outcome_definite, action: MergeBrokerReport}
+    - {from: SUBMITTING, event: OutcomeUnknown, to: SUBMIT_UNKNOWN, guard: true, action: ScheduleReconciliation}
+    - {from: SUBMIT_UNKNOWN, event: ReconcileFoundActive, to: SUBMITTED, guard: unique_broker_match, action: ImportBrokerFacts}
+    - {from: SUBMIT_UNKNOWN, event: ReconcileConfirmedAbsent, to: FAILED, guard: visibility_window_passed, action: PersistSubmitFailed}
+    - {from: SUBMIT_UNKNOWN, event: ReconcileAmbiguous, to: SUSPENDED, guard: true, action: OpenReconciliationCase}
+    - {from: SUBMITTED, event: PartialTrade, to: PARTIALLY_FILLED, guard: cum_between_zero_and_quantity, action: RecordTrade}
+    - {from: SUBMITTED, event: FullTrade, to: FILLED, guard: cum_equals_quantity, action: RecordTrade}
+    - {from: PARTIALLY_FILLED, event: FullTrade, to: FILLED, guard: cum_equals_quantity, action: RecordTrade}
+    - {from: SUBMITTED, event: RequestCancel, to: CANCEL_PENDING, guard: order_not_terminal, action: StartCancelAttempt}
+    - {from: PARTIALLY_FILLED, event: RequestCancel, to: CANCEL_PENDING, guard: leaves_positive, action: StartCancelAttempt}
+    - {from: CANCEL_PENDING, event: CancelConfirmed, to: CANCELED, guard: broker_confirms_canceled, action: MergeBrokerReport}
+    - {from: CANCEL_PENDING, event: OutcomeUnknown, to: CANCEL_UNKNOWN, guard: true, action: ScheduleReconciliation}
+    - {from: CANCEL_PENDING, event: FullTrade, to: FILLED, guard: cum_equals_quantity, action: RecordTrade}
+    - {from: CANCEL_UNKNOWN, event: ReconcileCanceled, to: CANCELED, guard: broker_confirms_canceled, action: ImportBrokerFacts}
+    - {from: CANCEL_UNKNOWN, event: ReconcileAmbiguous, to: SUSPENDED, guard: true, action: OpenReconciliationCase}
+  invariants:
+    - "0 <= cum_quantity <= quantity"
+    - "cum_quantity is monotonic"
+    - "only OMS mutates state"
+    - "unknown outcome never triggers blind retry"

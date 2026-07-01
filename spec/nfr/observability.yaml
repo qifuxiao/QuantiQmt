@@ -1,0 +1,41 @@
+nfr:
+  id: NFR-OBSERVABILITY
+  required_message_fields:
+    - message_id
+    - correlation_id
+    - causation_id
+    - source
+    - occurred_at
+    - schema_version
+  required_log_fields:
+    - timestamp
+    - level
+    - service
+    - instance
+    - environment
+    - correlation_id
+    - error_code
+  transaction_trace_must_include:
+    - strategy_decision
+    - target_or_order_intent
+    - order_registration
+    - risk_rule_results
+    - oms_transitions
+    - execution_attempts
+    - broker_reports
+    - trades
+    - ledger_entries
+    - manual_operations
+  prohibited_metric_labels:
+    - order_id
+    - trade_id
+    - correlation_id
+    - instrument_id
+    - raw_account_id
+  safety_alerts:
+    - dual_oms_leader
+    - order_message_dropped
+    - audit_unavailable
+    - unknown_order_stuck
+    - reconciliation_p0_p1
+    - stale_fencing_token

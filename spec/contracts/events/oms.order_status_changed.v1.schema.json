@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:quantiqmt:event:oms.order_status_changed:v1",
+  "title": "OrderStatusChangedPayloadV1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["order_id", "from_status", "to_status", "reason_code", "cum_quantity", "leaves_quantity", "changed_at"],
+  "properties": {
+    "order_id": {"type": "string", "minLength": 16, "maxLength": 64},
+    "from_status": {"type": "string", "minLength": 1, "maxLength": 32},
+    "to_status": {"type": "string", "minLength": 1, "maxLength": 32},
+    "reason_code": {"type": "string", "minLength": 1, "maxLength": 128},
+    "broker_order_id": {"type": ["string", "null"]},
+    "cum_quantity": {"type": "integer", "minimum": 0},
+    "leaves_quantity": {"type": "integer", "minimum": 0},
+    "average_price": {"type": ["string", "null"], "pattern": "^[0-9]+(\\.[0-9]+)?$"},
+    "source_report_id": {"type": ["string", "null"]},
+    "changed_at": {"type": "string", "format": "date-time"}
+  }
+}

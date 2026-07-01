@@ -11,5 +11,6 @@ ADR 记录不可逆或跨模块的设计决策。已有 ADR-0001 至 ADR-0005 �
 | ADR-0005 | 显式状态机 | Accepted |
 | ADR-0006 | Command/Event 分离与 At-Least-Once | Proposed |
 | ADR-0007 | OMS 单写者与订单一致性 | Proposed |
+| ADR-0008 | Python 与基础技术栈基线 | Accepted |
 
 新 ADR 使用：Context、Decision、Alternatives、Consequences、Operational Impact、Migration Plan 六个章节。

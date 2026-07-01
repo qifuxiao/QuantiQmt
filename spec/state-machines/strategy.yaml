@@ -1,0 +1,28 @@
+machine:
+  id: SM-STRATEGY
+  initial: CREATED
+  states:
+    CREATED: {allows_output: false}
+    INITIALIZING: {allows_output: false}
+    READY: {allows_output: false}
+    RUNNING: {allows_output: true}
+    PAUSED: {allows_output: false}
+    ERROR: {allows_output: false}
+    STOPPING: {allows_output: false}
+    STOPPED: {allows_output: false, terminal: true}
+  transitions:
+    - {from: CREATED, event: Load, to: INITIALIZING, guard: artifact_verified}
+    - {from: INITIALIZING, event: Initialized, to: READY, guard: checkpoint_and_dependencies_valid}
+    - {from: INITIALIZING, event: InitializationFailed, to: ERROR, guard: true}
+    - {from: READY, event: Enable, to: RUNNING, guard: runtime_prerequisites_fresh}
+    - {from: RUNNING, event: Pause, to: PAUSED, guard: true}
+    - {from: RUNNING, event: RuntimeFailure, to: ERROR, guard: true}
+    - {from: PAUSED, event: Resume, to: RUNNING, guard: runtime_prerequisites_fresh_and_approved}
+    - {from: RUNNING, event: Stop, to: STOPPING, guard: stop_policy_present}
+    - {from: PAUSED, event: Stop, to: STOPPING, guard: stop_policy_present}
+    - {from: ERROR, event: Stop, to: STOPPING, guard: stop_policy_present}
+    - {from: STOPPING, event: Stopped, to: STOPPED, guard: checkpoint_flushed_or_explicitly_failed}
+  invariants:
+    - "only RUNNING may emit trading outputs"
+    - "worker failure does not mutate OMS orders"
+    - "resume requires explicit health and approval guards"

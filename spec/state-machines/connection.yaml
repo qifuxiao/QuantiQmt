@@ -1,0 +1,28 @@
+machine:
+  id: SM-CONNECTION
+  initial: DISCONNECTED
+  states:
+    DISCONNECTED: {}
+    CONNECTING: {}
+    CONNECTED: {}
+    DEGRADED: {}
+    BACKOFF: {}
+    FAILED: {}
+    DISCONNECTING: {}
+  transitions:
+    - {from: DISCONNECTED, event: Connect, to: CONNECTING, guard: retry_or_operator_allows}
+    - {from: CONNECTING, event: Connected, to: CONNECTED, guard: active_probe_passed}
+    - {from: CONNECTING, event: ConnectFailed, to: BACKOFF, guard: retry_budget_remains}
+    - {from: CONNECTING, event: RetryExhausted, to: FAILED, guard: true}
+    - {from: BACKOFF, event: RetryDue, to: CONNECTING, guard: retry_budget_remains}
+    - {from: CONNECTED, event: HealthDegraded, to: DEGRADED, guard: true}
+    - {from: DEGRADED, event: HealthyWindowPassed, to: CONNECTED, guard: active_probe_passed}
+    - {from: DEGRADED, event: ConnectionLost, to: DISCONNECTED, guard: true}
+    - {from: CONNECTED, event: Disconnect, to: DISCONNECTING, guard: true}
+    - {from: DEGRADED, event: Disconnect, to: DISCONNECTING, guard: true}
+    - {from: DISCONNECTING, event: Disconnected, to: DISCONNECTED, guard: true}
+    - {from: FAILED, event: OperatorReset, to: DISCONNECTED, guard: incident_acknowledged}
+  invariants:
+    - "CONNECTED requires active probe, not only an open socket"
+    - "retry and backoff are bounded"
+    - "reconnect never restores trading mode automatically"
