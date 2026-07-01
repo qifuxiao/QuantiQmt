@@ -1,0 +1,23 @@
+[project]
+name = "quantiqmt"
+version = "0.1.0"
+description = ""
+authors = [
+    {name = "qifuxiao",email = "867225266@qq.com"}
+]
+readme = "README.md"
+requires-python = ">=3.11,<3.14"
+dependencies = [
+    "xtquant (>=250516.1.1,<250517.0.0)",
+    "fastapi (>=0.136.0,<0.137.0)",
+    "uvicorn (>=0.44.0,<0.45.0)",
+    "redis (>=7.4.0,<8.0.0)",
+    "pyyaml (>=6.0.3,<7.0.0)"
+]
+
+[tool.poetry]
+packages = [{include = "quantiqmt", from = "src"}]
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"

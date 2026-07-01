@@ -1,0 +1,93 @@
+# OMS 与风控详细规格
+
+> Status: Proposed
+
+## 不变量
+
+1. 每个 intent_id 最多创建一个 order_id。
+2. 只有 OMS 能改变订单状态和累计成交量。
+3. 未持久化 `APPROVED` 事实前不能产生 Broker Submit Command。
+4. `cum_quantity` 单调不减且不得大于 quantity。
+5. `(broker, account, trading_day, trade_id)` 只记账一次。
+6. 任何不确定结果不得被映射为 FAILED 后自动重下。
+7. 非 Leader 或 fencing token 过期实例不能产生外部副作用。
+
+## 完整订单状态
+
+| 状态 | 含义 | 是否终态 |
+|---|---|---|
+| REGISTERED | 意图已持久化 | 否 |
+| RISK_PENDING | 等待风险决策 | 否 |
+| REJECTED | 风控或 Broker 明确拒绝 | 是 |
+| APPROVED | 已批准但未发送 | 否 |
+| SUBMITTING | 已创建发送尝试 | 否 |
+| SUBMIT_UNKNOWN | 请求结果不确定 | 否 |
+| SUBMITTED | Broker 已确认活动订单 | 否 |
+| PARTIALLY_FILLED | 部分成交 | 否 |
+| CANCEL_PENDING | 已请求撤单，结果未定 | 否 |
+| CANCEL_UNKNOWN | 撤单结果不确定 | 否 |
+| CANCELED | 明确撤销，可能有部分成交 | 是 |
+| FILLED | 完全成交 | 是 |
+| EXPIRED | Broker 明确过期 | 是 |
+| FAILED | 确认未创建外部订单的技术失败 | 是 |
+| SUSPENDED | 等待人工/对账处理 | 否 |
+
+## 迁移表
+
+| 当前状态 | 输入 | Guard | 新状态 | 事件/动作 |
+|---|---|---|---|---|
+| REGISTERED | StartRisk | 快照可用 | RISK_PENDING | EvaluateRisk |
+| RISK_PENDING | RiskPass | 版本匹配 | APPROVED | OrderApproved |
+| RISK_PENDING | RiskReject | 版本匹配 | REJECTED | OrderRejected |
+| APPROVED | Dispatch | Leader 且未触发 Kill Switch | SUBMITTING | SubmitOrder |
+| SUBMITTING | BrokerAck/活动回报 | ID 可关联 | SUBMITTED | OrderSubmitted |
+| SUBMITTING | 明确 Broker 拒绝 | 证据确定 | REJECTED | OrderRejected |
+| SUBMITTING | 超时/断连 | 结果不可知 | SUBMIT_UNKNOWN | QueryBroker |
+| SUBMIT_UNKNOWN | ReconcileFound | 唯一映射 | SUBMITTED/部分成交/终态 | ImportReports |
+| SUBMIT_UNKNOWN | ReconcileAbsent | 超过可见性窗口且证据确定 | FAILED | SubmitFailed |
+| SUBMIT_UNKNOWN | 冲突/证据不足 | - | SUSPENDED | P1 + 人工工单 |
+| SUBMITTED | TradeReport | 成交唯一且 cum < qty | PARTIALLY_FILLED | TradeRecorded |
+| SUBMITTED/PARTIALLY_FILLED | TradeReport | cum = qty | FILLED | TradeRecorded |
+| SUBMITTED/PARTIALLY_FILLED | CancelRequest | 未终态 | CANCEL_PENDING | CancelOrder |
+| CANCEL_PENDING | CancelAck | leaves 已撤 | CANCELED | OrderCanceled |
+| CANCEL_PENDING | TradeReport | 仍可成交 | PARTIALLY_FILLED/FILLED | TradeRecorded |
+| CANCEL_PENDING | 超时 | 结果不可知 | CANCEL_UNKNOWN | QueryBroker |
+| CANCEL_UNKNOWN | Reconcile | 按 Broker 事实 | 活动/成交/CANCELED/SUSPENDED | Reconciled |
+
+终态收到迟到成交时不能简单拒绝：若 Broker 证明成交有效，记录成交并迁移至与累计成交一致的状态，同时产生严重差异事件。非法迁移必须隔离消息并告警，不允许静默跳过。
+
+## 回报乱序归并
+
+- 优先使用 Broker sequence；缺失时使用业务不变量和累计成交量，不仅依赖时间戳。
+- 成交可先于委托确认：先建立 provisional mapping，随后补齐 broker_order_id；无法唯一关联则进入隔离队列。
+- 状态回报不得降低 cum_quantity 或从终态回退到活动态。
+- 重复成交由数据库唯一约束和 Inbox 双重防护。
+
+## 风控规则矩阵
+
+| 层级 | 典型规则 | 数据新鲜度 | 超时策略 |
+|---|---|---|---|
+| 系统 | Kill Switch、交易状态、依赖健康 | 实时 | fail-closed |
+| 账户 | 可用资金、持仓、保证金、日损 | ≤ 配置阈值 | fail-closed |
+| 组合 | 集中度、行业/因子暴露、杠杆 | ≤ 配置阈值 | fail-closed |
+| 策略 | 单笔、累计仓位、频率、撤单率 | 实时 | fail-closed |
+| 标的 | 白名单、价格偏离、涨跌停、停牌 | 行情阈值内 | fail-closed |
+| 监控 | 异常统计、提示型规则 | 可配置 | 可 fail-open 并告警 |
+
+具体新鲜度阈值属于版本化配置，默认不写死在代码。资金/持仓快照质量不是 FRESH 时，涉及开仓或扩大风险敞口的命令一律拒绝；减仓是否允许由独立规则明确判定。
+
+## 风控确定性
+
+RiskDecision 必须由 `{order snapshot, market/account/portfolio snapshot versions, rule_set_version}` 唯一决定。规则无数据库写入、网络调用和系统时钟读取；所需数据在调用前形成不可变快照。
+
+## 人工修复
+
+允许的修复命令包括 LinkBrokerOrder、ImportTrade、MarkConfirmedAbsent、ApplyLedgerAdjustment。每次修复需要操作者、原因、证据、审批策略、前后版本和审计事件；禁止直接 SQL 修改订单状态。
+
+## 验收属性
+
+- 任意消息重复 N 次，最终业务状态不变。
+- 任意合法回报乱序，最终累计成交和终态一致。
+- 任意时刻最多一个有效 SubmitOrder 外部副作用。
+- 进程在每个持久化边界崩溃后重启，订单不会丢失或自动重复发送。
+- 所有拒绝、超时、修复和模式切换均可从审计链解释。
