@@ -10,13 +10,13 @@
     "instrument_id": {"type": "string", "minLength": 1, "maxLength": 64},
     "trading_day": {"type": "string", "format": "date"},
     "position_version": {"type": "integer", "minimum": 1},
-    "source_ledger_transaction_id": {"type": "string", "minLength": 16, "maxLength": 64},
+    "source_ledger_transaction_id": {"type": "string", "format": "uuid"},
     "previous_quantity": {"type": "integer"},
     "current_quantity": {"type": "integer"},
     "available_quantity": {"type": "integer", "minimum": 0},
-    "average_cost": {"type": ["string", "null"], "pattern": "^(0|[1-9][0-9]{0,17})(\\.[0-9]{1,8})?$"},
+    "average_cost": {"type": ["string", "null"], "pattern": "^(?=.*[1-9])(0|[1-9][0-9]{0,17})(\\.[0-9]{1,8})?$"},
     "market_value": {"type": ["string", "null"], "pattern": "^-?(0|[1-9][0-9]{0,17})(\\.[0-9]{1,8})?$"},
     "currency": {"type": "string", "pattern": "^[A-Z]{3}$"},
-    "changed_at": {"type": "string", "format": "date-time"}
+    "changed_at": {"type": "string", "format": "date-time", "pattern": "Z$"}
   }
 }

@@ -17,6 +17,8 @@
 
 核心订单、风险、成交与账本 V1 Schema 的 Decimal 字符串词法上限为 18 位整数、8 位小数，禁止前导零、指数形式、NaN 和 Infinity；品种 tick size、币种 scale 与 rounding mode 可以在 Domain 进一步收紧，但不得放宽该边界。
 
+Price 语义严格大于零；`"0"`、`"0.0"` 和任何全零小数均非法。Money/测量值可按字段语义允许零。所有内部 ID 使用 RFC 4122 UUID 字符串；Broker、账户、品种和外部报告 ID 属于外部命名空间，不强制 UUID。所有业务 datetime 除 `format: date-time` 外还必须以大写 `Z` 结尾，`+00:00` 或其他 offset 均不是 V1 的规范编码。
+
 ## Message Envelope V1
 
 | 字段 | 类型 | 必填 | 约束 |
@@ -147,3 +149,11 @@ TradePosted 保留 `(broker, account_id, trading_day, trade_id)` 成交去重事
 - 删除、改名、改变含义或精度必须发布新 message_type 版本。
 - Producer 至少支持当前版本；Consumer 在滚动升级期支持当前和前一版本。
 - 契约样例保存为 golden fixtures，所有 Adapter 执行编码/解码契约测试。
+
+## Spec 0.2 / Catalog 2 兼容与迁移
+
+- 本次从 Spec 0.1.0 升级到 0.2.0、Contract Catalog 1 升级到 2，新增 8 个 planned V1 Schema；既有 active 消息的字段与语义没有改变，属于向后兼容的规范扩展。
+- 新消息在架构 Review APPROVE 前不得由 Producer 发布，也不得被 TASK-002 视为 active。Review 后只允许把 Catalog status 从 planned 改为 active，不再修改已批准字段。
+- TASK-002 必须为每个新 Schema 建立 golden fixtures，并使用 JSON Schema `FormatChecker` 验证 UUID 与 date-time；仅调用类型校验视为迁移失败。
+- 尚无生产数据或已部署 Producer，因此不需要历史消息回填。未来若环境中发现同名试验消息，必须隔离并重新按批准 Schema 生成，禁止原地猜测转换。
+- Consumer 上线顺序为：先部署可解码 Consumer，再启用 Producer；回滚时先停 Producer，再回滚 Consumer。planned 阶段禁止任何双写或影子发布进入正式 Topic。

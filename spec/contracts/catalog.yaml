@@ -1,6 +1,6 @@
 catalog:
   id: CONTRACT-CATALOG
-  version: 1
+  version: 2
   status: accepted
 messages:
   - {name: strategy.submit_order_intent.v1, kind: command, owner: OrderApplication, schema: commands/strategy.submit_order_intent.v1.schema.json, status: active}

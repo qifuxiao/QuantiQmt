@@ -6,21 +6,21 @@
   "additionalProperties": false,
   "required": ["ledger_transaction_id", "broker", "account_id", "trading_day", "trade_id", "order_id", "instrument_id", "side", "position_effect", "price", "quantity", "currency", "entries", "posted_at"],
   "properties": {
-    "ledger_transaction_id": {"type": "string", "minLength": 16, "maxLength": 64},
+    "ledger_transaction_id": {"type": "string", "format": "uuid"},
     "broker": {"type": "string", "minLength": 1, "maxLength": 64},
     "account_id": {"type": "string", "minLength": 1, "maxLength": 128},
     "trading_day": {"type": "string", "format": "date"},
     "trade_id": {"type": "string", "minLength": 1, "maxLength": 128},
-    "order_id": {"type": "string", "minLength": 16, "maxLength": 64},
+    "order_id": {"type": "string", "format": "uuid"},
     "instrument_id": {"type": "string", "minLength": 1, "maxLength": 64},
     "side": {"enum": ["BUY", "SELL"]},
     "position_effect": {"enum": ["OPEN", "CLOSE", "AUTO"]},
-    "price": {"type": "string", "pattern": "^(0|[1-9][0-9]{0,17})(\\.[0-9]{1,8})?$"},
+    "price": {"type": "string", "pattern": "^(?=.*[1-9])(0|[1-9][0-9]{0,17})(\\.[0-9]{1,8})?$"},
     "quantity": {"type": "integer", "minimum": 1},
     "commission": {"type": ["string", "null"], "pattern": "^(0|[1-9][0-9]{0,17})(\\.[0-9]{1,8})?$"},
     "tax": {"type": ["string", "null"], "pattern": "^(0|[1-9][0-9]{0,17})(\\.[0-9]{1,8})?$"},
     "currency": {"type": "string", "pattern": "^[A-Z]{3}$"},
     "entries": {"type": "array", "minItems": 2, "items": {"type": "object", "additionalProperties": false, "required": ["account_code", "direction", "amount", "currency"], "properties": {"account_code": {"type": "string", "minLength": 1, "maxLength": 64}, "direction": {"enum": ["DEBIT", "CREDIT"]}, "amount": {"type": "string", "pattern": "^(0|[1-9][0-9]{0,17})(\\.[0-9]{1,8})?$"}, "currency": {"type": "string", "pattern": "^[A-Z]{3}$"}}}},
-    "posted_at": {"type": "string", "format": "date-time"}
+    "posted_at": {"type": "string", "format": "date-time", "pattern": "Z$"}
   }
 }

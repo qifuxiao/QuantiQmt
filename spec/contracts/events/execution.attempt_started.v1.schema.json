@@ -6,16 +6,16 @@
   "additionalProperties": false,
   "required": ["attempt_id", "order_id", "operation", "client_order_id", "broker", "account_id", "expected_order_version", "fencing_token", "started_at"],
   "properties": {
-    "attempt_id": {"type": "string", "minLength": 16, "maxLength": 64},
-    "order_id": {"type": "string", "minLength": 16, "maxLength": 64},
+    "attempt_id": {"type": "string", "format": "uuid"},
+    "order_id": {"type": "string", "format": "uuid"},
     "operation": {"enum": ["SUBMIT", "CANCEL"]},
     "client_order_id": {"type": "string", "minLength": 1, "maxLength": 128},
-    "cancel_request_id": {"type": ["string", "null"], "minLength": 16, "maxLength": 64},
+    "cancel_request_id": {"type": ["string", "null"], "format": "uuid"},
     "broker": {"type": "string", "minLength": 1, "maxLength": 64},
     "account_id": {"type": "string", "minLength": 1, "maxLength": 128},
     "expected_order_version": {"type": "integer", "minimum": 1},
     "fencing_token": {"type": "integer", "minimum": 1},
-    "started_at": {"type": "string", "format": "date-time"}
+    "started_at": {"type": "string", "format": "date-time", "pattern": "Z$"}
   },
-  "allOf": [{"if": {"properties": {"operation": {"const": "CANCEL"}}}, "then": {"required": ["cancel_request_id"], "properties": {"cancel_request_id": {"type": "string", "minLength": 16, "maxLength": 64}}}}]
+  "allOf": [{"if": {"properties": {"operation": {"const": "CANCEL"}}}, "then": {"required": ["cancel_request_id"], "properties": {"cancel_request_id": {"type": "string", "format": "uuid"}}}}]
 }

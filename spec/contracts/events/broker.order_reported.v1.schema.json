@@ -10,16 +10,16 @@
     "broker": {"type": "string", "minLength": 1, "maxLength": 64},
     "account_id": {"type": "string", "minLength": 1, "maxLength": 128},
     "trading_day": {"type": "string", "format": "date"},
-    "order_id": {"type": ["string", "null"], "minLength": 16, "maxLength": 64},
+    "order_id": {"type": ["string", "null"], "format": "uuid"},
     "client_order_id": {"type": "string", "minLength": 1, "maxLength": 128},
     "broker_order_id": {"type": ["string", "null"], "minLength": 1, "maxLength": 128},
     "broker_status": {"enum": ["ACCEPTED", "REJECTED", "PARTIALLY_FILLED", "FILLED", "CANCELED", "EXPIRED"]},
     "cum_quantity": {"type": "integer", "minimum": 0},
     "leaves_quantity": {"type": "integer", "minimum": 0},
-    "average_price": {"type": ["string", "null"], "pattern": "^(0|[1-9][0-9]{0,17})(\\.[0-9]{1,8})?$"},
+    "average_price": {"type": ["string", "null"], "pattern": "^(?=.*[1-9])(0|[1-9][0-9]{0,17})(\\.[0-9]{1,8})?$"},
     "broker_sequence": {"type": ["integer", "null"], "minimum": 0},
     "raw_error_code": {"type": ["string", "null"], "maxLength": 128},
-    "report_time": {"type": "string", "format": "date-time"},
-    "received_at": {"type": "string", "format": "date-time"}
+    "report_time": {"type": "string", "format": "date-time", "pattern": "Z$"},
+    "received_at": {"type": "string", "format": "date-time", "pattern": "Z$"}
   }
 }

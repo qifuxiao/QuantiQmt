@@ -6,19 +6,19 @@
   "additionalProperties": false,
   "required": ["order_id", "intent_id", "account_id", "instrument_id", "side", "position_effect", "order_type", "quantity", "time_in_force", "owner_strategy_id", "owner_strategy_version", "registered_at"],
   "properties": {
-    "order_id": {"type": "string", "minLength": 16, "maxLength": 64},
-    "intent_id": {"type": "string", "minLength": 16, "maxLength": 64},
+    "order_id": {"type": "string", "format": "uuid"},
+    "intent_id": {"type": "string", "format": "uuid"},
     "account_id": {"type": "string", "minLength": 1, "maxLength": 128},
     "instrument_id": {"type": "string", "minLength": 1, "maxLength": 64},
     "side": {"enum": ["BUY", "SELL"]},
     "position_effect": {"enum": ["OPEN", "CLOSE", "AUTO"]},
     "order_type": {"enum": ["LIMIT", "MARKET", "BEST"]},
     "quantity": {"type": "integer", "minimum": 1},
-    "limit_price": {"type": ["string", "null"], "pattern": "^(0|[1-9][0-9]{0,17})(\\.[0-9]{1,8})?$"},
+    "limit_price": {"type": ["string", "null"], "pattern": "^(?=.*[1-9])(0|[1-9][0-9]{0,17})(\\.[0-9]{1,8})?$"},
     "time_in_force": {"enum": ["DAY", "IOC", "FOK"]},
     "owner_strategy_id": {"type": "string", "minLength": 1, "maxLength": 128},
     "owner_strategy_version": {"type": "string", "minLength": 1, "maxLength": 64},
-    "registered_at": {"type": "string", "format": "date-time"}
+    "registered_at": {"type": "string", "format": "date-time", "pattern": "Z$"}
   },
-  "allOf": [{"if": {"properties": {"order_type": {"const": "LIMIT"}}}, "then": {"required": ["limit_price"], "properties": {"limit_price": {"type": "string", "pattern": "^(0|[1-9][0-9]{0,17})(\\.[0-9]{1,8})?$"}}}}]
+  "allOf": [{"if": {"properties": {"order_type": {"const": "LIMIT"}}}, "then": {"required": ["limit_price"], "properties": {"limit_price": {"type": "string", "pattern": "^(?=.*[1-9])(0|[1-9][0-9]{0,17})(\\.[0-9]{1,8})?$"}}}}]
 }
