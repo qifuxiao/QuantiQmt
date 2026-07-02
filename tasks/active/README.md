@@ -1,3 +1,3 @@
 # Active Tasks
 
-当前无 active task。TASK-011 保持 Ready，需由人类明确批准后才能激活。
+当前 active task：`TASK-011-complete-core-message-specs.md`。本任务完成独立架构评审前不得激活 TASK-002。

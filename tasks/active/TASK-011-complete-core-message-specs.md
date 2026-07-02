@@ -1,7 +1,7 @@
 ---
 id: TASK-011
 title: Complete and approve core order risk execution message schemas
-status: ready
+status: active
 depends_on: [TASK-000]
 spec_refs: [CONTRACT-CATALOG, CONTRACT-MESSAGE-ENVELOPE-V1, SM-ORDER, WF-SUBMIT-ORDER, WF-CANCEL-ORDER, WF-TRADE-ACCOUNTING]
 allowed_paths: [spec/contracts/**, spec/manifest.yaml, docs/10-EventDriven/**, tasks/index.yaml, tasks/backlog/TASK-002-message-contracts.md, tasks/backlog/TASK-003-order-domain.md, tasks/backlog/TASK-005-risk-engine.md, tasks/backlog/TASK-006-broker-simulator.md]
