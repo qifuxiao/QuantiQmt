@@ -1,7 +1,7 @@
 tasks:
   - {id: TASK-000, path: completed/TASK-000-engineering-bootstrap.md, status: completed, depends_on: []}
   - {id: TASK-001, path: completed/TASK-001-shared-kernel.md, status: completed, depends_on: [TASK-000]}
-  - {id: TASK-002, path: backlog/TASK-002-message-contracts.md, status: blocked, depends_on: [TASK-001, TASK-011]}
+  - {id: TASK-002, path: backlog/TASK-002-message-contracts.md, status: ready, depends_on: [TASK-001, TASK-011]}
   - {id: TASK-003, path: backlog/TASK-003-order-domain.md, status: blocked, depends_on: [TASK-001, TASK-002]}
   - {id: TASK-004, path: backlog/TASK-004-persistence-outbox.md, status: blocked, depends_on: [TASK-002, TASK-003]}
   - {id: TASK-005, path: backlog/TASK-005-risk-engine.md, status: blocked, depends_on: [TASK-003]}
@@ -10,4 +10,4 @@ tasks:
   - {id: TASK-008, path: backlog/TASK-008-strategy-sdk.md, status: blocked, depends_on: [TASK-002]}
   - {id: TASK-009, path: backlog/TASK-009-target-resolver.md, status: blocked, depends_on: [TASK-007, TASK-008]}
   - {id: TASK-010, path: backlog/TASK-010-reference-buy-hold.md, status: blocked, depends_on: [TASK-009]}
-  - {id: TASK-011, path: active/TASK-011-complete-core-message-specs.md, status: active, depends_on: [TASK-000]}
+  - {id: TASK-011, path: completed/TASK-011-complete-core-message-specs.md, status: completed, depends_on: [TASK-000]}
