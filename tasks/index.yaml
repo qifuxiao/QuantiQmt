@@ -10,4 +10,4 @@ tasks:
   - {id: TASK-008, path: backlog/TASK-008-strategy-sdk.md, status: blocked, depends_on: [TASK-002]}
   - {id: TASK-009, path: backlog/TASK-009-target-resolver.md, status: blocked, depends_on: [TASK-007, TASK-008]}
   - {id: TASK-010, path: backlog/TASK-010-reference-buy-hold.md, status: blocked, depends_on: [TASK-009]}
-  - {id: TASK-011, path: backlog/TASK-011-complete-core-message-specs.md, status: ready, depends_on: [TASK-000]}
+  - {id: TASK-011, path: active/TASK-011-complete-core-message-specs.md, status: active, depends_on: [TASK-000]}
