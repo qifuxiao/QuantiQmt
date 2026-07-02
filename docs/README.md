@@ -2,6 +2,8 @@
 
 QuantiQmt 是面向长期生产运行的量化交易系统，不是策略研究框架。本文档集是开发、评审、测试和运维的共同契约；实现与文档冲突时，必须先更新 ADR，再修改实现。
 
+> AI-first 工程入口：规范性技术契约位于 [../spec/README.md](../spec/README.md)，可执行任务位于 [../tasks/README.md](../tasks/README.md)，Agent 工作流位于 [../ai/README.md](../ai/README.md)。本目录保留架构解释与设计理由；发生冲突时以 `spec/` 为准。
+
 ## 阅读顺序
 
 1. [系统愿景](00-Architecture/00-System-Vision.md)
@@ -76,4 +78,4 @@ QuantiQmt 是面向长期生产运行的量化交易系统，不是策略研究�
 
 ## 规范优先级
 
-发生不一致时按以下顺序裁决：最新 Accepted ADR → L4 Catalog/Specification/API Contract → 主题架构文档 → Engineering Convention → 历史示例。事件名称以 Event Catalog 为准，字段以 Payload/Message Contract 为准，接口以 API Contract 为准，流程和状态以 Workflow/State Machine Catalog 为准。旧 ADR 和工程规范中的示例名称不构成可实现契约。
+发生不一致时按以下顺序裁决：安全不变量 → 最新 Accepted ADR → `spec/` → active task → `AGENTS.md` → 本目录主题文档 → Engineering Convention → 历史示例。事件、字段、接口、流程和状态的规范性版本以 `spec/manifest.yaml` 索引为准。旧 ADR 和工程规范中的示例名称不构成可实现契约。

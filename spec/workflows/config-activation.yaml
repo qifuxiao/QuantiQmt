@@ -1,0 +1,14 @@
+workflow:
+  id: WF-CONFIG-ACTIVATION
+  input: config_candidate
+  steps:
+    - {id: persist_candidate, owner: ConfigService}
+    - {id: schema_and_business_validate, owner: ConfigService, failure: reject_candidate}
+    - {id: prepare_required_components, owner: ConfigService, failure: reject_candidate}
+    - {id: persist_active_version, owner: ConfigService, transaction: "ActiveVersion + Event + Outbox"}
+    - {id: swap_immutable_snapshots, owner: Components, guard: safe_boundary}
+    - {id: collect_acknowledgements, owner: ConfigService, failure: rollback_or_safe_scope}
+  invariants:
+    - one_risk_decision_uses_one_rule_set_version
+    - secrets_are_references_not_plaintext
+    - partial_silent_activation_is_forbidden

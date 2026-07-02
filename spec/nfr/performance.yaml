@@ -1,0 +1,30 @@
+nfr:
+  id: NFR-PERFORMANCE
+  workload: target
+  assumptions:
+    active_instruments: 2000
+    market_peak_messages_per_second: 50000
+    strategy_instances: 100
+    order_intents_per_second: 500
+    broker_reports_per_second: 2000
+  latency_p99_ms:
+    callback_copy_to_ingress: 1
+    market_normalize_to_publish: 3
+    strategy_ordinary_evaluation: 8
+    risk_evaluation: 4
+    oms_command: 4
+    approved_to_broker_call_start: 3
+    internal_market_to_broker_call_start: 20
+    trade_receive_to_order_commit: 10
+    trade_commit_to_position_visible: 50
+    kill_switch_to_new_intent_blocked: 50
+  capacity_rules:
+    production_max_of_measured_safe_capacity: 0.60
+    queue_warning_ratio: 0.60
+    queue_degraded_ratio: 0.80
+    reject_new_risk_ratio: 0.95
+    report_percentiles: [p50, p95, p99, p99_9, max]
+  forbidden:
+    - report_average_only
+    - achieve_latency_by_dropping_order_messages
+    - weaken_audit_or_risk_for_performance

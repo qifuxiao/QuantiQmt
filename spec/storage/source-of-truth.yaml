@@ -1,0 +1,64 @@
+catalog:
+  id: STORAGE-SOT
+  entries:
+    - data: order_intent
+      authority: oms_journal
+      durable: postgresql
+      cache: oms_memory
+      recovery: journal_replay
+    - data: risk_decision
+      authority: risk_audit_event
+      durable: postgresql
+      cache: order_read_model
+      recovery: query_by_order_id
+    - data: internal_order_history
+      authority: oms_journal
+      durable: postgresql
+      cache: oms_memory
+      recovery: snapshot_plus_journal
+    - data: external_order_fact
+      authority: broker
+      durable: broker_and_postgresql_observation
+      cache: oms_read_model
+      recovery: broker_query_and_merge
+    - data: trade
+      authority: broker
+      durable: postgresql
+      cache: portfolio_projection
+      recovery: overlapping_broker_query_and_deduplicate
+    - data: ledger
+      authority: account_ledger
+      durable: postgresql_append_only
+      cache: balance_projection
+      recovery: ledger_replay
+    - data: position
+      authority: trade_ledger_projection
+      external_baseline: broker
+      durable: postgresql
+      cache: memory_or_redis
+      recovery: replay_and_reconcile
+    - data: account_cash
+      authority: internal_ledger
+      tradable_external_baseline: broker
+      durable: postgresql
+      cache: risk_snapshot
+      recovery: ledger_replay_and_broker_query
+    - data: tick
+      authority: market_upstream
+      durable: optional_market_store
+      cache: memory_or_redis
+      recovery: unavailable_gap_must_be_marked
+    - data: risk_rule_set
+      authority: versioned_config_store
+      durable: postgresql
+      cache: immutable_memory_snapshot
+      recovery: load_active_version
+    - data: system_mode_kill_switch
+      authority: control_journal
+      durable: postgresql
+      cache: component_memory
+      recovery: restore_before_trading
+  rules:
+    redis_is_authority: false
+    conflict_action: open_reconciliation_case
+    silent_history_overwrite: forbidden

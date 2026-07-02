@@ -1,0 +1,26 @@
+workflow:
+  id: WF-RECOVERY
+  new_order_barrier: closed
+  steps:
+    - {id: load_config, owner: Supervisor, failure: HALTED}
+    - {id: verify_schema_clock_trading_day, owner: Supervisor, failure: HALTED}
+    - {id: connect_postgresql_redis, owner: Supervisor, failure: SAFE}
+    - {id: restore_system_mode_kill_switch, owner: TradingCore, failure: HALTED}
+    - {id: acquire_lease_fencing, owner: OMS, failure: STANDBY}
+    - {id: restore_snapshot_and_journal, owner: OMS, failure: HALTED}
+    - {id: connect_broker, owner: BrokerGateway, failure: SAFE}
+    - {id: query_open_orders, owner: Reconciliation, failure: SAFE}
+    - {id: query_trades_overlap_window, owner: Reconciliation, failure: SAFE}
+    - {id: query_account_positions, owner: Reconciliation, failure: SAFE}
+    - {id: classify_differences, owner: Reconciliation, failure: HALTED_IF_UNSAFE}
+    - {id: apply_approved_repairs, owner: Reconciliation, failure: SAFE}
+    - {id: verify_outbox_inbox_projection_lag, owner: Supervisor, failure: SAFE}
+    - {id: open_recovery_barrier, owner: TradingCore, guard: all_completion_conditions}
+    - {id: start_market_and_strategies, owner: Supervisor, guard: recovery_barrier_open}
+  completion_conditions:
+    - all_active_orders_definite_or_suspended_case
+    - broker_trade_query_complete
+    - account_and_position_snapshots_fresh
+    - no_unapproved_p0_p1_difference
+    - valid_fencing_token
+    - recovery_report_persisted

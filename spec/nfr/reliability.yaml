@@ -1,0 +1,22 @@
+nfr:
+  id: NFR-RELIABILITY
+  availability_target: 0.999
+  recovery_targets:
+    strategy_worker_seconds: 30
+    projection_from_snapshot_seconds: 60
+    qmt_reconnect_and_reconcile_seconds: 60
+    oms_restart_barrier_seconds: 60
+    redis_rebuild_seconds: 300
+  delivery:
+    cross_process: at_least_once
+    business_correctness: idempotency_plus_single_writer_plus_reconciliation
+  failure_rules:
+    dependency_failure_does_not_bypass_controls: true
+    reconnect_does_not_auto_resume_normal: true
+    infinite_retry: forbidden
+    unbounded_queue: forbidden
+    unknown_external_outcome_blind_retry: forbidden
+  safety_modes: [NORMAL, DEGRADED, SAFE, HALTED]
+  rpo:
+    audit_target: zero
+    status: uncommitted_until_restore_drill_proves_it

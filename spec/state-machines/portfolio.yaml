@@ -1,0 +1,23 @@
+machine:
+  id: SM-PORTFOLIO
+  initial: EMPTY
+  states:
+    EMPTY: {risk_snapshot_usable: false}
+    RECOVERING: {risk_snapshot_usable: false}
+    READY: {risk_snapshot_usable: true}
+    STALE: {risk_snapshot_usable: false}
+    INCONSISTENT: {risk_snapshot_usable: false}
+    CLOSED: {risk_snapshot_usable: false}
+  transitions:
+    - {from: EMPTY, event: Restore, to: RECOVERING, guard: true}
+    - {from: RECOVERING, event: ReplayVerified, to: READY, guard: snapshot_and_replay_checksums_match}
+    - {from: RECOVERING, event: DifferenceDetected, to: INCONSISTENT, guard: true}
+    - {from: READY, event: ProjectionLagExceeded, to: STALE, guard: true}
+    - {from: STALE, event: CaughtUp, to: READY, guard: replay_verified}
+    - {from: READY, event: DifferenceDetected, to: INCONSISTENT, guard: true}
+    - {from: INCONSISTENT, event: RepairApproved, to: RECOVERING, guard: reconciliation_case_approved}
+    - {from: READY, event: SessionClosed, to: CLOSED, guard: checkpoint_persisted}
+    - {from: CLOSED, event: NewSession, to: RECOVERING, guard: trading_day_advanced}
+  invariants:
+    - "projection is derivable from ledger and trade facts"
+    - "only READY snapshots may approve increased risk"

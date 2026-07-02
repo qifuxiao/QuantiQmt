@@ -1,0 +1,45 @@
+workflow:
+  id: WF-SUBMIT-ORDER
+  input: strategy.submit_order_intent.v1
+  correlation_key: intent_id
+  steps:
+    - id: validate_intent
+      owner: OrderApplication
+      failure: reject_without_side_effect
+    - id: register_order
+      owner: OMS
+      transaction: "Order + OrderRegistered + Outbox"
+      idempotency_key: intent_id
+      failure: no_broker_side_effect
+    - id: build_risk_snapshot
+      owner: OrderApplication
+      failure: fail_closed
+    - id: evaluate_risk
+      owner: RiskEngine
+      timeout: fail_closed
+      output: RiskDecision
+    - id: apply_risk_decision
+      owner: OMS
+      guard: expected_order_version
+      reject_terminal: REJECTED
+    - id: start_execution_attempt
+      owner: ExecutionEngine
+      guard: "leader && valid_fencing_token && trading_mode_allows"
+      persist_before_external_call: true
+    - id: broker_submit
+      owner: BrokerGateway
+      idempotency_key: client_order_id
+      timeout: SUBMIT_UNKNOWN
+    - id: merge_report
+      owner: OMS
+      duplicate_safe: true
+      out_of_order_safe: true
+  forbidden:
+    - risk_before_order_registration
+    - broker_call_before_persisted_approval
+    - blind_retry_after_unknown_outcome
+  success_evidence:
+    - OrderRegistered
+    - RiskDecision
+    - ExecutionAttemptStarted
+    - BrokerReportOrExplicitUnknown
