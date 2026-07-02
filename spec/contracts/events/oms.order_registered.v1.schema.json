@@ -6,8 +6,8 @@
   "additionalProperties": false,
   "required": ["order_id", "intent_id", "account_id", "instrument_id", "side", "position_effect", "order_type", "quantity", "time_in_force", "owner_strategy_id", "owner_strategy_version", "registered_at"],
   "properties": {
-    "order_id": {"type": "string", "format": "uuid"},
-    "intent_id": {"type": "string", "format": "uuid"},
+    "order_id": {"type": "string", "format": "uuid", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"},
+    "intent_id": {"type": "string", "format": "uuid", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"},
     "account_id": {"type": "string", "minLength": 1, "maxLength": 128},
     "instrument_id": {"type": "string", "minLength": 1, "maxLength": 64},
     "side": {"enum": ["BUY", "SELL"]},

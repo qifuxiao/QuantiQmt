@@ -17,7 +17,7 @@
 
 核心订单、风险、成交与账本 V1 Schema 的 Decimal 字符串词法上限为 18 位整数、8 位小数，禁止前导零、指数形式、NaN 和 Infinity；品种 tick size、币种 scale 与 rounding mode 可以在 Domain 进一步收紧，但不得放宽该边界。
 
-Price 语义严格大于零；`"0"`、`"0.0"` 和任何全零小数均非法。Money/测量值可按字段语义允许零。所有内部 ID 使用 RFC 4122 UUID 字符串；Broker、账户、品种和外部报告 ID 属于外部命名空间，不强制 UUID。所有业务 datetime 除 `format: date-time` 外还必须以大写 `Z` 结尾，`+00:00` 或其他 offset 均不是 V1 的规范编码。
+Price 语义严格大于零；`"0"`、`"0.0"` 和任何全零小数均非法。Money/测量值可按字段语义允许零。所有内部 ID 使用 RFC 4122 UUID 的 canonical 小写字符串，大写十六进制 UUID 非法；Broker、账户、品种和外部报告 ID 属于外部命名空间，不强制 UUID。所有业务 datetime 除 `format: date-time` 外还必须以大写 `Z` 结尾，`+00:00` 或其他 offset 均不是 V1 的规范编码。
 
 ## Message Envelope V1
 

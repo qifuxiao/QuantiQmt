@@ -10,7 +10,7 @@
     "broker": {"type": "string", "minLength": 1, "maxLength": 64},
     "account_id": {"type": "string", "minLength": 1, "maxLength": 128},
     "trading_day": {"type": "string", "format": "date"},
-    "order_id": {"type": ["string", "null"], "format": "uuid"},
+    "order_id": {"type": ["string", "null"], "format": "uuid", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"},
     "client_order_id": {"type": "string", "minLength": 1, "maxLength": 128},
     "broker_order_id": {"type": ["string", "null"], "minLength": 1, "maxLength": 128},
     "broker_status": {"enum": ["ACCEPTED", "REJECTED", "PARTIALLY_FILLED", "FILLED", "CANCELED", "EXPIRED"]},

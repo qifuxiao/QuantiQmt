@@ -10,7 +10,7 @@
     "instrument_id": {"type": "string", "minLength": 1, "maxLength": 64},
     "trading_day": {"type": "string", "format": "date"},
     "position_version": {"type": "integer", "minimum": 1},
-    "source_ledger_transaction_id": {"type": "string", "format": "uuid"},
+    "source_ledger_transaction_id": {"type": "string", "format": "uuid", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"},
     "previous_quantity": {"type": "integer"},
     "current_quantity": {"type": "integer"},
     "available_quantity": {"type": "integer", "minimum": 0},

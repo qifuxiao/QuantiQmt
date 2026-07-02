@@ -6,8 +6,8 @@
   "additionalProperties": false,
   "required": ["cancel_request_id", "order_id", "client_order_id", "broker", "account_id", "expected_order_version", "fencing_token", "requested_at"],
   "properties": {
-    "cancel_request_id": {"type": "string", "format": "uuid"},
-    "order_id": {"type": "string", "format": "uuid"},
+    "cancel_request_id": {"type": "string", "format": "uuid", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"},
+    "order_id": {"type": "string", "format": "uuid", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"},
     "client_order_id": {"type": "string", "minLength": 1, "maxLength": 128},
     "broker_order_id": {"type": ["string", "null"], "minLength": 1, "maxLength": 128},
     "broker": {"type": "string", "minLength": 1, "maxLength": 64},
