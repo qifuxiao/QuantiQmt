@@ -37,6 +37,22 @@ catalogs:
       path: contracts/events/broker.trade_reported.v1.schema.json
     - id: CONTRACT-ORDER-STATUS-V1
       path: contracts/events/oms.order_status_changed.v1.schema.json
+    - id: CONTRACT-CANCEL-ORDER-V1
+      path: contracts/commands/execution.cancel_order.v1.schema.json
+    - id: CONTRACT-ORDER-REGISTERED-V1
+      path: contracts/events/oms.order_registered.v1.schema.json
+    - id: CONTRACT-RISK-ORDER-EVALUATED-V1
+      path: contracts/events/risk.order_evaluated.v1.schema.json
+    - id: CONTRACT-EXECUTION-ATTEMPT-STARTED-V1
+      path: contracts/events/execution.attempt_started.v1.schema.json
+    - id: CONTRACT-EXECUTION-OUTCOME-UNKNOWN-V1
+      path: contracts/events/execution.outcome_unknown.v1.schema.json
+    - id: CONTRACT-BROKER-ORDER-REPORTED-V1
+      path: contracts/events/broker.order_reported.v1.schema.json
+    - id: CONTRACT-LEDGER-TRADE-POSTED-V1
+      path: contracts/events/ledger.trade_posted.v1.schema.json
+    - id: CONTRACT-PORTFOLIO-POSITION-CHANGED-V1
+      path: contracts/events/portfolio.position_changed.v1.schema.json
     - id: CONTRACT-ERROR-CATALOG
       path: contracts/errors/catalog.yaml
   interfaces:

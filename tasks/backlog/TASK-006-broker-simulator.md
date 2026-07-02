@@ -3,7 +3,7 @@ id: TASK-006
 title: Implement execution port and programmable broker simulator
 status: blocked
 depends_on: [TASK-003, TASK-005]
-spec_refs: [INV-TRADING, PORTS-CORE, WF-SUBMIT-ORDER, NFR-RELIABILITY]
+spec_refs: [INV-TRADING, PORTS-CORE, WF-SUBMIT-ORDER, WF-CANCEL-ORDER, NFR-RELIABILITY, CONTRACT-CANCEL-ORDER-V1, CONTRACT-EXECUTION-ATTEMPT-STARTED-V1, CONTRACT-EXECUTION-OUTCOME-UNKNOWN-V1, CONTRACT-BROKER-ORDER-REPORTED-V1]
 allowed_paths: [src/quantiqmt/execution/**, src/quantiqmt/simulation/broker/**, tests/contract/broker/**]
 forbidden_paths: [src/quantiqmt/live/qmt/**]
 verification:
