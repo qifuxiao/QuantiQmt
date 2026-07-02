@@ -1,7 +1,7 @@
 ---
 id: TASK-001
 title: Implement immutable shared value types
-status: ready
+status: active
 depends_on: [TASK-000]
 spec_refs: [INV-CONSISTENCY, NFR-PERFORMANCE, CONTRACT-VALUE-TYPES]
 allowed_paths: [src/quantiqmt/shared/**, tests/unit/shared/**]

@@ -1,3 +1,3 @@
 # Active Tasks
 
-当前没有 active task。TASK-001 和 TASK-011 已 Ready，但只有人类可以从 backlog 激活其中一个。
+当前 active task：`TASK-001-shared-kernel.md`。TASK-011 保持 Ready，TASK-001 完成独立验收前不得激活其他任务。
