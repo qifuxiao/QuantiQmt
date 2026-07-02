@@ -15,6 +15,10 @@
 | 金额 | `Decimal`，显式 currency 和 scale |
 | 枚举 | 稳定字符串；未知值进入兼容分支，不按序号序列化 |
 
+核心订单、风险、成交与账本 V1 Schema 的 Decimal 字符串词法上限为 18 位整数、8 位小数，禁止前导零、指数形式、NaN 和 Infinity；品种 tick size、币种 scale 与 rounding mode 可以在 Domain 进一步收紧，但不得放宽该边界。
+
+Price 语义严格大于零；`"0"`、`"0.0"` 和任何全零小数均非法。Money/测量值可按字段语义允许零。所有内部 ID 使用 RFC 4122 UUID 的 canonical 小写字符串，大写十六进制 UUID 非法；Broker、账户、品种和外部报告 ID 属于外部命名空间，不强制 UUID。所有业务 datetime 除 `format: date-time` 外还必须以大写 `Z` 结尾，`+00:00` 或其他 offset 均不是 V1 的规范编码。
+
 ## Message Envelope V1
 
 | 字段 | 类型 | 必填 | 约束 |
@@ -74,6 +78,8 @@
 
 包含 order_id、client_order_id、broker_order_id（若已知）、cancel_request_id、expected_order_version、fencing_token。重复请求使用相同 cancel_request_id。
 
+该 Command 的 Envelope 必须同时设置 `idempotency_key=cancel_request_id`、`aggregate_id=order_id` 和 `partition_key=order_id`。`broker_order_id` 未知时允许为 null；这不授权重新生成 client_order_id 或绕过 UNKNOWN 对账。
+
 ## 核心 Event
 
 ### `oms.order_registered.v1`
@@ -88,6 +94,10 @@
 
 包含 broker、account_id、trading_day、client_order_id、broker_order_id、broker_status、cum_quantity、leaves_quantity、average_price、broker_sequence、report_time、raw_error_code。原始 payload 可加密归档，但不能进入 Domain。
 
+### `execution.attempt_started.v1` / `execution.outcome_unknown.v1`
+
+Attempt 在任何 Broker 外部调用前持久化，包含 attempt_id、operation(SUBMIT/CANCEL)、order_id、client_order_id、expected_order_version 和 fencing_token。CANCEL 必须携带 cancel_request_id。UNKNOWN 事件必须引用同一 attempt_id 和 fencing_token，并固定 `reconciliation_required=true`；它不是失败确认，也不得触发盲重试。
+
 ### `broker.trade_reported.v1`
 
 包含 broker、account_id、trading_day、trade_id、broker_order_id、instrument_id、side、quantity、price、commission、trade_time、broker_sequence。去重键为 `(broker, account_id, trading_day, trade_id)`。
@@ -95,6 +105,25 @@
 ### `oms.order_status_changed.v1`
 
 包含 order_id、from_status、to_status、reason_code、source_report_id、cum_quantity、leaves_quantity。`aggregate_version` 决定订单内顺序。
+
+### `ledger.trade_posted.v1` / `portfolio.position_changed.v1`
+
+TradePosted 保留 `(broker, account_id, trading_day, trade_id)` 成交去重事实，并包含至少两条同币种借贷分录；同一 currency 的 DEBIT 与 CREDIT 必须在 Domain 校验中相等。PositionChanged 以 `source_ledger_transaction_id` 幂等投影，并通过严格递增的 `position_version` 排序，不能直接消费 Broker 成交绕过 Ledger。
+
+## Golden Fixture Contract
+
+每个 active payload Schema 必须在 `tests/contract/messages/fixtures/<message_type>/` 提供下列固定类别；TASK-002 实现 DTO 时不得删减或改变含义：
+
+| Fixture | 必须证明 |
+|---|---|
+| `minimal.valid.json` | 仅必填字段即可通过，nullable 可选字段省略 |
+| `maximal.valid.json` | 所有可选字段、边界长度和最高精度 Decimal 字符串通过 |
+| `invalid.missing-required.json` | 缺少任一必填字段失败 |
+| `invalid.additional-property.json` | 未声明字段因 `additionalProperties=false` 失败 |
+| `invalid.precision.json` | float、指数形式、NaN/Infinity、负数量或非法 currency 失败 |
+| `invalid.unknown-enum.json` | 未知枚举在 V1 解码边界明确失败并进入隔离/兼容告警，不得静默映射 |
+
+条件契约还必须有专门 fixture：LIMIT 缺少 limit_price、CANCEL 缺少 cancel_request_id、UNKNOWN 的 `reconciliation_required` 非 true 均必须失败。日期时间 fixture 使用 UTC `Z`；格式检查器必须启用，不能只做 JSON 类型校验。
 
 ### `account.snapshot_observed.v1` / `portfolio.snapshot_observed.v1`
 
@@ -120,3 +149,11 @@
 - 删除、改名、改变含义或精度必须发布新 message_type 版本。
 - Producer 至少支持当前版本；Consumer 在滚动升级期支持当前和前一版本。
 - 契约样例保存为 golden fixtures，所有 Adapter 执行编码/解码契约测试。
+
+## Spec 0.2 / Catalog 2 兼容与迁移
+
+- 本次从 Spec 0.1.0 升级到 0.2.0、Contract Catalog 1 升级到 2，新增 8 个 planned V1 Schema；既有 active 消息的字段与语义没有改变，属于向后兼容的规范扩展。
+- 新消息在架构 Review APPROVE 前不得由 Producer 发布，也不得被 TASK-002 视为 active。Review 后只允许把 Catalog status 从 planned 改为 active，不再修改已批准字段。
+- TASK-002 必须为每个新 Schema 建立 golden fixtures，并使用 JSON Schema `FormatChecker` 验证 UUID 与 date-time；仅调用类型校验视为迁移失败。
+- 尚无生产数据或已部署 Producer，因此不需要历史消息回填。未来若环境中发现同名试验消息，必须隔离并重新按批准 Schema 生成，禁止原地猜测转换。
+- Consumer 上线顺序为：先部署可解码 Consumer，再启用 Producer；回滚时先停 Producer，再回滚 Consumer。planned 阶段禁止任何双写或影子发布进入正式 Topic。

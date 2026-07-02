@@ -40,8 +40,8 @@ Tick 高频流不进入订单审计 Journal；是否持久化由行情存储策�
 
 | Event | Publisher | Consumers | Partition Key | Persistent | Replay | Payload |
 |---|---|---|---|---|---|---|
-| oms.order_registered.v1 | OMS | Risk, Strategy, Audit | order_id | Yes | Yes | OrderRegisteredPayloadV1 |
-| oms.order_status_changed.v1 | OMS | Strategy, Portfolio, Audit, Alert | order_id | Yes | Yes | OrderStatusPayloadV1 |
+| oms.order_registered.v1 | OMS | Risk, StrategyRuntime, Audit | order_id | Yes | Yes | OrderRegisteredPayloadV1 |
+| oms.order_status_changed.v1 | OMS | StrategyRuntime, Portfolio, Audit, Alert | order_id | Yes | Yes | OrderStatusPayloadV1 |
 | oms.order_suspended.v1 | OMS | Reconciliation, ControlPlane, Alert | order_id | Yes | Yes | OrderSuspendedPayloadV1 |
 | execution.attempt_started.v1 | ExecutionEngine | OMS, Audit | order_id | Yes | Yes | ExecutionAttemptPayloadV1 |
 | execution.outcome_unknown.v1 | ExecutionEngine | OMS, Reconciliation, Alert | order_id | Yes | Yes | UnknownOutcomePayloadV1 |
@@ -56,7 +56,7 @@ Broker Event 允许重复和乱序；消费者必须依赖 message_id、业务�
 |---|---|---|---|---|---|---|
 | ledger.trade_posted.v1 | AccountLedger | Portfolio, Risk, Audit | account_id | Yes | Yes | LedgerTransactionPayloadV1 |
 | ledger.adjustment_posted.v1 | AccountLedger | Portfolio, Risk, Audit | account_id | Yes | Yes | LedgerTransactionPayloadV1 |
-| portfolio.position_changed.v1 | PortfolioProjection | Risk, Strategy, API | account_id+instrument_id | Yes | Yes | PositionPayloadV1 |
+| portfolio.position_changed.v1 | PortfolioProjection | Risk, StrategyRuntime, API | account_id+instrument_id | Yes | Yes | PositionPayloadV1 |
 | portfolio.snapshot_created.v1 | PortfolioProjection | Recovery, Risk | account_id | Yes | Yes | PortfolioSnapshotPayloadV1 |
 | account.snapshot_observed.v1 | BrokerAdapter | Reconciliation, Risk | account_id | Yes | Yes | AccountSnapshotPayloadV1 |
 | portfolio.snapshot_observed.v1 | BrokerAdapter | Reconciliation, Risk | account_id | Yes | Yes | BrokerPositionSnapshotPayloadV1 |

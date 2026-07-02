@@ -3,7 +3,7 @@ id: TASK-005
 title: Implement deterministic risk evaluator
 status: blocked
 depends_on: [TASK-003]
-spec_refs: [INV-RISK, WF-SUBMIT-ORDER, CONTRACT-ERROR-CATALOG]
+spec_refs: [INV-RISK, WF-SUBMIT-ORDER, CONTRACT-ERROR-CATALOG, CONTRACT-RISK-ORDER-EVALUATED-V1]
 allowed_paths: [src/quantiqmt/risk/**, tests/unit/risk/**, tests/property/risk/**]
 forbidden_paths: [src/quantiqmt/broker/**, src/quantiqmt/storage/**]
 verification:
