@@ -1,7 +1,7 @@
 tasks:
   - {id: TASK-000, path: completed/TASK-000-engineering-bootstrap.md, status: completed, depends_on: []}
   - {id: TASK-001, path: completed/TASK-001-shared-kernel.md, status: completed, depends_on: [TASK-000]}
-  - {id: TASK-002, path: backlog/TASK-002-message-contracts.md, status: ready, depends_on: [TASK-001, TASK-011]}
+  - {id: TASK-002, path: active/TASK-002-message-contracts.md, status: active, depends_on: [TASK-001, TASK-011]}
   - {id: TASK-003, path: backlog/TASK-003-order-domain.md, status: blocked, depends_on: [TASK-001, TASK-002]}
   - {id: TASK-004, path: backlog/TASK-004-persistence-outbox.md, status: blocked, depends_on: [TASK-002, TASK-003]}
   - {id: TASK-005, path: backlog/TASK-005-risk-engine.md, status: blocked, depends_on: [TASK-003]}
