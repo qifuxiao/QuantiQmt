@@ -2,7 +2,7 @@ tasks:
   - {id: TASK-000, path: completed/TASK-000-engineering-bootstrap.md, status: completed, depends_on: []}
   - {id: TASK-001, path: completed/TASK-001-shared-kernel.md, status: completed, depends_on: [TASK-000]}
   - {id: TASK-002, path: completed/TASK-002-message-contracts.md, status: completed, depends_on: [TASK-001, TASK-011]}
-  - {id: TASK-003, path: backlog/TASK-003-order-domain.md, status: blocked, depends_on: [TASK-001, TASK-002, TASK-012]}
+  - {id: TASK-003, path: active/TASK-003-order-domain.md, status: active, depends_on: [TASK-001, TASK-002, TASK-012]}
   - {id: TASK-004, path: backlog/TASK-004-persistence-outbox.md, status: blocked, depends_on: [TASK-002, TASK-003]}
   - {id: TASK-005, path: backlog/TASK-005-risk-engine.md, status: blocked, depends_on: [TASK-003]}
   - {id: TASK-006, path: backlog/TASK-006-broker-simulator.md, status: blocked, depends_on: [TASK-003, TASK-005]}
@@ -11,4 +11,4 @@ tasks:
   - {id: TASK-009, path: backlog/TASK-009-target-resolver.md, status: blocked, depends_on: [TASK-007, TASK-008]}
   - {id: TASK-010, path: backlog/TASK-010-reference-buy-hold.md, status: blocked, depends_on: [TASK-009]}
   - {id: TASK-011, path: completed/TASK-011-complete-core-message-specs.md, status: completed, depends_on: [TASK-000]}
-  - {id: TASK-012, path: active/TASK-012-order-merge-semantics.md, status: active, depends_on: [TASK-002]}
+  - {id: TASK-012, path: completed/TASK-012-order-merge-semantics.md, status: completed, depends_on: [TASK-002]}
