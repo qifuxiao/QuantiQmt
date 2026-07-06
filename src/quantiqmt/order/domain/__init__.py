@@ -1,19 +1,31 @@
 from quantiqmt.order.domain.model import (
+    ExternalFact,
+    FactIdentity,
+    GuardEvidence,
     InvalidOrderTransition,
     Order,
     OrderAction,
+    OrderDomainError,
     OrderEvent,
     OrderState,
+    OrderVersionConflict,
+    RiskSnapshotUnavailable,
     TransitionResult,
     transition_catalog,
 )
 
 __all__ = [
+    "ExternalFact",
+    "FactIdentity",
+    "GuardEvidence",
     "InvalidOrderTransition",
     "Order",
     "OrderAction",
+    "OrderDomainError",
     "OrderEvent",
     "OrderState",
+    "OrderVersionConflict",
+    "RiskSnapshotUnavailable",
     "TransitionResult",
     "transition_catalog",
 ]
