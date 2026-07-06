@@ -1,3 +1,3 @@
 # Active Tasks
 
-当前 active task：`TASK-002-message-contracts.md`。本任务完成独立 Review 前不得激活 TASK-003 或 TASK-008。
+当前无 active task。TASK-003 与 TASK-008 已解除依赖阻塞并处于 Ready，需由人类选择下一项后再激活。
