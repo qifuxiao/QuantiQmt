@@ -1,0 +1,285 @@
+from __future__ import annotations
+
+from copy import deepcopy
+from pathlib import Path
+from types import MappingProxyType
+
+import pytest
+from jsonschema import Draft202012Validator, FormatChecker  # type: ignore[import-untyped]
+
+from quantiqmt.contracts import (
+    ContractValidationError,
+    MessageCodec,
+    MessageEnvelope,
+    SchemaRegistry,
+    UnsupportedSchemaVersionError,
+)
+
+UUID1 = "550e8400-e29b-41d4-a716-446655440000"
+UUID2 = "550e8400-e29b-41d4-a716-446655440001"
+NOW = "2026-07-02T02:00:00Z"
+
+PAYLOADS: dict[str, dict[str, object]] = {
+    "strategy.submit_order_intent.v1": {
+        "intent_id": UUID1,
+        "strategy_id": "s",
+        "strategy_version": "1",
+        "account_id": "a",
+        "instrument_id": "600000.XSHG",
+        "side": "BUY",
+        "position_effect": "AUTO",
+        "order_type": "LIMIT",
+        "quantity": 100,
+        "limit_price": "10.01",
+        "time_in_force": "DAY",
+        "signal_time": NOW,
+        "market_data_version": "m1",
+        "valid_until": NOW,
+    },
+    "strategy.submit_target.v1": {
+        "target_id": UUID1,
+        "target_type": "WEIGHT",
+        "strategy_id": "s",
+        "strategy_version": "1",
+        "scope_id": "a",
+        "instrument_id": "600000.XSHG",
+        "target_weight": "0.5",
+        "decision_id": UUID2,
+        "input_event_id": UUID1,
+        "effective_at": NOW,
+        "valid_until": NOW,
+    },
+    "execution.cancel_order.v1": {
+        "cancel_request_id": UUID1,
+        "order_id": UUID2,
+        "client_order_id": "c1",
+        "broker": "qmt",
+        "account_id": "a",
+        "expected_order_version": 1,
+        "fencing_token": 1,
+        "requested_at": NOW,
+    },
+    "broker.trade_reported.v1": {
+        "broker": "qmt",
+        "account_id": "a",
+        "trading_day": "2026-07-02",
+        "trade_id": "t1",
+        "broker_order_id": "b1",
+        "instrument_id": "600000.XSHG",
+        "side": "BUY",
+        "position_effect": "AUTO",
+        "price": "10.01",
+        "quantity": 100,
+        "trade_time": NOW,
+        "received_at": NOW,
+    },
+    "oms.order_status_changed.v1": {
+        "order_id": UUID1,
+        "from_status": "REGISTERED",
+        "to_status": "RISK_PENDING",
+        "reason_code": "START_RISK",
+        "cum_quantity": 0,
+        "leaves_quantity": 100,
+        "changed_at": NOW,
+    },
+    "oms.order_registered.v1": {
+        "order_id": UUID1,
+        "intent_id": UUID2,
+        "account_id": "a",
+        "instrument_id": "600000.XSHG",
+        "side": "BUY",
+        "position_effect": "AUTO",
+        "order_type": "LIMIT",
+        "quantity": 100,
+        "limit_price": "10.01",
+        "time_in_force": "DAY",
+        "owner_strategy_id": "s",
+        "owner_strategy_version": "1",
+        "registered_at": NOW,
+    },
+    "risk.order_evaluated.v1": {
+        "decision_id": UUID1,
+        "order_id": UUID2,
+        "expected_order_version": 1,
+        "decision": "PASS",
+        "rule_set_version": "r1",
+        "snapshot_versions": {"account": "a1", "portfolio": "p1", "market": "m1"},
+        "rule_results": [
+            {"rule_id": "limit", "result": "PASS", "reason_code": "OK", "latency_us": 1}
+        ],
+        "evaluated_at": NOW,
+    },
+    "execution.attempt_started.v1": {
+        "attempt_id": UUID1,
+        "order_id": UUID2,
+        "operation": "SUBMIT",
+        "client_order_id": "c1",
+        "broker": "qmt",
+        "account_id": "a",
+        "expected_order_version": 2,
+        "fencing_token": 1,
+        "started_at": NOW,
+    },
+    "execution.outcome_unknown.v1": {
+        "attempt_id": UUID1,
+        "order_id": UUID2,
+        "operation": "SUBMIT",
+        "client_order_id": "c1",
+        "broker": "qmt",
+        "account_id": "a",
+        "fencing_token": 1,
+        "reason_code": "TIMEOUT",
+        "reconciliation_required": True,
+        "unknown_at": NOW,
+    },
+    "broker.order_reported.v1": {
+        "report_id": "r1",
+        "broker": "qmt",
+        "account_id": "a",
+        "trading_day": "2026-07-02",
+        "client_order_id": "c1",
+        "broker_status": "ACCEPTED",
+        "cum_quantity": 0,
+        "leaves_quantity": 100,
+        "report_time": NOW,
+        "received_at": NOW,
+    },
+    "ledger.trade_posted.v1": {
+        "ledger_transaction_id": UUID1,
+        "broker": "qmt",
+        "account_id": "a",
+        "trading_day": "2026-07-02",
+        "trade_id": "t1",
+        "order_id": UUID2,
+        "instrument_id": "600000.XSHG",
+        "side": "BUY",
+        "position_effect": "AUTO",
+        "price": "10.01000000",
+        "quantity": 100,
+        "currency": "CNY",
+        "entries": [
+            {"account_code": "SEC", "direction": "DEBIT", "amount": "1001.00", "currency": "CNY"},
+            {"account_code": "CASH", "direction": "CREDIT", "amount": "1001.00", "currency": "CNY"},
+        ],
+        "posted_at": NOW,
+    },
+    "portfolio.position_changed.v1": {
+        "account_id": "a",
+        "instrument_id": "600000.XSHG",
+        "trading_day": "2026-07-02",
+        "position_version": 1,
+        "source_ledger_transaction_id": UUID1,
+        "previous_quantity": 0,
+        "current_quantity": 100,
+        "available_quantity": 0,
+        "currency": "CNY",
+        "changed_at": NOW,
+    },
+}
+
+
+@pytest.fixture(scope="module")
+def registry() -> SchemaRegistry:
+    return SchemaRegistry(Path("spec/contracts"))
+
+
+def envelope(message_type: str, payload: dict[str, object], version: int = 1) -> dict[str, object]:
+    return {
+        "message_id": "message-00000001",
+        "message_type": message_type,
+        "schema_version": version,
+        "occurred_at": NOW,
+        "received_at": NOW,
+        "correlation_id": "correlation-0001",
+        "source": "tests",
+        "partition_key": "p1",
+        "payload": payload,
+    }
+
+
+@pytest.mark.parametrize("message_type", sorted(PAYLOADS))
+def test_all_approved_payloads_round_trip_without_precision_loss(
+    registry: SchemaRegistry, message_type: str
+) -> None:
+    codec = MessageCodec(registry)
+    original = envelope(message_type, PAYLOADS[message_type])
+    decoded = codec.decode(codec.encode(MessageEnvelope.create(original, registry)))
+    assert decoded.to_primitive() == original
+
+
+@pytest.mark.parametrize("message_type", sorted(PAYLOADS))
+def test_required_and_additional_properties_are_strict(
+    registry: SchemaRegistry, message_type: str
+) -> None:
+    payload = deepcopy(PAYLOADS[message_type])
+    payload.pop(next(iter(payload)))
+    with pytest.raises(ContractValidationError, match="missing required"):
+        MessageEnvelope.create(envelope(message_type, payload), registry)
+
+    payload = deepcopy(PAYLOADS[message_type])
+    payload["unexpected"] = True
+    with pytest.raises(ContractValidationError, match="additional property"):
+        MessageEnvelope.create(envelope(message_type, payload), registry)
+
+
+def test_unknown_enum_and_version_fail_explicitly(registry: SchemaRegistry) -> None:
+    payload = deepcopy(PAYLOADS["oms.order_registered.v1"])
+    payload["side"] = "UNKNOWN_FUTURE_SIDE"
+    with pytest.raises(ContractValidationError, match="unknown enum"):
+        MessageEnvelope.create(envelope("oms.order_registered.v1", payload), registry)
+    with pytest.raises(UnsupportedSchemaVersionError):
+        MessageEnvelope.create(envelope("oms.order_registered.v2", payload, 2), registry)
+
+
+def test_payload_is_deeply_immutable_and_decimal_text_is_preserved(
+    registry: SchemaRegistry,
+) -> None:
+    message = MessageEnvelope.create(
+        envelope("ledger.trade_posted.v1", PAYLOADS["ledger.trade_posted.v1"]), registry
+    )
+    assert isinstance(message.fields, MappingProxyType)
+    assert message.payload["price"] == "10.01000000"
+    entries = message.payload["entries"]
+    assert isinstance(entries, tuple)
+    with pytest.raises(TypeError):
+        message.payload._values["price"] = "1"  # type: ignore[index]
+
+
+def test_malformed_json_and_non_object_root_fail(registry: SchemaRegistry) -> None:
+    codec = MessageCodec(registry)
+    with pytest.raises(ContractValidationError):
+        codec.decode("{")
+    with pytest.raises(ContractValidationError, match="root"):
+        codec.decode("[]")
+
+
+@pytest.mark.parametrize("message_type", sorted(PAYLOADS))
+def test_runtime_acceptance_matches_official_jsonschema_for_golden_payloads(
+    registry: SchemaRegistry, message_type: str
+) -> None:
+    schema = registry.payload(message_type, 1)
+    official = Draft202012Validator(schema, format_checker=FormatChecker())
+    assert not list(official.iter_errors(PAYLOADS[message_type]))
+    MessageEnvelope.create(envelope(message_type, PAYLOADS[message_type]), registry)
+
+
+@pytest.mark.parametrize(
+    ("message_type", "field"),
+    [
+        ("strategy.submit_order_intent.v1", "side"),
+        ("strategy.submit_target.v1", "target_type"),
+        ("oms.order_registered.v1", "order_type"),
+        ("risk.order_evaluated.v1", "decision"),
+        ("execution.attempt_started.v1", "operation"),
+        ("execution.outcome_unknown.v1", "operation"),
+        ("broker.order_reported.v1", "broker_status"),
+        ("ledger.trade_posted.v1", "side"),
+    ],
+)
+def test_unknown_enum_golden_cases_are_rejected(
+    registry: SchemaRegistry, message_type: str, field: str
+) -> None:
+    payload = deepcopy(PAYLOADS[message_type])
+    payload[field] = "UNKNOWN_ENUM_V1"
+    with pytest.raises(ContractValidationError, match="unknown enum"):
+        MessageEnvelope.create(envelope(message_type, payload), registry)
