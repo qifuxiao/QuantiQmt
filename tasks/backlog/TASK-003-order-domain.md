@@ -1,7 +1,7 @@
 ---
 id: TASK-003
 title: Implement OMS order aggregate and state machine
-status: blocked
+status: ready
 depends_on: [TASK-001, TASK-002]
 spec_refs: [INV-TRADING, INV-CONSISTENCY, SM-ORDER, WF-SUBMIT-ORDER, CONTRACT-ORDER-REGISTERED-V1, CONTRACT-RISK-ORDER-EVALUATED-V1, CONTRACT-BROKER-ORDER-REPORTED-V1, CONTRACT-EXECUTION-OUTCOME-UNKNOWN-V1]
 allowed_paths: [src/quantiqmt/order/domain/**, tests/unit/order/**, tests/property/order/**]

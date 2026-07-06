@@ -1,7 +1,7 @@
 ---
 id: TASK-008
 title: Implement strategy SDK and isolated runtime contract
-status: blocked
+status: ready
 depends_on: [TASK-002]
 spec_refs: [PORTS-STRATEGY, SM-STRATEGY, CONTRACT-STRATEGY-TARGET-V1]
 allowed_paths: [src/quantiqmt/strategy_sdk/**, src/quantiqmt/strategy_runtime/**, tests/contract/strategy/**]
