@@ -12,3 +12,13 @@ workflow:
     - broker_fact_is_never_rolled_back
     - ledger_debits_equal_credits_per_currency
     - downstream_failure_replays_from_inbox
+  order_merge:
+    fact_identity: "broker+account_id+trading_day+trade_id"
+    fact_identity_required: true
+    duplicate: idempotent_no_op_without_order_version_increment
+    cumulative_source: "sum quantity exactly once for each accepted unique broker trade identity"
+    candidate_cumulative: "stored trade-derived cumulative quantity + current unseen unique Trade.quantity"
+    broker_report_cumulative: "reconciliation evidence only; mismatch opens case and cannot overwrite trade-derived cumulative quantity"
+    stale_or_out_of_order: "deduplicate by trade identity, then add unseen trade quantity irrespective of arrival order"
+    during_cancel: "trade remains authoritative in CANCEL_PENDING and CANCEL_UNKNOWN"
+    invalid_quantity: "reject QQ-OMS-5002 before state/version mutation"
