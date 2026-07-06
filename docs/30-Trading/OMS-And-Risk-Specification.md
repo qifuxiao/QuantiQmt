@@ -50,7 +50,7 @@
 | SUBMITTED/PARTIALLY_FILLED | TradeReport | cum = qty | FILLED | TradeRecorded |
 | SUBMITTED/PARTIALLY_FILLED | CancelRequest | 未终态 | CANCEL_PENDING | CancelOrder |
 | CANCEL_PENDING | CancelAck | leaves 已撤 | CANCELED | OrderCanceled |
-| CANCEL_PENDING | TradeReport | 仍可成交 | PARTIALLY_FILLED/FILLED | TradeRecorded |
+| CANCEL_PENDING | TradeReport | 仍可成交 | CANCEL_PENDING/FILLED | TradeRecorded |
 | CANCEL_PENDING | 超时 | 结果不可知 | CANCEL_UNKNOWN | QueryBroker |
 | CANCEL_UNKNOWN | Reconcile | 按 Broker 事实 | 活动/成交/CANCELED/SUSPENDED | Reconciled |
 
@@ -74,6 +74,19 @@
 ### Guard 输入事实
 
 Guard 不是默认通过的布尔开关。Application 必须提供具名事实：快照 identity/quality、expected order version、leader/fencing/mode、Broker 唯一关联、结果确定性、可见窗口证据及数量关系。缺失事实等同 Guard 失败；Domain 不自行访问 DB、Broker 或系统时钟补齐事实。
+
+Guard 失败必须遵守规范表：版本冲突返回 `QQ-COMMON-1003`，快照不可用返回 `QQ-RISK-4002`，数量/矛盾状态返回 `QQ-OMS-5002`；歧义映射和同 identity 内容冲突进入 `SUSPENDED` 并开 Case；可见窗口未满足是保持 UNKNOWN 的 no-op。除显式冲突迁移外，失败前后 state、cum、processed identities 和 aggregate version 原子不变。
+
+### 累计成交权威算法
+
+Order 的 `cum_quantity` 只等于所有已接受且唯一的 Broker Trade identity 的单笔 `quantity` 之和。Broker OrderReport 的 `cum_quantity` 仅用于对账，不直接覆盖聚合值；不一致时进入 `SUSPENDED`。恢复必须加载 identity、canonical content fingerprint、可用 Broker sequence 和 provisional client/broker mapping，否则恢复屏障不得打开。
+
+## Spec 0.3 兼容、迁移与回滚
+
+- 本次只增加 Order 迁移与归并约束，不改变既有消息字段；属于行为收紧。旧实现不得在新规范下继续写入 Order Journal。
+- 升级前暂停新 OrderIntent，完成 Inbox/Journal drain，构建 processed fact identity+fingerprint 索引并校验 trade-derived cumulative quantity，再部署新 Domain 实现并执行恢复对账。
+- Consumer/OMS 先升级，Execution/Broker producer 无需改消息版本。发现历史 identity 冲突或累计量差异时保持 SAFE/SUSPENDED，不自动修复历史。
+- 回滚前再次关闭恢复屏障并停止新交易；若新迁移已写入 Journal，只能回滚到支持 Spec 0.3 的实现，禁止旧状态机读取新事件后继续交易。
 
 - 优先使用 Broker sequence；缺失时使用业务不变量和累计成交量，不仅依赖时间戳。
 - 成交可先于委托确认：先建立 provisional mapping，随后补齐 broker_order_id；无法唯一关联则进入隔离队列。

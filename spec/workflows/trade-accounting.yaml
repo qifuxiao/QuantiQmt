@@ -16,6 +16,8 @@ workflow:
     fact_identity: "broker+account_id+trading_day+trade_id"
     fact_identity_required: true
     duplicate: idempotent_no_op_without_order_version_increment
-    stale_or_out_of_order: "merge by authoritative cumulative quantity and unique trade facts; never regress cumulative quantity"
+    cumulative_source: "sum quantity exactly once for each accepted unique broker trade identity"
+    broker_report_cumulative: "reconciliation evidence only; mismatch opens case and cannot overwrite trade-derived cumulative quantity"
+    stale_or_out_of_order: "deduplicate by trade identity, then add unseen trade quantity irrespective of arrival order"
     during_cancel: "trade remains authoritative in CANCEL_PENDING and CANCEL_UNKNOWN"
     invalid_quantity: "reject QQ-OMS-5002 before state/version mutation"
