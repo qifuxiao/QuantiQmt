@@ -1,0 +1,10 @@
+{
+  "order_id": "550e8400-e29b-41d4-a716-446655440000",
+  "from_status": "REGISTERED",
+  "to_status": "RISK_PENDING",
+  "reason_code": "START_RISK",
+  "cum_quantity": 0,
+  "leaves_quantity": 100,
+  "changed_at": "2026-07-02T02:00:00Z",
+  "unexpected_property": true
+}

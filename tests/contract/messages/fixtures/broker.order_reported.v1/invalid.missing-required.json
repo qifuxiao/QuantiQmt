@@ -1,0 +1,11 @@
+{
+  "broker": "qmt",
+  "account_id": "a",
+  "trading_day": "2026-07-02",
+  "client_order_id": "c1",
+  "broker_status": "ACCEPTED",
+  "cum_quantity": 0,
+  "leaves_quantity": 100,
+  "report_time": "2026-07-02T02:00:00Z",
+  "received_at": "2026-07-02T02:00:00Z"
+}

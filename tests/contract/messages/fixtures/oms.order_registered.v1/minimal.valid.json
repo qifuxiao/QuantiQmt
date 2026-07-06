@@ -1,0 +1,15 @@
+{
+  "order_id": "550e8400-e29b-41d4-a716-446655440000",
+  "intent_id": "550e8400-e29b-41d4-a716-446655440001",
+  "account_id": "a",
+  "instrument_id": "600000.XSHG",
+  "side": "BUY",
+  "position_effect": "AUTO",
+  "order_type": "LIMIT",
+  "quantity": 100,
+  "limit_price": "10.01",
+  "time_in_force": "DAY",
+  "owner_strategy_id": "s",
+  "owner_strategy_version": "1",
+  "registered_at": "2026-07-02T02:00:00Z"
+}

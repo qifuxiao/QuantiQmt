@@ -1,0 +1,12 @@
+{
+  "target_id": "550e8400-e29b-41d4-a716-446655440000",
+  "target_type": "WEIGHT",
+  "strategy_id": "s",
+  "strategy_version": "1",
+  "scope_id": "a",
+  "instrument_id": "600000.XSHG",
+  "decision_id": "550e8400-e29b-41d4-a716-446655440001",
+  "input_event_id": "550e8400-e29b-41d4-a716-446655440000",
+  "effective_at": "2026-07-02T02:00:00Z",
+  "valid_until": "2026-07-02T02:00:00Z"
+}

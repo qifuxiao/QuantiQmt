@@ -1,0 +1,22 @@
+{
+  "decision_id": "550e8400-e29b-41d4-a716-446655440000",
+  "order_id": "550e8400-e29b-41d4-a716-446655440001",
+  "expected_order_version": 1,
+  "decision": "PASS",
+  "rule_set_version": "r1",
+  "snapshot_versions": {
+    "account": "a1",
+    "portfolio": "p1",
+    "market": "m1"
+  },
+  "rule_results": [
+    {
+      "rule_id": "limit",
+      "result": "PASS",
+      "reason_code": "OK",
+      "latency_us": 1
+    }
+  ],
+  "evaluated_at": "2026-07-02T02:00:00Z",
+  "unexpected_property": true
+}
