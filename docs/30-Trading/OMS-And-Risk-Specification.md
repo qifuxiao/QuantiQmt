@@ -58,6 +58,23 @@
 
 ## 回报乱序归并
 
+### 事实身份与幂等
+
+- Broker OrderReport 必须携带 `(broker, account_id, trading_day, report_id)`；Broker Trade 必须携带 `(broker, account_id, trading_day, trade_id)`。缺少业务唯一键的事实不得进入 Order 聚合。
+- 相同 identity、相同内容是幂等 no-op，不改变状态、累计成交量或 aggregate version；相同 identity、不同内容进入 `SUSPENDED` 并开启对账 Case。
+- 迟到且不增加信息的非回退报告是 no-op。任何报告不得降低 `cum_quantity`；超量或回退统一以 `QQ-OMS-5002` 在修改状态/version 前拒绝。
+- 非成交事件禁止携带或修改累计成交量。每个被接受的新事实只推进一次 aggregate version；初始 version 为 1，恢复 version 必须等于最后已提交聚合事件版本且不小于 1。
+
+### 撤单竞态
+
+- `PARTIALLY_FILLED` 可以接收后续 `PartialTrade` 并保持原状态。
+- `CANCEL_PENDING` 与 `CANCEL_UNKNOWN` 收到部分成交时必须记账并保持撤单状态；收到全量成交时进入 `FILLED`。
+- 全量成交后的迟到撤单确认是 stale no-op，不能把 `FILLED` 改为 `CANCELED`。UNKNOWN 只触发查询/对账，绝不自动重新提交或重新撤单。
+
+### Guard 输入事实
+
+Guard 不是默认通过的布尔开关。Application 必须提供具名事实：快照 identity/quality、expected order version、leader/fencing/mode、Broker 唯一关联、结果确定性、可见窗口证据及数量关系。缺失事实等同 Guard 失败；Domain 不自行访问 DB、Broker 或系统时钟补齐事实。
+
 - 优先使用 Broker sequence；缺失时使用业务不变量和累计成交量，不仅依赖时间戳。
 - 成交可先于委托确认：先建立 provisional mapping，随后补齐 broker_order_id；无法唯一关联则进入隔离队列。
 - 状态回报不得降低 cum_quantity 或从终态回退到活动态。

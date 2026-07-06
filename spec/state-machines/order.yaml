@@ -30,17 +30,51 @@ machine:
     - {from: SUBMIT_UNKNOWN, event: ReconcileConfirmedAbsent, to: FAILED, guard: visibility_window_passed, action: PersistSubmitFailed}
     - {from: SUBMIT_UNKNOWN, event: ReconcileAmbiguous, to: SUSPENDED, guard: true, action: OpenReconciliationCase}
     - {from: SUBMITTED, event: PartialTrade, to: PARTIALLY_FILLED, guard: cum_between_zero_and_quantity, action: RecordTrade}
+    - {from: PARTIALLY_FILLED, event: PartialTrade, to: PARTIALLY_FILLED, guard: cum_strictly_increases_below_quantity, action: RecordTrade}
     - {from: SUBMITTED, event: FullTrade, to: FILLED, guard: cum_equals_quantity, action: RecordTrade}
     - {from: PARTIALLY_FILLED, event: FullTrade, to: FILLED, guard: cum_equals_quantity, action: RecordTrade}
     - {from: SUBMITTED, event: RequestCancel, to: CANCEL_PENDING, guard: order_not_terminal, action: StartCancelAttempt}
     - {from: PARTIALLY_FILLED, event: RequestCancel, to: CANCEL_PENDING, guard: leaves_positive, action: StartCancelAttempt}
     - {from: CANCEL_PENDING, event: CancelConfirmed, to: CANCELED, guard: broker_confirms_canceled, action: MergeBrokerReport}
+    - {from: CANCEL_PENDING, event: PartialTrade, to: CANCEL_PENDING, guard: cum_strictly_increases_below_quantity, action: RecordTrade}
     - {from: CANCEL_PENDING, event: OutcomeUnknown, to: CANCEL_UNKNOWN, guard: true, action: ScheduleReconciliation}
     - {from: CANCEL_PENDING, event: FullTrade, to: FILLED, guard: cum_equals_quantity, action: RecordTrade}
     - {from: CANCEL_UNKNOWN, event: ReconcileCanceled, to: CANCELED, guard: broker_confirms_canceled, action: ImportBrokerFacts}
+    - {from: CANCEL_UNKNOWN, event: PartialTrade, to: CANCEL_UNKNOWN, guard: cum_strictly_increases_below_quantity, action: RecordTrade}
+    - {from: CANCEL_UNKNOWN, event: FullTrade, to: FILLED, guard: cum_equals_quantity, action: RecordTrade}
     - {from: CANCEL_UNKNOWN, event: ReconcileAmbiguous, to: SUSPENDED, guard: true, action: OpenReconciliationCase}
   invariants:
     - "0 <= cum_quantity <= quantity"
     - "cum_quantity is monotonic"
     - "only OMS mutates state"
     - "unknown outcome never triggers blind retry"
+    - "non-trade events cannot mutate cum_quantity"
+    - "aggregate version is an integer >= 1 and increments once per accepted new fact"
+  fact_identity:
+    broker_order_report: "broker+account_id+trading_day+report_id"
+    broker_trade: "broker+account_id+trading_day+trade_id"
+    required_for: [BrokerAccepted, BrokerRejected, CancelConfirmed, PartialTrade, FullTrade]
+  merge_rules:
+    duplicate_fact: idempotent_no_op_without_version_increment
+    stale_non_regressive_report: idempotent_no_op_without_version_increment
+    conflicting_same_identity: suspend_and_open_reconciliation_case
+    trade_fact_precedence: "broker trade is authoritative and must be recorded during cancel pending/unknown"
+    regressive_cumulative_quantity: reject_QQ-OMS-5002
+    cumulative_quantity_above_order_quantity: reject_QQ-OMS-5002
+  guards:
+    snapshots_available: "account/portfolio/market snapshot identities and quality are supplied and usable"
+    expected_version_matches: "command expected_order_version equals current aggregate version"
+    leader_and_trading_allowed: "leadership, fencing token and system/account trading mode facts are all valid"
+    report_uniquely_correlated: "mandatory BrokerReport identity maps to exactly one order/client_order_id"
+    outcome_definite: "Broker report explicitly proves rejection; timeout/transport error is not definite"
+    unique_broker_match: "reconciliation finds exactly one Broker order matching stable client_order_id"
+    visibility_window_passed: "configured Broker visibility window elapsed and repeated queries confirm absence"
+    cum_between_zero_and_quantity: "0 < reported cumulative quantity < order quantity"
+    cum_strictly_increases_below_quantity: "stored cumulative quantity < reported cumulative quantity < order quantity"
+    cum_equals_quantity: "reported cumulative quantity == order quantity"
+    leaves_positive: "order quantity - cumulative quantity > 0"
+    broker_confirms_canceled: "definite Broker canceled status is uniquely correlated"
+  recovery:
+    initial_version: 1
+    restored_version: "integer >= 1 matching the last committed aggregate event version"
+    restored_cumulative_quantity: "0 <= value <= quantity and derived from accepted unique trade facts"

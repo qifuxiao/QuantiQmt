@@ -10,3 +10,10 @@ workflow:
     - {id: broker_cancel, owner: BrokerGateway, timeout: CANCEL_UNKNOWN}
     - {id: merge_cancel_or_trade_report, owner: OMS, duplicate_safe: true, out_of_order_safe: true}
   forbidden: [blind_retry_after_unknown_outcome, ignore_trade_during_cancel]
+  fact_merge:
+    trade_identity: "broker+account_id+trading_day+trade_id"
+    order_report_identity: "broker+account_id+trading_day+report_id"
+    duplicate: idempotent_no_op
+    partial_trade_during_cancel: "record trade; retain CANCEL_PENDING/CANCEL_UNKNOWN while leaves_quantity > 0"
+    full_trade_during_cancel: "record trade and transition FILLED; later cancel confirmation is stale no-op"
+    conflicting_identity: "SUSPENDED + reconciliation case; never overwrite prior fact"
