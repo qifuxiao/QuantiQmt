@@ -1,11 +1,11 @@
 {
   "ledger_transaction_id": "550e8400-e29b-41d4-a716-446655440000",
-  "broker": "qmt",
-  "account_id": "a",
+  "broker": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+  "account_id": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
   "trading_day": "2026-07-02",
-  "trade_id": "t1",
+  "trade_id": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
   "order_id": "550e8400-e29b-41d4-a716-446655440001",
-  "instrument_id": "600000.XSHG",
+  "instrument_id": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
   "side": "BUY",
   "position_effect": "AUTO",
   "price": "10.01000000",
@@ -13,13 +13,13 @@
   "currency": "CNY",
   "entries": [
     {
-      "account_code": "SEC",
+      "account_code": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
       "direction": "DEBIT",
       "amount": "1001.00",
       "currency": "CNY"
     },
     {
-      "account_code": "CASH",
+      "account_code": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
       "direction": "CREDIT",
       "amount": "1001.00",
       "currency": "CNY"

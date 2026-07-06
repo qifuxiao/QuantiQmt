@@ -57,6 +57,51 @@ def _write(path: Path, value: object) -> None:
     path.write_text(json.dumps(value, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 
 
+def _sample(schema: dict[str, Any]) -> object:
+    if "enum" in schema:
+        return schema["enum"][0]
+    declared = schema.get("type")
+    types = declared if isinstance(declared, list) else [declared]
+    kind = next((item for item in types if item != "null"), None)
+    if kind == "string":
+        if schema.get("format") == "date-time":
+            return "2026-07-02T02:00:00Z"
+        if schema.get("format") == "date":
+            return "2026-07-02"
+        return "x"
+    if kind == "integer":
+        return max(1, schema.get("minimum", 0))
+    if kind == "object":
+        return {}
+    if kind == "array":
+        return []
+    return None
+
+
+def _maximalize(value: object, schema: dict[str, Any]) -> object:
+    if isinstance(value, str):
+        maximum = schema.get("maxLength")
+        if maximum is not None and not any(key in schema for key in ("enum", "format", "pattern")):
+            return "x" * maximum
+        return value
+    if isinstance(value, list):
+        item_schema = schema.get("items", {})
+        return [_maximalize(item, item_schema) for item in value]
+    if isinstance(value, dict):
+        properties = schema.get("properties", {})
+        result = {
+            key: _maximalize(item, properties.get(key, schema.get("additionalProperties", {})))
+            for key, item in value.items()
+        }
+        maximum = schema.get("maxProperties")
+        additional = schema.get("additionalProperties")
+        if maximum is not None and isinstance(additional, dict):
+            while len(result) < maximum:
+                result[f"k{len(result):02d}"] = _maximalize(_sample(additional), additional)
+        return result
+    return value
+
+
 def _first_enum(schema: dict[str, Any]) -> tuple[list[str], str] | None:
     for name, prop in schema.get("properties", {}).items():
         if "enum" in prop:
@@ -95,7 +140,7 @@ def main() -> None:
             maximal["rule_results"][0].update(  # type: ignore[index]
                 {"measured_value": "1.00000000", "limit_value": "2.00000000"}
             )
-        _write(directory / "maximal.valid.json", maximal)
+        _write(directory / "maximal.valid.json", _maximalize(maximal, schema))
 
         missing = deepcopy(minimal)
         missing.pop(schema["required"][0])
@@ -131,7 +176,10 @@ def main() -> None:
                 if prop.get("format") == "date-time"
             )
             precision[temporal] = "2026-07-02T02:00:00,1Z"
-        _write(directory / "invalid.precision-or-format.json", precision)
+        obsolete = directory / "invalid.precision-or-format.json"
+        if obsolete.exists():
+            obsolete.unlink()
+        _write(directory / "invalid.precision.json", precision)
 
         enum_path = _first_enum(schema)
         if enum_path is not None:
@@ -153,6 +201,21 @@ def main() -> None:
     for message_type, (filename, changes) in conditional.items():
         value = deepcopy(payloads[message_type])
         value.update(changes)
+        _write(FIXTURES / message_type / filename, value)
+
+    missing_field_cases = {
+        "strategy.submit_order_intent.v1": ("invalid.limit-missing-price.json", "limit_price"),
+        "execution.outcome_unknown.v1": (
+            "invalid.cancel-missing-request-id.json",
+            "cancel_request_id",
+        ),
+        "strategy.submit_target.v1": ("invalid.one-of-no-match.json", "target_weight"),
+    }
+    for message_type, (filename, field) in missing_field_cases.items():
+        value = deepcopy(payloads[message_type])
+        if message_type == "execution.outcome_unknown.v1":
+            value["operation"] = "CANCEL"
+        value.pop(field, None)
         _write(FIXTURES / message_type / filename, value)
 
 

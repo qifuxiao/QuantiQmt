@@ -1,6 +1,6 @@
 {
-  "account_id": "a",
-  "instrument_id": "600000.XSHG",
+  "account_id": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+  "instrument_id": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
   "trading_day": "2026-07-02",
   "position_version": 1,
   "source_ledger_transaction_id": "550e8400-e29b-41d4-a716-446655440000",

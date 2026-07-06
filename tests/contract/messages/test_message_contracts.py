@@ -313,6 +313,54 @@ def test_disk_golden_invalid_fixtures_fail(registry: SchemaRegistry, path: Path)
     assert list(official.iter_errors(payload))
 
 
+def test_every_message_has_required_disk_fixture_set(registry: SchemaRegistry) -> None:
+    common = {
+        "minimal.valid.json",
+        "maximal.valid.json",
+        "invalid.missing-required.json",
+        "invalid.additional-property.json",
+        "invalid.precision.json",
+    }
+    for message_type in registry.message_types:
+        names = {path.name for path in (FIXTURE_ROOT / message_type).glob("*.json")}
+        assert common <= names, message_type
+    assert (
+        FIXTURE_ROOT / "strategy.submit_order_intent.v1/invalid.limit-missing-price.json"
+    ).is_file()
+    assert (
+        FIXTURE_ROOT / "execution.outcome_unknown.v1/invalid.cancel-missing-request-id.json"
+    ).is_file()
+    assert (FIXTURE_ROOT / "strategy.submit_target.v1/invalid.one-of-no-match.json").is_file()
+
+
+def _assert_present_strings_reach_max_length(value: object, schema: object) -> None:
+    if not isinstance(schema, MappingProxyType):
+        return
+    if (
+        isinstance(value, str)
+        and "maxLength" in schema
+        and not any(key in schema for key in ("enum", "format", "pattern"))
+    ):
+        assert len(value) == schema["maxLength"]
+    elif isinstance(value, dict):
+        properties = schema.get("properties", {})
+        additional = schema.get("additionalProperties", {})
+        for key, item in value.items():
+            _assert_present_strings_reach_max_length(item, properties.get(key, additional))
+    elif isinstance(value, list):
+        for item in value:
+            _assert_present_strings_reach_max_length(item, schema.get("items", {}))
+
+
+@pytest.mark.parametrize("message_type", sorted(PAYLOADS))
+def test_maximal_fixtures_exercise_declared_string_boundaries(
+    registry: SchemaRegistry, message_type: str
+) -> None:
+    path = FIXTURE_ROOT / message_type / "maximal.valid.json"
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    _assert_present_strings_reach_max_length(payload, registry.payload(message_type, 1))
+
+
 @pytest.mark.parametrize("message_type", sorted(PAYLOADS))
 def test_runtime_acceptance_matches_official_jsonschema_for_golden_payloads(
     registry: SchemaRegistry, message_type: str
