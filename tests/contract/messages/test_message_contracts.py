@@ -342,8 +342,11 @@ def _assert_present_strings_reach_max_length(value: object, schema: object) -> N
         and not any(key in schema for key in ("enum", "format", "pattern"))
     ):
         assert len(value) == schema["maxLength"]
+    if isinstance(value, str) and "\\." in schema.get("pattern", ""):
+        assert value.rsplit(".", 1)[-1] == "00000000"
     elif isinstance(value, dict):
         properties = schema.get("properties", {})
+        assert set(properties) <= set(value)
         additional = schema.get("additionalProperties", {})
         for key, item in value.items():
             _assert_present_strings_reach_max_length(item, properties.get(key, additional))

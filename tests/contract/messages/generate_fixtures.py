@@ -64,22 +64,34 @@ def _sample(schema: dict[str, Any]) -> object:
     types = declared if isinstance(declared, list) else [declared]
     kind = next((item for item in types if item != "null"), None)
     if kind == "string":
+        pattern = schema.get("pattern", "")
         if schema.get("format") == "date-time":
             return "2026-07-02T02:00:00Z"
         if schema.get("format") == "date":
             return "2026-07-02"
+        if schema.get("format") == "uuid":
+            return UUID1
+        if "[A-Z]{3}" in pattern:
+            return "CNY"
+        if "\\." in pattern:
+            return "1.00000000"
         return "x"
     if kind == "integer":
         return max(1, schema.get("minimum", 0))
     if kind == "object":
-        return {}
+        return {name: _sample(prop) for name, prop in schema.get("properties", {}).items()}
     if kind == "array":
-        return []
+        return [_sample(schema.get("items", {}))]
     return None
 
 
 def _maximalize(value: object, schema: dict[str, Any]) -> object:
     if isinstance(value, str):
+        pattern = schema.get("pattern", "")
+        if "\\." in pattern:
+            negative = value.startswith("-")
+            whole = value.lstrip("-").split(".", 1)[0]
+            return f"{'-' if negative else ''}{whole}.00000000"
         maximum = schema.get("maxLength")
         if maximum is not None and not any(key in schema for key in ("enum", "format", "pattern")):
             return "x" * maximum
@@ -93,6 +105,9 @@ def _maximalize(value: object, schema: dict[str, Any]) -> object:
             key: _maximalize(item, properties.get(key, schema.get("additionalProperties", {})))
             for key, item in value.items()
         }
+        for key, property_schema in properties.items():
+            if key not in result:
+                result[key] = _maximalize(_sample(property_schema), property_schema)
         maximum = schema.get("maxProperties")
         additional = schema.get("additionalProperties")
         if maximum is not None and isinstance(additional, dict):

@@ -8,7 +8,7 @@
   "position_effect": "AUTO",
   "order_type": "LIMIT",
   "quantity": 100,
-  "limit_price": "10.01",
+  "limit_price": "10.00000000",
   "time_in_force": "DAY",
   "signal_time": "2026-07-02T02:00:00Z",
   "market_data_version": "m1",

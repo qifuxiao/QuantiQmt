@@ -7,7 +7,7 @@
   "position_effect": "AUTO",
   "order_type": "LIMIT",
   "quantity": 100,
-  "limit_price": "10.01",
+  "limit_price": "10.00000000",
   "time_in_force": "DAY",
   "owner_strategy_id": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
   "owner_strategy_version": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",

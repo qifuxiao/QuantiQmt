@@ -8,24 +8,24 @@
   "instrument_id": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
   "side": "BUY",
   "position_effect": "AUTO",
-  "price": "10.01000000",
+  "price": "10.00000000",
   "quantity": 100,
   "currency": "CNY",
   "entries": [
     {
       "account_code": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
       "direction": "DEBIT",
-      "amount": "1001.00",
+      "amount": "1001.00000000",
       "currency": "CNY"
     },
     {
       "account_code": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
       "direction": "CREDIT",
-      "amount": "1001.00",
+      "amount": "1001.00000000",
       "currency": "CNY"
     }
   ],
   "posted_at": "2026-07-02T02:00:00Z",
-  "commission": "0.01000000",
-  "tax": "0"
+  "commission": "0.00000000",
+  "tax": "0.00000000"
 }
