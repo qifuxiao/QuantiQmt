@@ -62,6 +62,7 @@
 
 - Broker OrderReport 必须携带 `(broker, account_id, trading_day, report_id)`；Broker Trade 必须携带 `(broker, account_id, trading_day, trade_id)`。缺少业务唯一键的事实不得进入 Order 聚合。
 - 相同 identity、相同内容是幂等 no-op，不改变状态、累计成交量或 aggregate version；相同 identity、不同内容进入 `SUSPENDED` 并开启对账 Case。
+- canonical fingerprint 只包含 Broker 业务事实。Trade 排除本地 `received_at` 及内部补充的 order/client 映射；OrderReport 排除 `received_at` 与内部 order_id。字段集合以 `SM-ORDER.fact_identity.canonical_fingerprint` 为准，因此重复回调仅接收时间不同仍是 no-op。
 - 迟到且不增加信息的非回退报告是 no-op。任何报告不得降低 `cum_quantity`；超量或回退统一以 `QQ-OMS-5002` 在修改状态/version 前拒绝。
 - 非成交事件禁止携带或修改累计成交量。每个被接受的新事实只推进一次 aggregate version；初始 version 为 1，恢复 version 必须等于最后已提交聚合事件版本且不小于 1。
 

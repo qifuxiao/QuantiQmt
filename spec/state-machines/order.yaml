@@ -28,6 +28,9 @@ machine:
     - {from: SUBMITTING, event: BrokerRejected, to: REJECTED, guard: outcome_definite, action: MergeBrokerReport}
     - {from: SUBMITTING, event: OutcomeUnknown, to: SUBMIT_UNKNOWN, guard: true, action: ScheduleReconciliation}
     - {from: SUBMIT_UNKNOWN, event: ReconcileFoundActive, to: SUBMITTED, guard: unique_broker_match, action: ImportBrokerFacts}
+    - {from: SUBMIT_UNKNOWN, event: ReconcileFoundRejected, to: REJECTED, guard: unique_broker_match_and_definite_rejection, action: ImportBrokerFacts}
+    - {from: SUBMIT_UNKNOWN, event: ReconcileFoundCanceled, to: CANCELED, guard: unique_broker_match_and_definite_canceled, action: ImportBrokerFacts}
+    - {from: SUBMIT_UNKNOWN, event: ReconcileFoundExpired, to: EXPIRED, guard: unique_broker_match_and_definite_expired, action: ImportBrokerFacts}
     - {from: SUBMIT_UNKNOWN, event: PartialTrade, to: PARTIALLY_FILLED, guard: cum_strictly_increases_below_quantity, action: RecordTrade}
     - {from: SUBMIT_UNKNOWN, event: FullTrade, to: FILLED, guard: cum_equals_quantity, action: RecordTrade}
     - {from: SUBMIT_UNKNOWN, event: ReconcileConfirmedAbsent, to: FAILED, guard: visibility_window_passed, action: PersistSubmitFailed}
@@ -47,6 +50,8 @@ machine:
     - {from: CANCEL_PENDING, event: BrokerExpired, to: EXPIRED, guard: broker_confirms_expired_and_leaves_positive, action: MergeBrokerReport}
     - {from: CANCEL_UNKNOWN, event: ReconcileFoundActive, to: SUBMITTED, guard: unique_broker_match_and_cum_zero, action: ImportBrokerFacts}
     - {from: CANCEL_UNKNOWN, event: ReconcileFoundPartial, to: PARTIALLY_FILLED, guard: unique_broker_match_and_cum_between_zero_and_quantity, action: ImportBrokerFacts}
+    - {from: CANCEL_UNKNOWN, event: ReconcileFoundExpired, to: EXPIRED, guard: unique_broker_match_and_definite_expired, action: ImportBrokerFacts}
+    - {from: CANCEL_UNKNOWN, event: ReconcileFoundRejected, to: REJECTED, guard: unique_broker_match_and_definite_rejection, action: ImportBrokerFacts}
     - {from: CANCEL_UNKNOWN, event: ReconcileCanceled, to: CANCELED, guard: broker_confirms_canceled, action: ImportBrokerFacts}
     - {from: CANCEL_UNKNOWN, event: PartialTrade, to: CANCEL_UNKNOWN, guard: cum_strictly_increases_below_quantity, action: RecordTrade}
     - {from: CANCEL_UNKNOWN, event: FullTrade, to: FILLED, guard: cum_equals_quantity, action: RecordTrade}
@@ -73,6 +78,26 @@ machine:
     - {from: REJECTED, event: FactConflict, to: SUSPENDED, guard: conflicting_same_identity, action: OpenReconciliationCase}
     - {from: FAILED, event: FactConflict, to: SUSPENDED, guard: conflicting_same_identity, action: OpenReconciliationCase}
     - {from: FILLED, event: FactConflict, to: SUSPENDED, guard: conflicting_same_identity, action: OpenReconciliationCase}
+    - {from: SUBMITTING, event: ReportCumulativeMismatch, to: SUSPENDED, guard: report_cumulative_mismatch, action: OpenReconciliationCase}
+    - {from: SUBMIT_UNKNOWN, event: ReportCumulativeMismatch, to: SUSPENDED, guard: report_cumulative_mismatch, action: OpenReconciliationCase}
+    - {from: SUBMITTED, event: ReportCumulativeMismatch, to: SUSPENDED, guard: report_cumulative_mismatch, action: OpenReconciliationCase}
+    - {from: PARTIALLY_FILLED, event: ReportCumulativeMismatch, to: SUSPENDED, guard: report_cumulative_mismatch, action: OpenReconciliationCase}
+    - {from: CANCEL_PENDING, event: ReportCumulativeMismatch, to: SUSPENDED, guard: report_cumulative_mismatch, action: OpenReconciliationCase}
+    - {from: CANCEL_UNKNOWN, event: ReportCumulativeMismatch, to: SUSPENDED, guard: report_cumulative_mismatch, action: OpenReconciliationCase}
+    - {from: CANCELED, event: ReportCumulativeMismatch, to: SUSPENDED, guard: report_cumulative_mismatch, action: OpenReconciliationCase}
+    - {from: EXPIRED, event: ReportCumulativeMismatch, to: SUSPENDED, guard: report_cumulative_mismatch, action: OpenReconciliationCase}
+    - {from: REJECTED, event: ReportCumulativeMismatch, to: SUSPENDED, guard: report_cumulative_mismatch, action: OpenReconciliationCase}
+    - {from: FILLED, event: ReportCumulativeMismatch, to: SUSPENDED, guard: report_cumulative_mismatch, action: OpenReconciliationCase}
+    - {from: SUBMITTING, event: ReportCorrelationAmbiguous, to: SUSPENDED, guard: report_correlation_ambiguous, action: OpenReconciliationCase}
+    - {from: SUBMIT_UNKNOWN, event: ReportCorrelationAmbiguous, to: SUSPENDED, guard: report_correlation_ambiguous, action: OpenReconciliationCase}
+    - {from: SUBMITTED, event: ReportCorrelationAmbiguous, to: SUSPENDED, guard: report_correlation_ambiguous, action: OpenReconciliationCase}
+    - {from: PARTIALLY_FILLED, event: ReportCorrelationAmbiguous, to: SUSPENDED, guard: report_correlation_ambiguous, action: OpenReconciliationCase}
+    - {from: CANCEL_PENDING, event: ReportCorrelationAmbiguous, to: SUSPENDED, guard: report_correlation_ambiguous, action: OpenReconciliationCase}
+    - {from: CANCEL_UNKNOWN, event: ReportCorrelationAmbiguous, to: SUSPENDED, guard: report_correlation_ambiguous, action: OpenReconciliationCase}
+    - {from: CANCELED, event: ReportCorrelationAmbiguous, to: SUSPENDED, guard: report_correlation_ambiguous, action: OpenReconciliationCase}
+    - {from: EXPIRED, event: ReportCorrelationAmbiguous, to: SUSPENDED, guard: report_correlation_ambiguous, action: OpenReconciliationCase}
+    - {from: REJECTED, event: ReportCorrelationAmbiguous, to: SUSPENDED, guard: report_correlation_ambiguous, action: OpenReconciliationCase}
+    - {from: FILLED, event: ReportCorrelationAmbiguous, to: SUSPENDED, guard: report_correlation_ambiguous, action: OpenReconciliationCase}
   invariants:
     - "0 <= cum_quantity <= quantity"
     - "cum_quantity is monotonic"
@@ -83,7 +108,13 @@ machine:
   fact_identity:
     broker_order_report: "broker+account_id+trading_day+report_id"
     broker_trade: "broker+account_id+trading_day+trade_id"
-    required_for: [BrokerAccepted, BrokerRejected, CancelConfirmed, PartialTrade, FullTrade]
+    required_for: [BrokerAccepted, BrokerRejected, BrokerExpired, CancelConfirmed, PartialTrade, FullTrade]
+    canonical_fingerprint:
+      broker_trade_include: [broker, account_id, trading_day, trade_id, broker_order_id, instrument_id, side, position_effect, price, quantity, commission, tax, trade_time, broker_sequence]
+      broker_trade_exclude: [received_at, order_id, client_order_id]
+      broker_order_report_include: [report_id, broker, account_id, trading_day, client_order_id, broker_order_id, broker_status, cum_quantity, leaves_quantity, average_price, broker_sequence, raw_error_code, report_time]
+      broker_order_report_exclude: [received_at, order_id]
+      normalization: "canonical JSON with sorted field names, explicit nulls and unchanged decimal strings"
   merge_rules:
     duplicate_fact: idempotent_no_op_without_version_increment
     stale_non_regressive_report: idempotent_no_op_without_version_increment
@@ -110,7 +141,12 @@ machine:
     broker_confirms_expired_and_leaves_positive: "definite expiry, unique correlation and cumulative quantity < quantity"
     unique_broker_match_and_cum_zero: "one active Broker order match and trade-derived cumulative quantity == 0"
     unique_broker_match_and_cum_between_zero_and_quantity: "one active Broker order match and 0 < trade-derived cumulative quantity < quantity"
+    unique_broker_match_and_definite_rejection: "one Broker order match with definite rejected status"
+    unique_broker_match_and_definite_canceled: "one Broker order match with definite canceled status"
+    unique_broker_match_and_definite_expired: "one Broker order match with definite expired status"
     conflicting_same_identity: "persisted identity exists with a different canonical content fingerprint"
+    report_cumulative_mismatch: "uniquely correlated OrderReport cum_quantity differs from trade-derived cumulative quantity"
+    report_correlation_ambiguous: "one report maps to zero or multiple candidate orders after the visibility window"
     late_trade_strictly_increases_below_quantity: "unique authoritative trade raises trade-derived cumulative quantity but remains below quantity"
     late_trade_completes_quantity: "unique authoritative trade makes trade-derived cumulative quantity equal quantity"
   guard_failures:
@@ -118,7 +154,7 @@ machine:
     expected_version_matches: "QQ-COMMON-1003; no state/version mutation"
     leader_and_trading_allowed: "QQ-OMS-5002; no state/version mutation or external action"
     report_uniquely_correlated: "SUSPENDED + reconciliation case when ambiguous; no report facts overwritten"
-    outcome_definite: "retain SUBMITTING and classify UNKNOWN when evidence is insufficient"
+    outcome_definite: "reject BrokerRejected as QQ-OMS-5002 with no mutation when evidence is insufficient; caller must submit the distinct OutcomeUnknown event to enter SUBMIT_UNKNOWN"
     unique_broker_match: "SUSPENDED + reconciliation case when ambiguous; retain UNKNOWN when not yet visible"
     visibility_window_passed: "idempotent no-op retaining SUBMIT_UNKNOWN until evidence threshold is met"
     quantity_guards: "QQ-OMS-5002; state, cumulative quantity, processed identities and version remain atomically unchanged"
