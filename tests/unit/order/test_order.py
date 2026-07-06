@@ -4,6 +4,8 @@ import pytest
 import yaml
 
 from quantiqmt.order.domain import (
+    BrokerReportEvidence,
+    BrokerStatus,
     ExternalFact,
     FactIdentity,
     GuardEvidence,
@@ -13,6 +15,7 @@ from quantiqmt.order.domain import (
     OrderEvent,
     OrderState,
     OrderVersionConflict,
+    ProcessedFact,
     RiskSnapshotUnavailable,
     transition_catalog,
 )
@@ -24,7 +27,21 @@ def order(quantity: int = 100, **kwargs: object) -> Order:
 
 
 def evidence(name: str = "true") -> GuardEvidence:
-    return GuardEvidence.of(name)
+    return GuardEvidence()
+
+
+def report_evidence(
+    status: BrokerStatus = BrokerStatus.ACCEPTED,
+    *,
+    correlation_count: int = 1,
+    cumulative: int = 0,
+    leaves: int = 100,
+) -> GuardEvidence:
+    return GuardEvidence(
+        broker_report=BrokerReportEvidence(
+            correlation_count, status, Quantity(cumulative), Quantity(leaves)
+        )
+    )
 
 
 def fact(key: str, *, fingerprint: str | None = None, trade: int | None = None) -> ExternalFact:
@@ -42,7 +59,7 @@ def submitted(quantity: int = 100) -> Order:
     aggregate.transition(OrderEvent.DISPATCH, GuardEvidence.trading_authority())
     aggregate.transition(
         OrderEvent.BROKER_ACCEPTED,
-        evidence("report_uniquely_correlated"),
+        report_evidence(),
         fact=fact("accepted"),
     )
     return aggregate
@@ -172,6 +189,16 @@ def test_same_identity_with_different_content_suspends_and_opens_case() -> None:
     assert result.current is OrderState.SUSPENDED
     assert result.action is OrderAction.OPEN_RECONCILIATION_CASE
     assert aggregate.cumulative_quantity == Quantity(10)
+    version = aggregate.version
+    assert (
+        aggregate.transition(
+            OrderEvent.PARTIAL_TRADE,
+            evidence(),
+            fact=fact("trade-1", fingerprint="sha256:b", trade=10),
+        )
+        is None
+    )
+    assert aggregate.version == version
 
 
 def test_cancel_pending_and_unknown_continue_recording_trades() -> None:
@@ -205,7 +232,7 @@ def test_fill_wins_cancel_race_and_late_cancel_confirmation_is_no_op() -> None:
     assert (
         aggregate.transition(
             OrderEvent.CANCEL_CONFIRMED,
-            evidence("broker_confirms_canceled"),
+            report_evidence(BrokerStatus.CANCELED, cumulative=100, leaves=0),
             fact=fact("late-cancel"),
         )
         is None
@@ -232,17 +259,29 @@ def test_restored_version_must_be_positive(version: int) -> None:
         order(version=version)
 
 
+def test_recovery_rejects_state_quantity_and_trade_sum_mismatches() -> None:
+    with pytest.raises(ValueError, match="FILLED"):
+        order(state=OrderState.FILLED)
+    with pytest.raises(ValueError, match="unique trade fact sum"):
+        order(cumulative_quantity=Quantity(10))
+    with pytest.raises(ValueError, match="unique trade fact sum"):
+        order(
+            cumulative_quantity=Quantity(20),
+            processed_facts={FactIdentity("trade", "t1"): ProcessedFact("sha256:t1", Quantity(10))},
+        )
+
+
 def test_recovery_copies_fact_maps_and_restores_dedupe_state() -> None:
     identity = FactIdentity("broker-report", "r1")
-    restored = {identity: "sha256:r1"}
+    restored = {identity: ProcessedFact("sha256:r1")}
     aggregate = order(processed_facts=restored, broker_sequences={"account": 7})
     restored.clear()
-    assert dict(aggregate.processed_facts) == {identity: "sha256:r1"}
+    assert dict(aggregate.processed_facts) == {identity: ProcessedFact("sha256:r1")}
     # A replayed fact is a no-op before state-transition lookup.
     assert (
         aggregate.transition(
             OrderEvent.BROKER_ACCEPTED,
-            evidence("report_uniquely_correlated"),
+            report_evidence(),
             fact=ExternalFact(identity, "sha256:r1"),
         )
         is None
@@ -261,9 +300,50 @@ def test_stale_non_trade_report_is_an_idempotent_no_op() -> None:
     assert (
         aggregate.transition(
             OrderEvent.BROKER_ACCEPTED,
-            evidence("report_uniquely_correlated"),
+            report_evidence(),
             fact=stale,
         )
         is None
     )
     assert aggregate.version == 1
+
+
+def test_stale_sequence_does_not_hide_cumulative_mismatch() -> None:
+    existing = submitted()
+    aggregate = Order(
+        existing.order_id,
+        existing.quantity,
+        state=existing.state,
+        cumulative_quantity=existing.cumulative_quantity,
+        version=existing.version,
+        processed_facts=existing.processed_facts,
+        broker_sequences={"account": 7},
+    )
+    mismatch = ExternalFact(
+        FactIdentity("broker-report", "mismatch"),
+        "sha256:mismatch",
+        broker_sequence=6,
+        stream="account",
+    )
+    result = aggregate.transition(
+        OrderEvent.REPORT_CUMULATIVE_MISMATCH,
+        report_evidence(cumulative=10, leaves=90),
+        fact=mismatch,
+    )
+    assert result is not None
+    assert aggregate.state is OrderState.SUSPENDED
+
+
+def test_broker_guard_is_calculated_from_structured_report() -> None:
+    aggregate = order()
+    aggregate.transition(OrderEvent.START_RISK, GuardEvidence.risk_snapshots("a", "p", "m"))
+    aggregate.transition(OrderEvent.RISK_PASSED, GuardEvidence.expected_version(2))
+    aggregate.transition(OrderEvent.DISPATCH, GuardEvidence.trading_authority())
+    before = snapshot(aggregate)
+    with pytest.raises(InvalidOrderTransition, match="QQ-OMS-5002"):
+        aggregate.transition(
+            OrderEvent.BROKER_ACCEPTED,
+            report_evidence(correlation_count=2),
+            fact=fact("ambiguous"),
+        )
+    assert snapshot(aggregate) == before

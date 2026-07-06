@@ -2,6 +2,8 @@ from hypothesis import given
 from hypothesis import strategies as st
 
 from quantiqmt.order.domain import (
+    BrokerReportEvidence,
+    BrokerStatus,
     ExternalFact,
     FactIdentity,
     GuardEvidence,
@@ -29,7 +31,11 @@ def submitted(total: int) -> Order:
     aggregate.transition(OrderEvent.DISPATCH, GuardEvidence.trading_authority())
     aggregate.transition(
         OrderEvent.BROKER_ACCEPTED,
-        GuardEvidence.of("report_uniquely_correlated"),
+        GuardEvidence(
+            broker_report=BrokerReportEvidence(
+                1, BrokerStatus.ACCEPTED, Quantity(0), Quantity(total)
+            )
+        ),
         fact=external("accepted"),
     )
     return aggregate
@@ -59,11 +65,7 @@ def test_unique_trade_sequences_with_arbitrary_duplicates_preserve_invariants(
         trade = accepted[index]
         result = aggregate.transition(
             OrderEvent.PARTIAL_TRADE,
-            GuardEvidence.of(
-                "cum_between_zero_and_quantity"
-                if aggregate.state is OrderState.SUBMITTED
-                else "cum_strictly_increases_below_quantity"
-            ),
+            GuardEvidence(),
             fact=trade,
         )
         if index in processed:
@@ -75,7 +77,7 @@ def test_unique_trade_sequences_with_arbitrary_duplicates_preserve_invariants(
     assert aggregate.cumulative_quantity == Quantity(expected)
     aggregate.transition(
         OrderEvent.FULL_TRADE,
-        GuardEvidence.of("cum_equals_quantity"),
+        GuardEvidence(),
         fact=external("final", total - expected),
     )
     assert aggregate.cumulative_quantity == aggregate.quantity
@@ -94,7 +96,7 @@ def test_invalid_trade_never_partially_mutates_aggregate(total: int, excess: int
     try:
         aggregate.transition(
             OrderEvent.FULL_TRADE,
-            GuardEvidence.of("cum_equals_quantity"),
+            GuardEvidence(),
             fact=external("invalid", total + excess),
         )
     except InvalidOrderTransition as error:
@@ -106,3 +108,45 @@ def test_invalid_trade_never_partially_mutates_aggregate(total: int, excess: int
         dict(aggregate.processed_facts),
     )
     assert after == before
+
+
+@given(st.integers(min_value=2, max_value=10_000), st.data())
+def test_conflict_replay_and_cancel_fill_race_are_idempotent(
+    total: int, data: st.DataObject
+) -> None:
+    partial = data.draw(st.integers(min_value=1, max_value=total - 1))
+    aggregate = submitted(total)
+    first = external("partial", partial)
+    aggregate.transition(OrderEvent.REQUEST_CANCEL, GuardEvidence())
+    aggregate.transition(OrderEvent.PARTIAL_TRADE, GuardEvidence(), fact=first)
+    if data.draw(st.booleans()):
+        aggregate.transition(OrderEvent.OUTCOME_UNKNOWN, GuardEvidence())
+    aggregate.transition(
+        OrderEvent.FULL_TRADE,
+        GuardEvidence(),
+        fact=external("remainder", total - partial),
+    )
+    version = aggregate.version
+    late_cancel = external("late-cancel")
+    assert (
+        aggregate.transition(OrderEvent.CANCEL_CONFIRMED, GuardEvidence(), fact=late_cancel) is None
+    )
+    assert aggregate.version == version
+    assert aggregate.state is OrderState.FILLED
+
+
+@given(st.integers(min_value=2, max_value=10_000), st.text(min_size=1, max_size=30))
+def test_same_conflicting_fact_replay_is_no_op(total: int, suffix: str) -> None:
+    aggregate = submitted(total)
+    original = external("trade", 1)
+    aggregate.transition(OrderEvent.PARTIAL_TRADE, GuardEvidence(), fact=original)
+    conflict = ExternalFact(
+        original.identity,
+        f"different:{suffix}",
+        original.trade_quantity,
+    )
+    aggregate.transition(OrderEvent.PARTIAL_TRADE, GuardEvidence(), fact=conflict)
+    version = aggregate.version
+    assert aggregate.transition(OrderEvent.PARTIAL_TRADE, GuardEvidence(), fact=conflict) is None
+    assert aggregate.version == version
+    assert aggregate.state is OrderState.SUSPENDED

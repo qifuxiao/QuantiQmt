@@ -1,4 +1,6 @@
 from quantiqmt.order.domain.model import (
+    BrokerReportEvidence,
+    BrokerStatus,
     ExternalFact,
     FactIdentity,
     GuardEvidence,
@@ -9,12 +11,16 @@ from quantiqmt.order.domain.model import (
     OrderEvent,
     OrderState,
     OrderVersionConflict,
+    ProcessedFact,
+    ReconciliationEvidence,
     RiskSnapshotUnavailable,
     TransitionResult,
     transition_catalog,
 )
 
 __all__ = [
+    "BrokerReportEvidence",
+    "BrokerStatus",
     "ExternalFact",
     "FactIdentity",
     "GuardEvidence",
@@ -25,6 +31,8 @@ __all__ = [
     "OrderEvent",
     "OrderState",
     "OrderVersionConflict",
+    "ProcessedFact",
+    "ReconciliationEvidence",
     "RiskSnapshotUnavailable",
     "TransitionResult",
     "transition_catalog",

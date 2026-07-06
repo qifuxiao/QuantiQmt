@@ -76,6 +76,16 @@ class OrderAction(StrEnum):
     START_CANCEL_ATTEMPT = "StartCancelAttempt"
 
 
+class BrokerStatus(StrEnum):
+    ACTIVE = "ACTIVE"
+    ACCEPTED = "ACCEPTED"
+    PARTIALLY_FILLED = "PARTIALLY_FILLED"
+    FILLED = "FILLED"
+    REJECTED = "REJECTED"
+    CANCELED = "CANCELED"
+    EXPIRED = "EXPIRED"
+
+
 class OrderDomainError(ValueError):
     """Base error carrying a stable catalog code."""
 
@@ -131,10 +141,49 @@ class ExternalFact:
 
 
 @dataclass(frozen=True, slots=True)
+class ProcessedFact:
+    """Recovery record sufficient to validate identity and trade-derived cumulative."""
+
+    fingerprint: str
+    trade_quantity: Quantity | None = None
+
+    def __post_init__(self) -> None:
+        if not self.fingerprint.strip():
+            raise ValueError("processed fact fingerprint must be non-empty")
+        if self.trade_quantity is not None:
+            self.trade_quantity.require_positive()
+
+
+@dataclass(frozen=True, slots=True)
+class BrokerReportEvidence:
+    correlation_count: int
+    status: BrokerStatus
+    reported_cumulative: Quantity
+    leaves_quantity: Quantity
+    definite: bool = True
+
+    def __post_init__(self) -> None:
+        if self.correlation_count < 0:
+            raise ValueError("correlation count cannot be negative")
+
+
+@dataclass(frozen=True, slots=True)
+class ReconciliationEvidence:
+    match_count: int
+    status: BrokerStatus | None = None
+    visibility_window_passed: bool = False
+    repeated_absence_confirmed: bool = False
+    cancel_rejected: bool = False
+
+    def __post_init__(self) -> None:
+        if self.match_count < 0:
+            raise ValueError("match count cannot be negative")
+
+
+@dataclass(frozen=True, slots=True)
 class GuardEvidence:
     """Facts used to evaluate guards; no field defaults to successful."""
 
-    externally_proven: frozenset[str] = frozenset()
     snapshot_ids: tuple[str, str, str] | None = None
     snapshots_usable: bool = False
     expected_order_version: int | None = None
@@ -142,12 +191,8 @@ class GuardEvidence:
     fencing_token_valid: bool = False
     system_trading_allowed: bool = False
     account_trading_allowed: bool = False
-
-    @classmethod
-    def of(cls, *guards: str) -> GuardEvidence:
-        """Supply externally established Broker/reconciliation evidence."""
-
-        return cls(externally_proven=frozenset(guards))
+    broker_report: BrokerReportEvidence | None = None
+    reconciliation: ReconciliationEvidence | None = None
 
     @classmethod
     def risk_snapshots(cls, account: str, portfolio: str, market: str) -> GuardEvidence:
@@ -316,7 +361,8 @@ class Order:
     state: OrderState = OrderState.REGISTERED
     cumulative_quantity: Quantity = field(default_factory=lambda: Quantity(0))
     version: int = 1
-    processed_facts: Mapping[FactIdentity, str] = field(default_factory=dict, repr=False)
+    processed_facts: Mapping[FactIdentity, ProcessedFact] = field(default_factory=dict, repr=False)
+    fact_conflicts: Mapping[FactIdentity, frozenset[str]] = field(default_factory=dict, repr=False)
     broker_sequences: Mapping[str, int] = field(default_factory=dict, repr=False)
 
     def __post_init__(self) -> None:
@@ -326,12 +372,22 @@ class Order:
         if not 0 <= self.cumulative_quantity.value <= self.quantity.value:
             raise ValueError("restored cumulative quantity must be within order quantity")
         facts = dict(self.processed_facts)
-        if any(not fingerprint.strip() for fingerprint in facts.values()):
-            raise ValueError("restored fact fingerprints must be non-empty")
+        trade_sum = sum(
+            item.trade_quantity.value for item in facts.values() if item.trade_quantity is not None
+        )
+        if trade_sum != self.cumulative_quantity.value:
+            raise ValueError("restored cumulative quantity must equal unique trade fact sum")
+        self._validate_state_quantity()
+        conflicts = {
+            identity: frozenset(values) for identity, values in self.fact_conflicts.items()
+        }
+        if any(not value.strip() for values in conflicts.values() for value in values):
+            raise ValueError("restored conflict fingerprints must be non-empty")
         sequences = dict(self.broker_sequences)
         if any(not stream or sequence < 0 for stream, sequence in sequences.items()):
             raise ValueError("restored broker sequences are invalid")
         self.processed_facts = MappingProxyType(facts)
+        self.fact_conflicts = MappingProxyType(conflicts)
         self.broker_sequences = MappingProxyType(sequences)
 
     def transition(
@@ -349,26 +405,39 @@ class Order:
             raise InvalidOrderTransition(f"{event} cannot carry an external fact")
 
         if fact is not None and fact.identity in self.processed_facts:
-            if self.processed_facts[fact.identity] == fact.fingerprint:
+            accepted = self.processed_facts[fact.identity]
+            if accepted.fingerprint == fact.fingerprint:
+                return None
+            if fact.fingerprint in self.fact_conflicts.get(fact.identity, frozenset()):
                 return None
             return self._commit(
                 OrderEvent.FACT_CONFLICT,
-                GuardEvidence.of("conflicting_same_identity"),
+                GuardEvidence(),
                 fact=None,
                 remember_fact=False,
+                conflict=fact,
             )
         if self.state is OrderState.FILLED and event is OrderEvent.CANCEL_CONFIRMED:
             # A fill wins the cancel race; the later cancellation report is stale.
             return None
         if (
             fact is not None
+            and event
+            in {
+                OrderEvent.BROKER_ACCEPTED,
+                OrderEvent.BROKER_REJECTED,
+                OrderEvent.BROKER_EXPIRED,
+                OrderEvent.CANCEL_CONFIRMED,
+            }
             and fact.trade_quantity is None
             and fact.broker_sequence is not None
             and fact.stream is not None
             and fact.broker_sequence <= self.broker_sequences.get(fact.stream, -1)
         ):
             return None
-        return self._commit(event, evidence, fact=fact, remember_fact=fact is not None)
+        return self._commit(
+            event, evidence, fact=fact, remember_fact=fact is not None, conflict=None
+        )
 
     def _commit(
         self,
@@ -377,11 +446,14 @@ class Order:
         *,
         fact: ExternalFact | None,
         remember_fact: bool,
+        conflict: ExternalFact | None,
     ) -> TransitionResult | None:
         definition = _TRANSITIONS.get((self.state, event))
         if definition is None:
             raise InvalidOrderTransition(f"undeclared transition {self.state} + {event}")
-        if not self._guard_passes(definition.guard, evidence):
+        if not self._guard_passes(
+            definition.guard, evidence, identity_conflict=conflict is not None
+        ):
             self._guard_failure(definition.guard)
             return None
 
@@ -396,23 +468,31 @@ class Order:
 
         previous = self.state
         next_facts = dict(self.processed_facts)
+        next_conflicts = dict(self.fact_conflicts)
         next_sequences = dict(self.broker_sequences)
         if remember_fact and fact is not None:
-            next_facts[fact.identity] = fact.fingerprint
+            next_facts[fact.identity] = ProcessedFact(fact.fingerprint, fact.trade_quantity)
             if fact.broker_sequence is not None and fact.stream is not None:
                 next_sequences[fact.stream] = max(
                     fact.broker_sequence, next_sequences.get(fact.stream, 0)
                 )
+        if conflict is not None:
+            fingerprints = set(next_conflicts.get(conflict.identity, frozenset()))
+            fingerprints.add(conflict.fingerprint)
+            next_conflicts[conflict.identity] = frozenset(fingerprints)
 
         # No mutation occurs before all transition, guard, and fact checks pass.
         self.state = definition.target
         self.cumulative_quantity = candidate
         self.processed_facts = MappingProxyType(next_facts)
+        self.fact_conflicts = MappingProxyType(next_conflicts)
         self.broker_sequences = MappingProxyType(next_sequences)
         self.version += 1
         return TransitionResult(previous, self.state, event, definition.action, self.version)
 
-    def _guard_passes(self, guard: str, evidence: GuardEvidence) -> bool:
+    def _guard_passes(
+        self, guard: str, evidence: GuardEvidence, *, identity_conflict: bool
+    ) -> bool:
         if guard == "true":
             return True
         if guard == "snapshots_available":
@@ -444,7 +524,111 @@ class Order:
             return self.cumulative_quantity.value < self.quantity.value
         if guard in _QUANTITY_GUARDS:
             return True  # evaluated from the unseen Trade below
-        return guard in evidence.externally_proven
+        report = evidence.broker_report
+        reconciliation = evidence.reconciliation
+        if guard == "report_uniquely_correlated":
+            return report is not None and report.correlation_count == 1
+        if guard == "outcome_definite":
+            return bool(
+                report
+                and report.correlation_count == 1
+                and report.definite
+                and report.status is BrokerStatus.REJECTED
+            )
+        if guard == "broker_confirms_canceled":
+            return bool(
+                report
+                and report.correlation_count == 1
+                and report.definite
+                and report.status is BrokerStatus.CANCELED
+            )
+        if guard == "broker_confirms_expired":
+            return bool(
+                report
+                and report.definite
+                and report.correlation_count == 1
+                and report.status is BrokerStatus.EXPIRED
+                and report.reported_cumulative.value == 0
+            )
+        if guard == "broker_confirms_expired_and_leaves_positive":
+            return bool(
+                report
+                and report.definite
+                and report.correlation_count == 1
+                and report.status is BrokerStatus.EXPIRED
+                and self.cumulative_quantity.value < self.quantity.value
+            )
+        if guard == "conflicting_same_identity":
+            return identity_conflict
+        if guard == "report_cumulative_mismatch":
+            return bool(
+                report
+                and report.correlation_count == 1
+                and report.reported_cumulative != self.cumulative_quantity
+            )
+        if guard == "report_correlation_ambiguous":
+            return bool(
+                report
+                and report.correlation_count != 1
+                and reconciliation
+                and reconciliation.visibility_window_passed
+            )
+        if reconciliation is None:
+            return False
+        unique = reconciliation.match_count == 1
+        if guard == "unique_broker_match":
+            return unique
+        if guard == "visibility_window_passed":
+            return bool(
+                reconciliation.visibility_window_passed
+                and reconciliation.repeated_absence_confirmed
+                and reconciliation.match_count == 0
+            )
+        status_guards = {
+            "unique_broker_match_and_definite_rejection": BrokerStatus.REJECTED,
+            "unique_broker_match_and_definite_canceled": BrokerStatus.CANCELED,
+            "unique_broker_match_and_definite_expired": BrokerStatus.EXPIRED,
+        }
+        if guard in status_guards:
+            return unique and reconciliation.status is status_guards[guard]
+        if guard == "unique_broker_match_and_cum_zero":
+            return unique and self.cumulative_quantity.value == 0
+        if guard == "unique_broker_match_and_cum_between_zero_and_quantity":
+            return unique and 0 < self.cumulative_quantity.value < self.quantity.value
+        if guard == "cancel_rejected_and_trade_derived_cum_zero":
+            return unique and reconciliation.cancel_rejected and self.cumulative_quantity.value == 0
+        if guard == "cancel_rejected_and_trade_derived_cum_between_zero_and_quantity":
+            return (
+                unique
+                and reconciliation.cancel_rejected
+                and 0 < self.cumulative_quantity.value < self.quantity.value
+            )
+        if guard == "original_order_rejected_after_cancel_history":
+            return unique and reconciliation.status is BrokerStatus.REJECTED
+        return False
+
+    def _validate_state_quantity(self) -> None:
+        value = self.cumulative_quantity.value
+        total = self.quantity.value
+        if self.state is OrderState.FILLED and value != total:
+            raise ValueError("FILLED recovery requires cumulative quantity == quantity")
+        if self.state is OrderState.PARTIALLY_FILLED and not 0 < value < total:
+            raise ValueError("PARTIALLY_FILLED recovery requires a partial cumulative quantity")
+        if (
+            self.state
+            in {
+                OrderState.REGISTERED,
+                OrderState.RISK_PENDING,
+                OrderState.APPROVED,
+                OrderState.SUBMITTING,
+                OrderState.SUBMIT_UNKNOWN,
+                OrderState.SUBMITTED,
+                OrderState.REJECTED,
+                OrderState.FAILED,
+            }
+            and value != 0
+        ):
+            raise ValueError(f"{self.state} recovery requires zero cumulative quantity")
 
     def _guard_failure(self, guard: str) -> None:
         if guard == "snapshots_available":
