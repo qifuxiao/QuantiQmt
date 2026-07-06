@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from copy import deepcopy
 from pathlib import Path
 from types import MappingProxyType
@@ -18,6 +19,7 @@ from quantiqmt.contracts import (
 UUID1 = "550e8400-e29b-41d4-a716-446655440000"
 UUID2 = "550e8400-e29b-41d4-a716-446655440001"
 NOW = "2026-07-02T02:00:00Z"
+FIXTURE_ROOT = Path(__file__).with_name("fixtures")
 
 PAYLOADS: dict[str, dict[str, object]] = {
     "strategy.submit_order_intent.v1": {
@@ -251,6 +253,64 @@ def test_malformed_json_and_non_object_root_fail(registry: SchemaRegistry) -> No
         codec.decode("{")
     with pytest.raises(ContractValidationError, match="root"):
         codec.decode("[]")
+
+
+def test_public_constructors_cannot_bypass_validation(registry: SchemaRegistry) -> None:
+    with pytest.raises(TypeError, match="create"):
+        MessageEnvelope({}, object())
+    payload_type = type(
+        MessageEnvelope.create(
+            envelope("oms.order_registered.v1", PAYLOADS["oms.order_registered.v1"]),
+            registry,
+        ).payload
+    )
+    with pytest.raises(TypeError, match="create"):
+        payload_type("x", 1, {})
+
+
+@pytest.mark.parametrize("bad_time", ["20260702T020000Z", "2026-07-02T02:00:00,1Z"])
+def test_runtime_rejects_non_rfc3339_datetime(registry: SchemaRegistry, bad_time: str) -> None:
+    payload = deepcopy(PAYLOADS["oms.order_registered.v1"])
+    payload["registered_at"] = bad_time
+    with pytest.raises(ContractValidationError):
+        MessageEnvelope.create(envelope("oms.order_registered.v1", payload), registry)
+
+
+def test_registry_schema_is_deeply_immutable(registry: SchemaRegistry) -> None:
+    schema = registry.payload("execution.cancel_order.v1", 1)
+    properties = schema["properties"]
+    assert isinstance(properties, MappingProxyType)
+    with pytest.raises(TypeError):
+        properties["fencing_token"] = {}  # type: ignore[index]
+
+
+@pytest.mark.parametrize(
+    "path",
+    sorted(FIXTURE_ROOT.glob("*/*.valid.json")),
+    ids=lambda path: str(path.parent.name + "/" + path.name),
+)
+def test_disk_golden_valid_fixtures_pass(registry: SchemaRegistry, path: Path) -> None:
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    MessageEnvelope.create(envelope(path.parent.name, payload), registry)
+    official = Draft202012Validator(
+        registry.payload(path.parent.name, 1), format_checker=FormatChecker()
+    )
+    assert not list(official.iter_errors(payload))
+
+
+@pytest.mark.parametrize(
+    "path",
+    sorted(FIXTURE_ROOT.glob("*/invalid.*.json")),
+    ids=lambda path: str(path.parent.name + "/" + path.name),
+)
+def test_disk_golden_invalid_fixtures_fail(registry: SchemaRegistry, path: Path) -> None:
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    with pytest.raises(ContractValidationError):
+        MessageEnvelope.create(envelope(path.parent.name, payload), registry)
+    official = Draft202012Validator(
+        registry.payload(path.parent.name, 1), format_checker=FormatChecker()
+    )
+    assert list(official.iter_errors(payload))
 
 
 @pytest.mark.parametrize("message_type", sorted(PAYLOADS))

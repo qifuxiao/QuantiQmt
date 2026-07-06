@@ -11,6 +11,10 @@ from typing import Any
 from quantiqmt.contracts.errors import ContractValidationError
 
 JsonValue = None | bool | int | float | str | list["JsonValue"] | dict[str, "JsonValue"]
+_RFC3339 = re.compile(
+    r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$",
+    re.ASCII,
+)
 
 
 def validate(instance: object, schema: Mapping[str, Any], *, path: str = "$") -> None:
@@ -65,6 +69,8 @@ def _validate_string(value: str, schema: Mapping[str, Any], path: str) -> None:
         elif value_format == "date":
             date.fromisoformat(value)
         elif value_format == "date-time":
+            if _RFC3339.fullmatch(value) is None:
+                raise ValueError("date-time must use RFC3339 syntax")
             parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
             if "T" not in value or parsed.tzinfo is None:
                 raise ValueError("date-time must include time and timezone")
@@ -104,7 +110,7 @@ def _validate_array(value: Sequence[object], schema: Mapping[str, Any], path: st
 
 
 def _matches_type(value: object, declared: object) -> bool:
-    names = declared if isinstance(declared, list) else [declared]
+    names = declared if isinstance(declared, (list, tuple)) else [declared]
     checks = {
         "null": lambda item: item is None,
         "boolean": lambda item: isinstance(item, bool),

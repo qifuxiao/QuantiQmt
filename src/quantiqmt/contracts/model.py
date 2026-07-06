@@ -13,13 +13,16 @@ from quantiqmt.contracts.registry import SchemaRegistry
 from quantiqmt.contracts.validation import JsonValue, validate
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, init=False)
 class ImmutablePayload(Mapping[str, object]):
     """Deeply immutable, schema-validated message payload."""
 
     message_type: str
     schema_version: int
     _values: Mapping[str, object]
+
+    def __init__(self, *_: object, **__: object) -> None:
+        raise TypeError("ImmutablePayload must be created through create()")
 
     @classmethod
     def create(
@@ -31,7 +34,11 @@ class ImmutablePayload(Mapping[str, object]):
     ) -> ImmutablePayload:
         schema = registry.payload(message_type, schema_version)
         validate(values, schema, path="$.payload")
-        return cls(message_type, schema_version, _freeze_mapping(values))
+        instance = object.__new__(cls)
+        object.__setattr__(instance, "message_type", message_type)
+        object.__setattr__(instance, "schema_version", schema_version)
+        object.__setattr__(instance, "_values", _freeze_mapping(values))
+        return instance
 
     def __getitem__(self, key: str) -> object:
         return self._values[key]
@@ -46,12 +53,15 @@ class ImmutablePayload(Mapping[str, object]):
         return _thaw_mapping(self._values)
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, init=False)
 class MessageEnvelope:
     """Immutable V1 envelope coupled to a validated payload version."""
 
     fields: Mapping[str, object]
     payload: ImmutablePayload
+
+    def __init__(self, *_: object, **__: object) -> None:
+        raise TypeError("MessageEnvelope must be created through create()")
 
     @classmethod
     def create(cls, values: Mapping[str, object], registry: SchemaRegistry) -> MessageEnvelope:
@@ -65,7 +75,10 @@ class MessageEnvelope:
             raise ContractValidationError("$.payload: must be an object")
         payload = ImmutablePayload.create(message_type, schema_version, payload_value, registry)
         fields = {key: value for key, value in values.items() if key != "payload"}
-        return cls(_freeze_mapping(fields), payload)
+        instance = object.__new__(cls)
+        object.__setattr__(instance, "fields", _freeze_mapping(fields))
+        object.__setattr__(instance, "payload", payload)
+        return instance
 
     def to_primitive(self) -> dict[str, JsonValue]:
         result = _thaw_mapping(self.fields)

@@ -1,0 +1,17 @@
+{
+  "report_id": "r1",
+  "broker": "qmt",
+  "account_id": "a",
+  "trading_day": "2026-07-02",
+  "client_order_id": "c1",
+  "broker_status": "ACCEPTED",
+  "cum_quantity": 0,
+  "leaves_quantity": 100,
+  "report_time": "2026-07-02T02:00:00Z",
+  "received_at": "2026-07-02T02:00:00Z",
+  "order_id": "550e8400-e29b-41d4-a716-446655440000",
+  "broker_order_id": "broker-order-1",
+  "average_price": "10.01000000",
+  "broker_sequence": 1,
+  "raw_error_code": "0"
+}

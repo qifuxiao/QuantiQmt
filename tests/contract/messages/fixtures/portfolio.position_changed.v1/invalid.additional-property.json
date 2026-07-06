@@ -1,0 +1,13 @@
+{
+  "account_id": "a",
+  "instrument_id": "600000.XSHG",
+  "trading_day": "2026-07-02",
+  "position_version": 1,
+  "source_ledger_transaction_id": "550e8400-e29b-41d4-a716-446655440000",
+  "previous_quantity": 0,
+  "current_quantity": 100,
+  "available_quantity": 0,
+  "currency": "CNY",
+  "changed_at": "2026-07-02T02:00:00Z",
+  "unexpected_property": true
+}

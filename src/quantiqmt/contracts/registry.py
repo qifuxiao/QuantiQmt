@@ -3,37 +3,24 @@
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Mapping
 from pathlib import Path
 from types import MappingProxyType
-from typing import Any
+from typing import Any, cast
 
 from quantiqmt.contracts.errors import UnknownMessageTypeError, UnsupportedSchemaVersionError
 
-_SCHEMA_PATHS = MappingProxyType(
-    {
-        "strategy.submit_order_intent.v1": "commands/strategy.submit_order_intent.v1.schema.json",
-        "strategy.submit_target.v1": "commands/strategy.submit_target.v1.schema.json",
-        "execution.cancel_order.v1": "commands/execution.cancel_order.v1.schema.json",
-        "broker.trade_reported.v1": "events/broker.trade_reported.v1.schema.json",
-        "oms.order_status_changed.v1": "events/oms.order_status_changed.v1.schema.json",
-        "oms.order_registered.v1": "events/oms.order_registered.v1.schema.json",
-        "risk.order_evaluated.v1": "events/risk.order_evaluated.v1.schema.json",
-        "execution.attempt_started.v1": "events/execution.attempt_started.v1.schema.json",
-        "execution.outcome_unknown.v1": "events/execution.outcome_unknown.v1.schema.json",
-        "broker.order_reported.v1": "events/broker.order_reported.v1.schema.json",
-        "ledger.trade_posted.v1": "events/ledger.trade_posted.v1.schema.json",
-        "portfolio.position_changed.v1": "events/portfolio.position_changed.v1.schema.json",
-    }
-)
+_CATALOG_ENTRY = re.compile(r"name:\s*([^,}]+).*?schema:\s*([^,}]+).*?status:\s*active")
 
 
 class SchemaRegistry:
     """Immutable registry loading the accepted schema snapshot once."""
 
     def __init__(self, schema_root: Path) -> None:
+        routes = _active_routes(schema_root / "catalog.yaml")
         self._schemas = MappingProxyType(
-            {name: _load_schema(schema_root / relative) for name, relative in _SCHEMA_PATHS.items()}
+            {name: _load_schema(schema_root / relative) for name, relative in routes.items()}
         )
         self._envelope = _load_schema(schema_root / "common/message-envelope.v1.schema.json")
 
@@ -74,4 +61,23 @@ def _load_schema(path: Path) -> Mapping[str, Any]:
         document = json.load(stream)
     if not isinstance(document, dict):
         raise ValueError(f"schema root must be an object: {path}")
-    return MappingProxyType(document)
+    return cast(Mapping[str, Any], _deep_freeze(document))
+
+
+def _active_routes(path: Path) -> dict[str, str]:
+    routes: dict[str, str] = {}
+    for line in path.read_text(encoding="utf-8").splitlines():
+        match = _CATALOG_ENTRY.search(line)
+        if match is not None:
+            routes[match.group(1).strip()] = match.group(2).strip()
+    if not routes:
+        raise ValueError(f"catalog contains no active schema routes: {path}")
+    return routes
+
+
+def _deep_freeze(value: Any) -> Any:
+    if isinstance(value, dict):
+        return MappingProxyType({key: _deep_freeze(item) for key, item in value.items()})
+    if isinstance(value, list):
+        return tuple(_deep_freeze(item) for item in value)
+    return value
