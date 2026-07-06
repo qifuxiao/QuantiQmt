@@ -51,7 +51,9 @@ machine:
     - {from: CANCEL_UNKNOWN, event: ReconcileFoundActive, to: SUBMITTED, guard: unique_broker_match_and_cum_zero, action: ImportBrokerFacts}
     - {from: CANCEL_UNKNOWN, event: ReconcileFoundPartial, to: PARTIALLY_FILLED, guard: unique_broker_match_and_cum_between_zero_and_quantity, action: ImportBrokerFacts}
     - {from: CANCEL_UNKNOWN, event: ReconcileFoundExpired, to: EXPIRED, guard: unique_broker_match_and_definite_expired, action: ImportBrokerFacts}
-    - {from: CANCEL_UNKNOWN, event: ReconcileFoundRejected, to: REJECTED, guard: unique_broker_match_and_definite_rejection, action: ImportBrokerFacts}
+    - {from: CANCEL_UNKNOWN, event: ReconcileCancelRejectedActive, to: SUBMITTED, guard: cancel_rejected_and_trade_derived_cum_zero, action: ImportBrokerFacts}
+    - {from: CANCEL_UNKNOWN, event: ReconcileCancelRejectedPartial, to: PARTIALLY_FILLED, guard: cancel_rejected_and_trade_derived_cum_between_zero_and_quantity, action: ImportBrokerFacts}
+    - {from: CANCEL_UNKNOWN, event: ReconcileFoundRejected, to: SUSPENDED, guard: original_order_rejected_after_cancel_history, action: OpenReconciliationCase}
     - {from: CANCEL_UNKNOWN, event: ReconcileCanceled, to: CANCELED, guard: broker_confirms_canceled, action: ImportBrokerFacts}
     - {from: CANCEL_UNKNOWN, event: PartialTrade, to: CANCEL_UNKNOWN, guard: cum_strictly_increases_below_quantity, action: RecordTrade}
     - {from: CANCEL_UNKNOWN, event: FullTrade, to: FILLED, guard: cum_equals_quantity, action: RecordTrade}
@@ -108,7 +110,7 @@ machine:
   fact_identity:
     broker_order_report: "broker+account_id+trading_day+report_id"
     broker_trade: "broker+account_id+trading_day+trade_id"
-    required_for: [BrokerAccepted, BrokerRejected, BrokerExpired, CancelConfirmed, PartialTrade, FullTrade]
+    required_for: [BrokerAccepted, BrokerRejected, BrokerExpired, CancelConfirmed, PartialTrade, FullTrade, FactConflict, ReportCumulativeMismatch, ReportCorrelationAmbiguous, ReconcileFoundActive, ReconcileFoundPartial, ReconcileFoundRejected, ReconcileFoundCanceled, ReconcileFoundExpired, ReconcileCancelRejectedActive, ReconcileCancelRejectedPartial, ReconcileCanceled, ReconcileAmbiguous]
     canonical_fingerprint:
       broker_trade_include: [broker, account_id, trading_day, trade_id, broker_order_id, instrument_id, side, position_effect, price, quantity, commission, tax, trade_time, broker_sequence]
       broker_trade_exclude: [received_at, order_id, client_order_id]
@@ -132,9 +134,9 @@ machine:
     outcome_definite: "Broker report explicitly proves rejection; timeout/transport error is not definite"
     unique_broker_match: "reconciliation finds exactly one Broker order matching stable client_order_id"
     visibility_window_passed: "configured Broker visibility window elapsed and repeated queries confirm absence"
-    cum_between_zero_and_quantity: "0 < reported cumulative quantity < order quantity"
-    cum_strictly_increases_below_quantity: "stored cumulative quantity < reported cumulative quantity < order quantity"
-    cum_equals_quantity: "reported cumulative quantity == order quantity"
+    cum_between_zero_and_quantity: "candidate cumulative = stored trade-derived cumulative + unseen unique Trade.quantity; require 0 < candidate < order quantity"
+    cum_strictly_increases_below_quantity: "candidate cumulative = stored trade-derived cumulative + unseen unique Trade.quantity; require stored < candidate < order quantity"
+    cum_equals_quantity: "candidate cumulative = stored trade-derived cumulative + unseen unique Trade.quantity; require candidate == order quantity"
     leaves_positive: "order quantity - cumulative quantity > 0"
     broker_confirms_canceled: "definite Broker canceled status is uniquely correlated"
     broker_confirms_expired: "definite uniquely correlated Broker expired status and cum_quantity == 0"
@@ -144,11 +146,14 @@ machine:
     unique_broker_match_and_definite_rejection: "one Broker order match with definite rejected status"
     unique_broker_match_and_definite_canceled: "one Broker order match with definite canceled status"
     unique_broker_match_and_definite_expired: "one Broker order match with definite expired status"
+    cancel_rejected_and_trade_derived_cum_zero: "definite cancel-request rejection proves original order remains active and trade-derived cumulative quantity == 0"
+    cancel_rejected_and_trade_derived_cum_between_zero_and_quantity: "definite cancel-request rejection proves original order remains active and 0 < trade-derived cumulative quantity < quantity"
+    original_order_rejected_after_cancel_history: "Broker claims original submit rejection after this aggregate previously entered a valid cancel flow; treat as contradictory history"
     conflicting_same_identity: "persisted identity exists with a different canonical content fingerprint"
     report_cumulative_mismatch: "uniquely correlated OrderReport cum_quantity differs from trade-derived cumulative quantity"
     report_correlation_ambiguous: "one report maps to zero or multiple candidate orders after the visibility window"
-    late_trade_strictly_increases_below_quantity: "unique authoritative trade raises trade-derived cumulative quantity but remains below quantity"
-    late_trade_completes_quantity: "unique authoritative trade makes trade-derived cumulative quantity equal quantity"
+    late_trade_strictly_increases_below_quantity: "candidate cumulative = stored trade-derived cumulative + unseen unique Trade.quantity; require stored < candidate < quantity"
+    late_trade_completes_quantity: "candidate cumulative = stored trade-derived cumulative + unseen unique Trade.quantity; require candidate == quantity"
   guard_failures:
     snapshots_available: "QQ-RISK-4002; no state/version mutation"
     expected_version_matches: "QQ-COMMON-1003; no state/version mutation"

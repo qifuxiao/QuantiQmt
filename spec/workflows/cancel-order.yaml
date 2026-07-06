@@ -16,4 +16,5 @@ workflow:
     duplicate: idempotent_no_op
     partial_trade_during_cancel: "record trade; retain CANCEL_PENDING/CANCEL_UNKNOWN while leaves_quantity > 0"
     full_trade_during_cancel: "record trade and transition FILLED; later cancel confirmation is stale no-op"
+    cancel_rejected: "return to SUBMITTED when trade-derived cumulative is zero, or PARTIALLY_FILLED when between zero and quantity; an original-order rejection claim after cancel history is contradictory and suspends"
     conflicting_identity: "SUSPENDED + reconciliation case; never overwrite prior fact"

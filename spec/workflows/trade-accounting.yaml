@@ -17,6 +17,7 @@ workflow:
     fact_identity_required: true
     duplicate: idempotent_no_op_without_order_version_increment
     cumulative_source: "sum quantity exactly once for each accepted unique broker trade identity"
+    candidate_cumulative: "stored trade-derived cumulative quantity + current unseen unique Trade.quantity"
     broker_report_cumulative: "reconciliation evidence only; mismatch opens case and cannot overwrite trade-derived cumulative quantity"
     stale_or_out_of_order: "deduplicate by trade identity, then add unseen trade quantity irrespective of arrival order"
     during_cancel: "trade remains authoritative in CANCEL_PENDING and CANCEL_UNKNOWN"

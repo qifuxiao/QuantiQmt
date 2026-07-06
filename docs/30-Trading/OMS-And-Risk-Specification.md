@@ -70,6 +70,7 @@
 
 - `PARTIALLY_FILLED` 可以接收后续 `PartialTrade` 并保持原状态。
 - `CANCEL_PENDING` 与 `CANCEL_UNKNOWN` 收到部分成交时必须记账并保持撤单状态；收到全量成交时进入 `FILLED`。
+- 撤单请求被明确拒绝时，原订单仍活动：trade-derived cum 为零回到 `SUBMITTED`，介于零和总量之间回到 `PARTIALLY_FILLED`。若 Broker 在已进入合法撤单历史后声称原始下单被拒绝，这是历史矛盾，必须 `SUSPENDED`。
 - 全量成交后的迟到撤单确认是 stale no-op，不能把 `FILLED` 改为 `CANCELED`。UNKNOWN 只触发查询/对账，绝不自动重新提交或重新撤单。
 
 ### Guard 输入事实
@@ -81,6 +82,8 @@ Guard 失败必须遵守规范表：版本冲突返回 `QQ-COMMON-1003`，快照
 ### 累计成交权威算法
 
 Order 的 `cum_quantity` 只等于所有已接受且唯一的 Broker Trade identity 的单笔 `quantity` 之和。Broker OrderReport 的 `cum_quantity` 仅用于对账，不直接覆盖聚合值；不一致时进入 `SUSPENDED`。恢复必须加载 identity、canonical content fingerprint、可用 Broker sequence 和 provisional client/broker mapping，否则恢复屏障不得打开。
+
+每个 PartialTrade/FullTrade Guard 使用 `candidate_cumulative = stored trade-derived cumulative + 当前 unseen unique Trade.quantity`，不能要求 Trade payload 提供不存在的累计字段。异常事件和所有 reconciliation import 事件同样必须持久化来源 report/trade identity 与 fingerprint，重复重放为不推进 version 的 no-op。
 
 ## Spec 0.3 兼容、迁移与回滚
 
