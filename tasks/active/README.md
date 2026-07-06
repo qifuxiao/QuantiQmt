@@ -1,3 +1,3 @@
 # Active Tasks
 
-当前无 active task。TASK-003 与 TASK-008 已解除依赖阻塞并处于 Ready，需由人类选择下一项后再激活。
+当前 active task：`TASK-003-order-domain.md`。TASK-008 保持 Ready；TASK-003 完成独立 Review 前不得激活后续交易核心任务。
