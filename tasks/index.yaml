@@ -3,7 +3,7 @@ tasks:
   - {id: TASK-001, path: completed/TASK-001-shared-kernel.md, status: completed, depends_on: [TASK-000]}
   - {id: TASK-002, path: completed/TASK-002-message-contracts.md, status: completed, depends_on: [TASK-001, TASK-011]}
   - {id: TASK-003, path: completed/TASK-003-order-domain.md, status: completed, depends_on: [TASK-001, TASK-002, TASK-012]}
-  - {id: TASK-004, path: backlog/TASK-004-persistence-outbox.md, status: ready, depends_on: [TASK-002, TASK-003]}
+  - {id: TASK-004, path: active/TASK-004-persistence-outbox.md, status: active, depends_on: [TASK-002, TASK-003]}
   - {id: TASK-005, path: backlog/TASK-005-risk-engine.md, status: ready, depends_on: [TASK-003]}
   - {id: TASK-006, path: backlog/TASK-006-broker-simulator.md, status: blocked, depends_on: [TASK-003, TASK-005]}
   - {id: TASK-007, path: backlog/TASK-007-ledger-portfolio.md, status: blocked, depends_on: [TASK-004, TASK-006]}
