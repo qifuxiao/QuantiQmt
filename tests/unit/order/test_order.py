@@ -16,6 +16,7 @@ from quantiqmt.order.domain import (
     OrderState,
     OrderVersionConflict,
     ProcessedFact,
+    ReconciliationEvidence,
     RiskSnapshotUnavailable,
     transition_catalog,
 )
@@ -290,7 +291,16 @@ def test_recovery_copies_fact_maps_and_restores_dedupe_state() -> None:
 
 
 def test_stale_non_trade_report_is_an_idempotent_no_op() -> None:
-    aggregate = order(broker_sequences={"account": 7})
+    current = submitted()
+    aggregate = Order(
+        current.order_id,
+        current.quantity,
+        state=current.state,
+        version=current.version,
+        processed_facts=current.processed_facts,
+        broker_sequences={"account": 7},
+    )
+    version = aggregate.version
     stale = ExternalFact(
         FactIdentity("broker-report", "r2"),
         "sha256:r2",
@@ -305,7 +315,7 @@ def test_stale_non_trade_report_is_an_idempotent_no_op() -> None:
         )
         is None
     )
-    assert aggregate.version == 1
+    assert aggregate.version == version
 
 
 def test_stale_sequence_does_not_hide_cumulative_mismatch() -> None:
@@ -334,6 +344,32 @@ def test_stale_sequence_does_not_hide_cumulative_mismatch() -> None:
     assert aggregate.state is OrderState.SUSPENDED
 
 
+def test_stale_sequence_does_not_hide_contradictory_status() -> None:
+    current = submitted()
+    aggregate = Order(
+        current.order_id,
+        current.quantity,
+        state=current.state,
+        version=current.version,
+        processed_facts=current.processed_facts,
+        broker_sequences={"account": 7},
+    )
+    contradictory = ExternalFact(
+        FactIdentity("broker-report", "contradictory"),
+        "sha256:contradictory",
+        broker_sequence=6,
+        stream="account",
+    )
+    before = snapshot(aggregate)
+    with pytest.raises(InvalidOrderTransition, match="QQ-OMS-5002"):
+        aggregate.transition(
+            OrderEvent.BROKER_ACCEPTED,
+            report_evidence(BrokerStatus.REJECTED),
+            fact=contradictory,
+        )
+    assert snapshot(aggregate) == before
+
+
 def test_broker_guard_is_calculated_from_structured_report() -> None:
     aggregate = order()
     aggregate.transition(OrderEvent.START_RISK, GuardEvidence.risk_snapshots("a", "p", "m"))
@@ -343,7 +379,60 @@ def test_broker_guard_is_calculated_from_structured_report() -> None:
     with pytest.raises(InvalidOrderTransition, match="QQ-OMS-5002"):
         aggregate.transition(
             OrderEvent.BROKER_ACCEPTED,
-            report_evidence(correlation_count=2),
+            report_evidence(BrokerStatus.REJECTED),
             fact=fact("ambiguous"),
         )
     assert snapshot(aggregate) == before
+
+
+def test_ambiguous_broker_report_suspends_instead_of_raising() -> None:
+    aggregate = order()
+    aggregate.transition(OrderEvent.START_RISK, GuardEvidence.risk_snapshots("a", "p", "m"))
+    aggregate.transition(OrderEvent.RISK_PASSED, GuardEvidence.expected_version(2))
+    aggregate.transition(OrderEvent.DISPATCH, GuardEvidence.trading_authority())
+    result = aggregate.transition(
+        OrderEvent.BROKER_ACCEPTED,
+        report_evidence(correlation_count=2),
+        fact=fact("ambiguous-report"),
+    )
+    assert result is not None
+    assert result.current is OrderState.SUSPENDED
+    assert result.action is OrderAction.OPEN_RECONCILIATION_CASE
+
+
+def test_zero_report_matches_after_visibility_window_suspends() -> None:
+    aggregate = order(state=OrderState.SUBMITTING)
+    result = aggregate.transition(
+        OrderEvent.BROKER_ACCEPTED,
+        GuardEvidence(
+            broker_report=BrokerReportEvidence(
+                0, BrokerStatus.ACCEPTED, Quantity(0), Quantity(100)
+            ),
+            reconciliation=ReconciliationEvidence(
+                0, visibility_window_passed=True, repeated_absence_confirmed=True
+            ),
+        ),
+        fact=fact("missing-correlation"),
+    )
+    assert result is not None
+    assert aggregate.state is OrderState.SUSPENDED
+
+
+def test_ambiguous_reconciliation_suspends_and_active_guard_checks_status() -> None:
+    aggregate = order(state=OrderState.SUBMIT_UNKNOWN)
+    ambiguous = GuardEvidence(reconciliation=ReconciliationEvidence(2, BrokerStatus.ACTIVE))
+    result = aggregate.transition(
+        OrderEvent.RECONCILE_FOUND_ACTIVE,
+        ambiguous,
+        fact=fact("ambiguous-reconciliation"),
+    )
+    assert result is not None
+    assert result.current is OrderState.SUSPENDED
+
+    rejected = order(state=OrderState.SUBMIT_UNKNOWN)
+    with pytest.raises(InvalidOrderTransition, match="QQ-OMS-5002"):
+        rejected.transition(
+            OrderEvent.RECONCILE_FOUND_ACTIVE,
+            GuardEvidence(reconciliation=ReconciliationEvidence(1, BrokerStatus.REJECTED)),
+            fact=fact("wrong-status"),
+        )

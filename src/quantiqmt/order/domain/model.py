@@ -420,19 +420,68 @@ class Order:
         if self.state is OrderState.FILLED and event is OrderEvent.CANCEL_CONFIRMED:
             # A fill wins the cancel race; the later cancellation report is stale.
             return None
+
+        report = evidence.broker_report
+        reconciliation = evidence.reconciliation
+        normal_report_events = {
+            OrderEvent.BROKER_ACCEPTED,
+            OrderEvent.BROKER_REJECTED,
+            OrderEvent.BROKER_EXPIRED,
+            OrderEvent.CANCEL_CONFIRMED,
+        }
+        if event in normal_report_events and report is not None:
+            if report.correlation_count > 1 or (
+                report.correlation_count == 0
+                and reconciliation is not None
+                and reconciliation.visibility_window_passed
+            ):
+                return self._commit(
+                    OrderEvent.REPORT_CORRELATION_AMBIGUOUS,
+                    evidence,
+                    fact=fact,
+                    remember_fact=True,
+                    conflict=None,
+                )
+            if (
+                report.correlation_count == 1
+                and report.reported_cumulative != self.cumulative_quantity
+            ):
+                return self._commit(
+                    OrderEvent.REPORT_CUMULATIVE_MISMATCH,
+                    evidence,
+                    fact=fact,
+                    remember_fact=True,
+                    conflict=None,
+                )
+        reconciliation_events = {
+            OrderEvent.RECONCILE_FOUND_ACTIVE,
+            OrderEvent.RECONCILE_FOUND_PARTIAL,
+            OrderEvent.RECONCILE_FOUND_REJECTED,
+            OrderEvent.RECONCILE_FOUND_CANCELED,
+            OrderEvent.RECONCILE_FOUND_EXPIRED,
+            OrderEvent.RECONCILE_CANCEL_REJECTED_ACTIVE,
+            OrderEvent.RECONCILE_CANCEL_REJECTED_PARTIAL,
+            OrderEvent.RECONCILE_CANCELED,
+        }
+        if event in reconciliation_events and reconciliation is not None:
+            if reconciliation.match_count > 1:
+                return self._commit(
+                    OrderEvent.RECONCILE_AMBIGUOUS,
+                    evidence,
+                    fact=fact,
+                    remember_fact=True,
+                    conflict=None,
+                )
+            if reconciliation.match_count == 0 and not reconciliation.visibility_window_passed:
+                return None
         if (
             fact is not None
-            and event
-            in {
-                OrderEvent.BROKER_ACCEPTED,
-                OrderEvent.BROKER_REJECTED,
-                OrderEvent.BROKER_EXPIRED,
-                OrderEvent.CANCEL_CONFIRMED,
-            }
+            and event in normal_report_events
             and fact.trade_quantity is None
             and fact.broker_sequence is not None
             and fact.stream is not None
             and fact.broker_sequence <= self.broker_sequences.get(fact.stream, -1)
+            and self._is_stale_non_regressive_report(event, report)
         ):
             return None
         return self._commit(
@@ -527,7 +576,11 @@ class Order:
         report = evidence.broker_report
         reconciliation = evidence.reconciliation
         if guard == "report_uniquely_correlated":
-            return report is not None and report.correlation_count == 1
+            return bool(
+                report
+                and report.correlation_count == 1
+                and report.status in {BrokerStatus.ACCEPTED, BrokerStatus.ACTIVE}
+            )
         if guard == "outcome_definite":
             return bool(
                 report
@@ -569,15 +622,21 @@ class Order:
         if guard == "report_correlation_ambiguous":
             return bool(
                 report
-                and report.correlation_count != 1
-                and reconciliation
-                and reconciliation.visibility_window_passed
+                and (
+                    report.correlation_count > 1
+                    or (
+                        report.correlation_count == 0
+                        and reconciliation
+                        and reconciliation.visibility_window_passed
+                    )
+                )
             )
         if reconciliation is None:
             return False
         unique = reconciliation.match_count == 1
+        active = reconciliation.status in {BrokerStatus.ACTIVE, BrokerStatus.ACCEPTED}
         if guard == "unique_broker_match":
-            return unique
+            return unique and active
         if guard == "visibility_window_passed":
             return bool(
                 reconciliation.visibility_window_passed
@@ -592,9 +651,13 @@ class Order:
         if guard in status_guards:
             return unique and reconciliation.status is status_guards[guard]
         if guard == "unique_broker_match_and_cum_zero":
-            return unique and self.cumulative_quantity.value == 0
+            return unique and active and self.cumulative_quantity.value == 0
         if guard == "unique_broker_match_and_cum_between_zero_and_quantity":
-            return unique and 0 < self.cumulative_quantity.value < self.quantity.value
+            return (
+                unique
+                and reconciliation.status in {BrokerStatus.ACTIVE, BrokerStatus.PARTIALLY_FILLED}
+                and 0 < self.cumulative_quantity.value < self.quantity.value
+            )
         if guard == "cancel_rejected_and_trade_derived_cum_zero":
             return unique and reconciliation.cancel_rejected and self.cumulative_quantity.value == 0
         if guard == "cancel_rejected_and_trade_derived_cum_between_zero_and_quantity":
@@ -606,6 +669,40 @@ class Order:
         if guard == "original_order_rejected_after_cancel_history":
             return unique and reconciliation.status is BrokerStatus.REJECTED
         return False
+
+    def _is_stale_non_regressive_report(
+        self, event: OrderEvent, report: BrokerReportEvidence | None
+    ) -> bool:
+        if (
+            report is None
+            or report.correlation_count != 1
+            or report.reported_cumulative.value < self.cumulative_quantity.value
+            or report.reported_cumulative.value > self.quantity.value
+        ):
+            return False
+        compatible_states = {
+            OrderEvent.BROKER_ACCEPTED: {
+                OrderState.SUBMITTED,
+                OrderState.PARTIALLY_FILLED,
+                OrderState.CANCEL_PENDING,
+                OrderState.CANCEL_UNKNOWN,
+                OrderState.CANCELED,
+                OrderState.EXPIRED,
+                OrderState.FILLED,
+            },
+            OrderEvent.BROKER_REJECTED: {OrderState.REJECTED},
+            OrderEvent.BROKER_EXPIRED: {OrderState.EXPIRED},
+            OrderEvent.CANCEL_CONFIRMED: {OrderState.CANCELED, OrderState.FILLED},
+        }
+        compatible_statuses = {
+            OrderEvent.BROKER_ACCEPTED: {BrokerStatus.ACCEPTED, BrokerStatus.ACTIVE},
+            OrderEvent.BROKER_REJECTED: {BrokerStatus.REJECTED},
+            OrderEvent.BROKER_EXPIRED: {BrokerStatus.EXPIRED},
+            OrderEvent.CANCEL_CONFIRMED: {BrokerStatus.CANCELED},
+        }
+        return (
+            self.state in compatible_states[event] and report.status in compatible_statuses[event]
+        )
 
     def _validate_state_quantity(self) -> None:
         value = self.cumulative_quantity.value

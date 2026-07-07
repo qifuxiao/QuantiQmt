@@ -11,6 +11,7 @@ from quantiqmt.order.domain import (
     Order,
     OrderEvent,
     OrderState,
+    ReconciliationEvidence,
 )
 from quantiqmt.shared import Identifier, Quantity
 
@@ -150,3 +151,106 @@ def test_same_conflicting_fact_replay_is_no_op(total: int, suffix: str) -> None:
     assert aggregate.transition(OrderEvent.PARTIAL_TRADE, GuardEvidence(), fact=conflict) is None
     assert aggregate.version == version
     assert aggregate.state is OrderState.SUSPENDED
+
+
+@given(
+    st.integers(min_value=2, max_value=10_000),
+    st.integers(min_value=1, max_value=1_000_000),
+    st.data(),
+)
+def test_sequence_no_op_requires_non_regressive_compatible_report(
+    total: int, recorded_sequence: int, data: st.DataObject
+) -> None:
+    partial = data.draw(st.integers(min_value=1, max_value=total - 1))
+    current = submitted(total)
+    trade = external("partial", partial)
+    current.transition(OrderEvent.PARTIAL_TRADE, GuardEvidence(), fact=trade)
+    restored = Order(
+        current.order_id,
+        current.quantity,
+        state=current.state,
+        cumulative_quantity=current.cumulative_quantity,
+        version=current.version,
+        processed_facts=current.processed_facts,
+        broker_sequences={"account": recorded_sequence},
+    )
+    incoming_sequence = data.draw(st.integers(min_value=0, max_value=recorded_sequence))
+    regressive = ExternalFact(
+        FactIdentity("report", "regressive"),
+        "sha256:regressive",
+        broker_sequence=incoming_sequence,
+        stream="account",
+    )
+    result = restored.transition(
+        OrderEvent.BROKER_ACCEPTED,
+        GuardEvidence(
+            broker_report=BrokerReportEvidence(
+                1, BrokerStatus.ACCEPTED, Quantity(0), Quantity(total)
+            )
+        ),
+        fact=regressive,
+    )
+    assert result is not None
+    assert restored.state is OrderState.SUSPENDED
+
+
+@given(st.integers(min_value=2, max_value=20))
+def test_ambiguous_report_and_reconciliation_always_open_case(match_count: int) -> None:
+    report_order = submitted(100)
+    # Re-enter the state in which a newly submitted report is correlated.
+    submitting = Order(
+        report_order.order_id,
+        report_order.quantity,
+        state=OrderState.SUBMITTING,
+        version=report_order.version,
+        processed_facts=report_order.processed_facts,
+    )
+    report_result = submitting.transition(
+        OrderEvent.BROKER_ACCEPTED,
+        GuardEvidence(
+            broker_report=BrokerReportEvidence(
+                match_count, BrokerStatus.ACCEPTED, Quantity(0), Quantity(100)
+            )
+        ),
+        fact=external("ambiguous-report"),
+    )
+    assert report_result is not None
+    assert submitting.state is OrderState.SUSPENDED
+
+    unknown = Order(
+        report_order.order_id,
+        report_order.quantity,
+        state=OrderState.SUBMIT_UNKNOWN,
+        version=report_order.version,
+        processed_facts=report_order.processed_facts,
+    )
+    reconciliation_result = unknown.transition(
+        OrderEvent.RECONCILE_FOUND_ACTIVE,
+        GuardEvidence(reconciliation=ReconciliationEvidence(match_count, BrokerStatus.ACTIVE)),
+        fact=external("ambiguous-reconciliation"),
+    )
+    assert reconciliation_result is not None
+    assert unknown.state is OrderState.SUSPENDED
+
+
+@given(st.integers(min_value=2, max_value=10_000), st.integers(min_value=0, max_value=10**9))
+def test_recovery_rebuild_preserves_trade_and_sequence_replay_safety(
+    total: int, sequence: int
+) -> None:
+    live = submitted(total)
+    trade = external("recovery-trade", 1)
+    live.transition(OrderEvent.PARTIAL_TRADE, GuardEvidence(), fact=trade)
+    restored = Order(
+        live.order_id,
+        live.quantity,
+        state=live.state,
+        cumulative_quantity=live.cumulative_quantity,
+        version=live.version,
+        processed_facts=live.processed_facts,
+        fact_conflicts=live.fact_conflicts,
+        broker_sequences={"account": sequence},
+    )
+    version = restored.version
+    assert restored.transition(OrderEvent.PARTIAL_TRADE, GuardEvidence(), fact=trade) is None
+    assert restored.version == version
+    assert restored.broker_sequences["account"] == sequence
