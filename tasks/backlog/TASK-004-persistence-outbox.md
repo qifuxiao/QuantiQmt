@@ -1,8 +1,8 @@
 ---
 id: TASK-004
 title: Implement Order repository journal and outbox
-status: active
-depends_on: [TASK-002, TASK-003]
+status: blocked
+depends_on: [TASK-002, TASK-003, TASK-013]
 spec_refs: [INV-CONSISTENCY, REPO-ORDER, STORAGE-SOT]
 allowed_paths: [src/quantiqmt/order/infrastructure/**, src/quantiqmt/messaging/outbox/**, tests/integration/persistence/**, migrations/**]
 forbidden_paths: [src/quantiqmt/broker/**, src/quantiqmt/strategy/**]
