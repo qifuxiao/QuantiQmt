@@ -1,0 +1,66 @@
+workflow:
+  id: WF-ORDER-COMMIT
+  owner: OrderApplication
+  clock_source: injected_clock
+  registration:
+    input: validated_order_intent
+    idempotency_key: intent_id
+    steps:
+      - {id: lookup_intent, owner: OrderRepository, result: existing_or_absent}
+      - {id: compare_existing_fingerprint, owner: OrderApplication, when: existing}
+      - {id: allocate_order_and_client_ids, owner: OrderApplication, when: absent}
+      - {id: construct_initial_order, owner: OrderApplication, aggregate_version: 1}
+      - {id: construct_registration_journal, owner: OrderApplication, event_type: ORDER_REGISTERED}
+      - {id: construct_order_registered_message, owner: OrderApplication, message_type: oms.order_registered.v1}
+      - {id: atomic_register, owner: OrderRepository, transaction: "orders + journal + outbox"}
+    outcomes:
+      identical_existing: return_existing_without_new_writes
+      conflicting_existing: QQ-STORAGE-7001
+      committed: persisted_before_any_risk_or_broker_side_effect
+      failed: QQ-STORAGE-7002_and_no_partial_write
+  transition_commit:
+    input: accepted_domain_transition
+    preconditions:
+      - domain_transition_already_validated
+      - new_version_equals_expected_version_plus_one
+      - outbox_envelopes_schema_validated
+    steps:
+      - {id: build_post_state, owner: OrderApplication}
+      - {id: build_transition_journal, owner: OrderApplication, event_type: ORDER_TRANSITION_APPLIED}
+      - {id: build_status_changed_message, owner: OrderApplication, message_type: oms.order_status_changed.v1}
+      - {id: compare_and_swap_order, owner: OrderRepository, guard: expected_version}
+      - {id: append_journal, owner: OrderRepository, unique: "order_id + aggregate_version"}
+      - {id: insert_outbox_messages, owner: OrderRepository, unique: message_id}
+      - {id: commit_transaction, owner: OrderRepository}
+    transaction_scope: [compare_and_swap_order, append_journal, insert_outbox_messages]
+    outcomes:
+      committed: order_journal_outbox_visible_together
+      version_conflict: QQ-COMMON-1003_no_write
+      commit_failure: QQ-STORAGE-7002_no_partial_write
+      uncertain_commit: query_by_order_and_next_version_before_retry
+  no_op:
+    inputs: [duplicate_fact, accepted_stale_non_regressive_report, visibility_window_not_passed]
+    repository_call: forbidden
+    journal_write: forbidden
+    outbox_write: forbidden
+    version_increment: forbidden
+  outbox_mapping:
+    ORDER_REGISTERED:
+      message_type: oms.order_registered.v1
+      aggregate_version: 1
+    ORDER_TRANSITION_APPLIED:
+      message_type: oms.order_status_changed.v1
+      payload:
+        from_status: journal.previous_state
+        to_status: journal.current_state
+        reason_code: journal.order_event
+        cum_quantity: journal.post_state.cumulative_quantity
+        leaves_quantity: "journal.post_state.quantity - journal.post_state.cumulative_quantity"
+        source_report_id: journal.accepted_broker_order_report_key_or_null
+      include_self_transition: true
+  forbidden:
+    - broker_or_backbone_call_inside_transaction
+    - repository_generated_business_id
+    - planned_message_in_outbox
+    - journal_update_or_delete
+    - retry_with_new_message_id_after_uncertain_commit

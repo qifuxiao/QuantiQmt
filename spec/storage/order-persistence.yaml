@@ -1,0 +1,168 @@
+storage:
+  id: STORAGE-ORDER-PERSISTENCE
+  version: 1
+  authority:
+    internal_order_history: order_journal
+    current_order_projection: orders
+    snapshot: rebuildable_acceleration
+  canonical_json:
+    encoding: utf-8
+    object_keys: lexicographic
+    whitespace: none
+    unicode_normalization: NFC
+    decimal: unchanged_plain_string
+    timestamp: utc_z_rfc3339
+    float: forbidden
+  checksum:
+    algorithm: sha256
+    representation: lowercase_hex
+    journal_input: "previous_entry_checksum + canonical_json(entry_without_checksums)"
+    snapshot_input: "canonical_json(snapshot_without_checksum)"
+  registration_fingerprint:
+    algorithm: sha256
+    input: validated_strategy_submit_order_intent_payload
+    excludes: [message_envelope, received_at, transport_metadata]
+    tags: sorted_by_key
+  tables:
+    orders:
+      primary_key: [order_id]
+      columns:
+        order_id: {type: uuid, nullable: false}
+        intent_id: {type: uuid, nullable: false}
+        client_order_id: {type: varchar, max_length: 128, nullable: false}
+        registration_fingerprint: {type: char, length: 64, nullable: false}
+        account_id: {type: varchar, max_length: 128, nullable: false}
+        instrument_id: {type: varchar, max_length: 64, nullable: false}
+        owner_strategy_id: {type: varchar, max_length: 128, nullable: false}
+        owner_strategy_version: {type: varchar, max_length: 64, nullable: false}
+        order_type: {type: enum, values: [LIMIT, MARKET, BEST], nullable: false}
+        side: {type: enum, values: [BUY, SELL], nullable: false}
+        position_effect: {type: enum, values: [OPEN, CLOSE, AUTO], nullable: false}
+        time_in_force: {type: enum, values: [DAY, IOC, FOK], nullable: false}
+        quantity: {type: bigint, minimum: 1, nullable: false}
+        limit_price: {type: decimal_string, max_scale: 8, nullable: true}
+        state: {type: order_state, nullable: false}
+        cumulative_quantity: {type: bigint, minimum: 0, nullable: false}
+        aggregate_version: {type: bigint, minimum: 1, nullable: false}
+        state_payload: {type: json, nullable: false}
+        registered_at: {type: timestamptz, nullable: false}
+        updated_at: {type: timestamptz, nullable: false}
+      unique:
+        - [intent_id]
+        - [client_order_id]
+      checks:
+        - cumulative_quantity_lte_quantity
+        - limit_requires_positive_limit_price
+        - state_payload_version_equals_aggregate_version
+      references:
+        state: SM-ORDER.states
+      immutable_after_insert:
+        - order_id
+        - intent_id
+        - client_order_id
+        - registration_fingerprint
+        - account_id
+        - instrument_id
+        - owner_strategy_id
+        - owner_strategy_version
+        - order_type
+        - side
+        - position_effect
+        - time_in_force
+        - quantity
+        - limit_price
+        - registered_at
+      indexes:
+        - {columns: [account_id, state], purpose: active_order_query}
+        - {columns: [updated_at], purpose: recovery_and_operations}
+    order_journal:
+      primary_key: [journal_id]
+      columns:
+        journal_id: {type: uuid, nullable: false}
+        order_id: {type: uuid, nullable: false}
+        aggregate_version: {type: bigint, minimum: 1, nullable: false}
+        event_type: {type: enum, values: [ORDER_REGISTERED, ORDER_TRANSITION_APPLIED], nullable: false}
+        schema_version: {type: integer, const: 1}
+        payload: {type: json, nullable: false}
+        occurred_at: {type: timestamptz, nullable: false}
+        recorded_at: {type: timestamptz, nullable: false}
+        correlation_id: {type: varchar, max_length: 64, nullable: false}
+        causation_id: {type: varchar, max_length: 64, nullable: true}
+        previous_entry_checksum: {type: char, length: 64, nullable: true}
+        entry_checksum: {type: char, length: 64, nullable: false}
+      unique:
+        - [order_id, aggregate_version]
+      append_only: true
+      first_entry:
+        aggregate_version: 1
+        event_type: ORDER_REGISTERED
+        previous_entry_checksum: null
+      sequence_rule: "version increments exactly by one and previous_entry_checksum equals prior entry_checksum"
+      payload_required:
+        common: [order_id, aggregate_version, post_state]
+        ORDER_REGISTERED: [registration]
+        ORDER_TRANSITION_APPLIED:
+          - previous_state
+          - current_state
+          - order_event
+          - order_action
+          - accepted_fact_delta
+          - conflict_delta
+      mutation: [INSERT]
+    order_snapshots:
+      primary_key: [snapshot_id]
+      columns:
+        snapshot_id: {type: uuid, nullable: false}
+        order_id: {type: uuid, nullable: false}
+        aggregate_version: {type: bigint, minimum: 1, nullable: false}
+        schema_version: {type: integer, const: 1}
+        state_payload: {type: json, nullable: false}
+        journal_head_checksum: {type: char, length: 64, nullable: false}
+        snapshot_checksum: {type: char, length: 64, nullable: false}
+        created_at: {type: timestamptz, nullable: false}
+      unique:
+        - [order_id, aggregate_version]
+      validity:
+        - snapshot_checksum_matches
+        - aggregate_version_lte_journal_max_version
+        - journal_head_checksum_matches_same_version
+        - state_payload_version_matches
+  post_state_v1:
+    required:
+      - order_id
+      - intent_id
+      - client_order_id
+      - registration
+      - state
+      - quantity
+      - cumulative_quantity
+      - aggregate_version
+      - processed_facts
+      - fact_conflicts
+      - broker_sequences
+      - provisional_mappings
+    processed_fact:
+      required: [namespace, key, fingerprint, trade_quantity]
+      trade_quantity: "positive integer for Trade, null otherwise"
+    fact_conflict:
+      required: [namespace, key, conflicting_fingerprints]
+    broker_sequence:
+      required: [stream, last_observed_sequence]
+    provisional_mapping:
+      required: [client_order_id, broker_order_id_candidates, ambiguity_status]
+    collection_ordering:
+      processed_facts: "namespace then key"
+      fact_conflicts: "namespace then key; fingerprints lexicographic"
+      broker_sequences: stream
+      provisional_mappings: client_order_id
+  transaction_rules:
+    register: [orders_insert, journal_v1_insert, order_registered_outbox_insert]
+    transition: [orders_compare_and_swap, journal_next_version_insert, outbox_insert_all]
+    atomic: true
+    external_io_inside_transaction: forbidden
+  recovery:
+    order: [latest_valid_snapshot, journal_after_snapshot]
+    invalid_snapshot: full_journal_replay
+    invalid_journal: halt_and_keep_recovery_barrier_closed
+    replay_guard_re_evaluation: forbidden
+    replay_requires_contiguous_versions: true

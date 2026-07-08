@@ -16,6 +16,21 @@ catalog:
       durable: postgresql
       cache: oms_memory
       recovery: snapshot_plus_journal
+    - data: order_current_projection
+      authority: oms_journal
+      durable: postgresql_orders_projection
+      cache: oms_memory
+      recovery: journal_replay
+    - data: order_snapshot
+      authority: none_rebuildable
+      durable: postgresql
+      cache: none
+      recovery: discard_invalid_then_journal_replay
+    - data: unpublished_message
+      authority: postgresql_outbox
+      durable: postgresql
+      cache: none
+      recovery: lease_reclaim_and_at_least_once_publish
     - data: external_order_fact
       authority: broker
       durable: broker_and_postgresql_observation
@@ -62,3 +77,6 @@ catalog:
     redis_is_authority: false
     conflict_action: open_reconciliation_case
     silent_history_overwrite: forbidden
+    order_journal_append_only: true
+    outbox_delete_before_retention: forbidden
+    snapshot_checksum_failure: fallback_to_full_journal

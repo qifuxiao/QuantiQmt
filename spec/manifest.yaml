@@ -1,8 +1,8 @@
 specification:
   name: quantiqmt
-  version: 0.3.0
+  version: 0.4.0
   status: accepted
-  updated: 2026-07-06
+  updated: 2026-07-08
   normative_root: spec
   explanatory_root: docs
 
@@ -60,6 +60,8 @@ catalogs:
       path: interfaces/core-ports.md
     - id: PORTS-STRATEGY
       path: interfaces/strategy-ports.md
+    - id: PORTS-ORDER-PERSISTENCE
+      path: interfaces/order-persistence-ports.md
   state_machines:
     - id: SM-ORDER
       path: state-machines/order.yaml
@@ -88,12 +90,20 @@ catalogs:
       path: workflows/broker-reconnect.yaml
     - id: WF-CONFIG-ACTIVATION
       path: workflows/config-activation.yaml
+    - id: WF-ORDER-COMMIT
+      path: workflows/order-commit.yaml
+    - id: WF-OUTBOX-PUBLICATION
+      path: workflows/outbox-publication.yaml
   repositories:
     - id: REPO-ORDER
       path: repositories/order-repository.md
   storage:
     - id: STORAGE-SOT
       path: storage/source-of-truth.yaml
+    - id: STORAGE-ORDER-PERSISTENCE
+      path: storage/order-persistence.yaml
+    - id: STORAGE-OUTBOX
+      path: storage/outbox.yaml
   nfr:
     - id: NFR-PERFORMANCE
       path: nfr/performance.yaml
@@ -104,3 +114,27 @@ catalogs:
   reviews:
     - id: REVIEW-BASELINE-0.1
       path: reviews/BASELINE-0.1-REVIEW.md
+
+change:
+  id: SPEC-0.4-ORDER-PERSISTENCE
+  compatibility: additive_contracts_with_end_to_end_identifier_clarification
+  previous_version: 0.3.0
+  public_message_schema_changes: none
+  error_catalog_change: additive_only
+  identifier_clarification: "OrderIntent V1 is wire-compatible; values unable to satisfy active OrderRegistered UUID contract are rejected as QQ-OMS-5001 before persistence"
+  affected_tasks: [TASK-004]
+  deployment_order:
+    - deploy_expand_only_database_migrations
+    - deploy_repository_with_dual_version_readiness_check
+    - verify_registration_journal_snapshot_and_outbox_recovery
+    - enable_order_writes
+    - enable_outbox_workers
+    - open_recovery_barrier_after_lag_and_dead_letter_checks
+  migration:
+    existing_production_rows: none_expected_before_TASK-004
+    if_rows_exist: "stop writes, derive identity and journal chain from audited source, verify checksums, then resume"
+    destructive_backfill: forbidden
+  rollback:
+    before_new_writes: revert_application_and_expand_only_schema_may_remain
+    after_new_journal_writes: "only implementations supporting STORAGE-ORDER-PERSISTENCE v1 may run"
+    outbox: "stop workers without deleting rows; rollback publisher while retaining same message IDs"

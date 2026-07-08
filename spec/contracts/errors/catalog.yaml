@@ -1,5 +1,5 @@
 catalog:
-  version: 1
+  version: 2
   format: "QQ-{DOMAIN}-{NUMBER}"
   ranges:
     COMMON: [1000, 1999]
@@ -24,6 +24,10 @@ errors:
     name: RISK_SNAPSHOT_STALE
     category: BUSINESS
     retry: after_fresh_snapshot
+  - code: QQ-OMS-5001
+    name: INVALID_ORDER_INTENT
+    category: BUSINESS
+    retry: never
   - code: QQ-OMS-5002
     name: INVALID_ORDER_TRANSITION
     category: BUSINESS
@@ -40,10 +44,22 @@ errors:
     name: STALE_FENCING_TOKEN
     category: SECURITY
     retry: never
+  - code: QQ-STORAGE-7001
+    name: IDEMPOTENCY_CONFLICT
+    category: CONFLICT
+    retry: never
   - code: QQ-STORAGE-7002
     name: JOURNAL_COMMIT_FAILED
     category: DEPENDENCY
     retry: context_dependent
+  - code: QQ-STORAGE-7003
+    name: SNAPSHOT_INVALID
+    category: DATA_QUALITY
+    retry: full_journal_replay
+  - code: QQ-STORAGE-7004
+    name: OUTBOX_CLAIM_LOST
+    category: CONFLICT
+    retry: reclaim_or_new_claim
   - code: QQ-STORAGE-7005
     name: LEDGER_UNBALANCED
     category: INTERNAL
@@ -52,7 +68,14 @@ errors:
     name: RECONCILIATION_DIFFERENCE
     category: CONFLICT
     retry: case_workflow
+  - code: QQ-RECOVERY-8002
+    name: ORDER_JOURNAL_CORRUPTED
+    category: DATA_QUALITY
+    retry: never_until_operator_repair
 governance:
   reuse_code: forbidden
   unknown_outcome_auto_retry: forbidden
   canonical_explanation: docs/70-Observability/Error-Code-Catalog.md
+compatibility:
+  version_2_additive_codes: [QQ-OMS-5001, QQ-STORAGE-7001, QQ-STORAGE-7003, QQ-STORAGE-7004, QQ-RECOVERY-8002]
+  existing_code_meanings_changed: false
