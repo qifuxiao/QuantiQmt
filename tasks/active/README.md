@@ -1,3 +1,5 @@
 # Active Tasks
 
-当前 active task：`TASK-013-order-persistence-contracts.md`。TASK-004 暂停并依赖本规范任务；TASK-005、TASK-008 保持 Ready。
+当前没有 active task。
+
+TASK-013 已完成并进入 `tasks/completed/`。TASK-004 仍保持 blocked；后续建议先执行系统性规范与任务队列优化，再恢复实现任务。
