@@ -33,7 +33,7 @@ verification:
 ## Deliverables
 
 - Application 层不可变 persistence DTO、Repository/Clock/ClientOrderIdFactory 边界。
-- `ClaimPolicy`、`ClaimedMessage`、`PublishFailure`、`OutboxMutationResult`、`SnapshotLookup`、`RecoveryPage` 等 Port DTO。
+- `OrderRegistrationDraft`、`OrderSnapshot`、`ClaimPolicy`、`ClaimedMessage`、`PublishFailure`、`OutboxMutationResult`、`SnapshotLookup`、`RecoveryPage` 等 Port DTO。
 - Expand-only PostgreSQL migration、约束和索引。
 - Repository 注册幂等、CAS save、Snapshot/full Journal recovery。
 - Outbox claim/lease/reclaim/publish acknowledgement/renew 与 dead-letter 行为；所有 Store 操作必须有 deadline。
@@ -47,7 +47,7 @@ verification:
 - [ ] intent/client order 和 aggregate version 唯一约束有效。
 - [ ] 并发保存返回 QQ-COMMON-1003，不覆盖数据。
 - [ ] Journal append-only、版本连续且 checksum chain 可验证。
-- [ ] Snapshot checksum 损坏时从完整 Journal 重建；Journal 损坏保持恢复屏障关闭。
+- [ ] Snapshot checksum 损坏时记录 QQ-STORAGE-7003、丢弃该恢复尝试中的 Snapshot 并从完整 Journal 重建；Journal 损坏保持恢复屏障关闭。
 - [ ] Outbox Worker 崩溃后可 reclaim；相同 message_id 允许重复发布但不产生新业务事实。
 - [ ] claim token fencing、lease 未过期校验、最大尝试、dead-letter、critical lag 安全动作符合 STORAGE-OUTBOX。
 - [ ] 旧 Worker 在 lease 过期后不能 renew、mark_published 或 release_failed，返回 QQ-STORAGE-7004。

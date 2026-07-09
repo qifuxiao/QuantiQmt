@@ -130,6 +130,10 @@ change:
     - recovery_ports_define_order_enumeration_snapshot_diagnostics_and_projection_rebuild
     - client_order_id_factory_port_defined_before_TASK-004_implementation
     - unique_identifier_collision_uses_QQ-STORAGE-7006
+    - client_order_id_factory_uses_registration_draft_without_client_order_id
+    - order_snapshot_dto_is_defined_for_snapshot_store_and_recovery
+    - invalid_snapshot_requires_full_journal_replay_for_current_recovery_attempt
+    - outbox_envelope_schema_version_mapping_is_explicit
   affected_tasks: [TASK-004]
   deployment_order:
     - deploy_expand_only_database_migrations

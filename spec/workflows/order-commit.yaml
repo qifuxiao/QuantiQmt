@@ -52,6 +52,7 @@ workflow:
         input: "outbox:v1|{message_type}|{order_id}|{aggregate_version}"
         max_length: 64
         stability: "same order_id, aggregate_version and message_type MUST produce the same message_id across retries and recovery"
+      schema_version: payload_contract_schema_version
       occurred_at: payload_business_time
       received_at: payload_business_time
       correlation_id: journal.correlation_id
@@ -63,6 +64,7 @@ workflow:
       timestamp_format: utc_z_rfc3339
     ORDER_REGISTERED:
       message_type: oms.order_registered.v1
+      schema_version: 1
       aggregate_version: 1
       payload_business_time: journal.post_state.registration.registered_at
       payload:
@@ -81,6 +83,7 @@ workflow:
         registered_at: journal.post_state.registration.registered_at
     ORDER_TRANSITION_APPLIED:
       message_type: oms.order_status_changed.v1
+      schema_version: 1
       payload_business_time: journal.occurred_at
       payload:
         order_id: journal.order_id
@@ -96,6 +99,7 @@ workflow:
       include_self_transition: true
     additional_active_messages:
       message_id_algorithm: "caller must provide deterministic sha256_lower_hex input with order_id and aggregate_version; random message_id is forbidden"
+      schema_version: "must equal the active payload contract schema version from CONTRACT-CATALOG"
       envelope_fields: "same envelope_defaults unless the active contract explicitly defines a stricter mapping"
   forbidden:
     - broker_or_backbone_call_inside_transaction

@@ -5,6 +5,21 @@
 ## DTO
 
 ```python
+class OrderRegistrationDraft(Protocol):
+    order_id: Identifier
+    intent_id: Identifier
+    account_id: str
+    instrument_id: InstrumentId
+    side: str
+    position_effect: str
+    order_type: str
+    quantity: Quantity
+    limit_price: Price | None
+    time_in_force: str
+    owner_strategy_id: str
+    owner_strategy_version: str
+    registered_at: datetime  # UTC aware
+
 class OrderRegistration(Protocol):
     order_id: Identifier
     intent_id: Identifier
@@ -49,6 +64,16 @@ class RecoveryLoad(Protocol):
     persisted_order: PersistedOrder
     source: Literal["SNAPSHOT_PLUS_JOURNAL", "FULL_JOURNAL"]
     snapshot_diagnostic: str | None
+
+class OrderSnapshot(Protocol):
+    snapshot_id: Identifier
+    order_id: Identifier
+    aggregate_version: int
+    schema_version: int
+    state_payload: Mapping[str, JsonValue]
+    journal_head_checksum: str
+    snapshot_checksum: str
+    created_at: datetime  # UTC aware
 
 class RecoveryPage(Protocol):
     order_ids: tuple[Identifier, ...]
@@ -172,7 +197,7 @@ class OrderRepository(Protocol):
 class ClientOrderIdFactory(Protocol):
     def create(
         self,
-        registration: OrderRegistration,
+        draft: OrderRegistrationDraft,
         *,
         broker: str,
         broker_capability_snapshot: Mapping[str, JsonValue],
@@ -189,7 +214,7 @@ class ClientOrderIdFactory(Protocol):
     ) -> None: ...
 ```
 
-The factory is an Application Port. It MUST generate the ID before any Broker side effect, MUST validate length/charset/capability constraints for the selected Broker adapter, and MUST never query or mutate Repository state directly. Repository uniqueness remains authoritative; on a `client_order_id` uniqueness race the Application MAY call `create` again only if no Broker side effect has occurred and the original `intent_id` is still absent.
+The factory is an Application Port. It receives `OrderRegistrationDraft`, which intentionally has no `client_order_id`; `OrderRegistration` is built only after `create` returns a candidate and `validate` succeeds. The factory MUST generate the ID before any Broker side effect, MUST validate length/charset/capability constraints for the selected Broker adapter, and MUST never query or mutate Repository state directly. Repository uniqueness remains authoritative; on a `client_order_id` uniqueness race the Application MAY call `create` again only if no Broker side effect has occurred and the original `intent_id` is still absent.
 
 ## SnapshotStore
 
@@ -205,7 +230,7 @@ class OrderSnapshotStore(Protocol):
 ```
 
 SnapshotStore 不得独立改变 Order row 或 Journal。调用者只为已经 committed 的 aggregate version 写 Snapshot。
-`status=ABSENT` means no snapshot rows exist. `status=INVALID_DISCARDED` means at least one candidate snapshot failed checksum/schema/head validation and the caller MUST record `QQ-STORAGE-7003`; `snapshot` MAY still contain the next lower valid snapshot, otherwise it is null and recovery continues with full Journal replay.
+`status=ABSENT` means no snapshot rows exist. `status=INVALID_DISCARDED` means the selected recovery snapshot failed checksum/schema/head validation; `snapshot` MUST be null and the caller MUST record `QQ-STORAGE-7003` and perform full Journal replay for that order. An implementation MAY keep lower valid snapshots for future maintenance, but MUST NOT use a lower snapshot in the same recovery attempt after detecting corruption.
 
 ## OutboxStore
 

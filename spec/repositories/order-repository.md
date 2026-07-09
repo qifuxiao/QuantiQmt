@@ -16,7 +16,7 @@ PersistedOrder
 - `intent_id` 来自已验证的 `strategy.submit_order_intent.v1`，在注册后不可改变。
 - OrderApplication 必须把 V1 command 中较宽的 legacy identifier 约束收紧为 canonical lower-case UUID；不满足返回 `QQ-OMS-5001`，不得进入 Repository。
 - `order_id` 由 Application 在首次注册尝试前生成，注册成功后不可改变。
-- `client_order_id` 由 Application 的 `ClientOrderIdFactory` 在注册事务前生成并随注册持久化；它在任何 Broker 副作用之前存在，后续 submit/reconcile 必须复用，禁止超时后更换。
+- `client_order_id` 由 Application 的 `ClientOrderIdFactory` 根据 `OrderRegistrationDraft` 在注册事务前生成并随注册持久化；`OrderRegistrationDraft` 不含 `client_order_id`，避免生成前置条件循环。`client_order_id` 在任何 Broker 副作用之前存在，后续 submit/reconcile 必须复用，禁止超时后更换。
 - V1 不规定 `client_order_id` 的字符生成算法；Factory 的 Port 与 DTO 见 `PORTS-ORDER-PERSISTENCE`。Factory 必须通过 Execution/Broker capability 校验格式，Repository 通过唯一约束保证仓库范围唯一。Repository 不生成、校验 Broker 能力或改写三个 ID。
 - Domain `Order` 不因持久化需要读取数据库；身份由 Application persistence DTO 包装，禁止把它们塞入 Infrastructure 私有 ORM 后失去恢复可见性。
 
@@ -88,7 +88,7 @@ Journal 保存已经通过 Domain Guard 的事实；恢复时验证并恢复 com
 - Snapshot 是可丢弃的恢复加速层，不是权威来源。
 - `OrderSnapshotStore.latest_for_recovery` 必须区分 `ABSENT`、`VALID` 与 `INVALID_DISCARDED`，不能把“无快照”和“坏快照”都折叠成 `None`。
 - 加载 checksum、schema version、journal head checksum 均有效且 `snapshot.version <= journal.max_version` 的最高版本 Snapshot，再顺序重放更高版本 Journal。
-- Snapshot 无效返回诊断 `QQ-STORAGE-7003` 并自动退化为完整 Journal 重放；不得用无效 Snapshot 启动交易。若存在更低版本有效 Snapshot，允许从该 Snapshot 加更高版本 Journal 继续恢复，但仍必须记录 `QQ-STORAGE-7003`。
+- Snapshot 无效返回诊断 `QQ-STORAGE-7003` 并自动退化为完整 Journal 重放；不得用无效 Snapshot 启动交易。发现损坏后，本次恢复不得改用较低版本 Snapshot；较低有效 Snapshot 只能留待离线维护或下一次干净恢复策略评估。
 - Journal 缺口、版本不连续、checksum/chain 不一致返回 `QQ-RECOVERY-8002` 并保持恢复屏障关闭。
 - 重建结果必须恢复 registration identity、Order state/version/cumulative、processed fact fingerprints、conflict fingerprints、Broker sequences 和 provisional mappings。
 - 全量启动恢复通过 `list_recovery_order_ids` 分页枚举；Projection mismatch 通过 `rebuild_projection_from_journal` 从 Journal 权威重建 `orders` projection，不得手工覆盖历史事实。
