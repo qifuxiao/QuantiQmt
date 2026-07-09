@@ -45,21 +45,23 @@ storage:
     missing_or_invalid_configuration: fail_startup
   transitions:
     - {from: PENDING, operation: claim, to: CLAIMED, guard: available_and_selected}
-    - {from: CLAIMED, operation: renew, to: CLAIMED, guard: matching_claim_token}
-    - {from: CLAIMED, operation: publish_ack, to: PUBLISHED, guard: matching_claim_token}
-    - {from: CLAIMED, operation: publish_failed, to: PENDING, guard: "matching token and attempts below max"}
-    - {from: CLAIMED, operation: publish_failed, to: DEAD_LETTER, guard: "matching token and attempts reached max"}
+    - {from: CLAIMED, operation: renew, to: CLAIMED, guard: matching_claim_token_and_lease_not_expired}
+    - {from: CLAIMED, operation: publish_ack, to: PUBLISHED, guard: matching_claim_token_and_lease_not_expired}
+    - {from: CLAIMED, operation: publish_failed, to: PENDING, guard: "matching token, lease not expired, and attempts below max"}
+    - {from: CLAIMED, operation: publish_failed, to: DEAD_LETTER, guard: "matching token, lease not expired, and attempts reached max"}
     - {from: CLAIMED, operation: reclaim, to: CLAIMED, guard: lease_expired, action: new_claim_token}
     - {from: DEAD_LETTER, operation: authorized_requeue, to: PENDING, guard: audited_operator_approval}
   semantics:
     claim_selection: "atomic ordered claim using skip-locked or equivalent non-blocking primitive"
+    claim_lease: "lease_until = postgresql_transaction_clock + policy.lease_duration_ms"
     attempt_increment: once_per_claim
     publish_receipt: backbone_acceptance_only
     crash_after_publish_before_ack: duplicate_publication_expected
     consumer_requirement: inbox_or_business_key_idempotency
     ordering: "transport order is not guaranteed, including after reclaim; aggregate_version lets consumers detect, defer, or replay gaps"
     persisted_time_authority: postgresql_transaction_clock
-    expired_worker_token: fenced_no_mutation
+    expired_worker_token: "fenced_no_mutation; mark_published/release_failed/renew after lease_until returns QQ-STORAGE-7004 even when claim_token matches"
+    old_worker_after_reclaim: "old token cannot publish_ack, release, renew, or dead-letter; duplicate publication is handled by consumer idempotency"
     infinite_retry: forbidden
     delete_after_publish: forbidden_until_retention_and_audit_policy
   dead_letter:

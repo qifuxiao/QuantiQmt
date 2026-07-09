@@ -16,7 +16,13 @@ storage:
   checksum:
     algorithm: sha256
     representation: lowercase_hex
-    journal_input: "previous_entry_checksum + canonical_json(entry_without_checksums)"
+    journal_input:
+      encoding: utf-8
+      separator: "\n"
+      genesis_previous_component: "0000000000000000000000000000000000000000000000000000000000000000"
+      subsequent_previous_component: previous_entry_checksum
+      entry_component: canonical_json(entry_without_entry_checksum_and_previous_entry_checksum)
+      serialized: "previous_component + separator + entry_component"
     snapshot_input: "canonical_json(snapshot_without_checksum)"
   registration_fingerprint:
     algorithm: sha256
@@ -97,6 +103,7 @@ storage:
         aggregate_version: 1
         event_type: ORDER_REGISTERED
         previous_entry_checksum: null
+        checksum_previous_component: "0000000000000000000000000000000000000000000000000000000000000000"
       sequence_rule: "version increments exactly by one and previous_entry_checksum equals prior entry_checksum"
       payload_required:
         common: [order_id, aggregate_version, post_state]

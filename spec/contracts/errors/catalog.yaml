@@ -64,6 +64,10 @@ errors:
     name: LEDGER_UNBALANCED
     category: INTERNAL
     retry: never
+  - code: QQ-STORAGE-7006
+    name: UNIQUE_IDENTIFIER_COLLISION
+    category: CONFLICT
+    retry: regenerate_before_side_effect_then_bounded_retry
   - code: QQ-RECOVERY-8001
     name: RECONCILIATION_DIFFERENCE
     category: CONFLICT
@@ -77,5 +81,5 @@ governance:
   unknown_outcome_auto_retry: forbidden
   canonical_explanation: docs/70-Observability/Error-Code-Catalog.md
 compatibility:
-  version_2_additive_codes: [QQ-OMS-5001, QQ-STORAGE-7001, QQ-STORAGE-7003, QQ-STORAGE-7004, QQ-RECOVERY-8002]
+  version_2_additive_codes: [QQ-OMS-5001, QQ-STORAGE-7001, QQ-STORAGE-7003, QQ-STORAGE-7004, QQ-STORAGE-7006, QQ-RECOVERY-8002]
   existing_code_meanings_changed: false

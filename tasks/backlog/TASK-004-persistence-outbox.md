@@ -33,9 +33,11 @@ verification:
 ## Deliverables
 
 - Application 层不可变 persistence DTO、Repository/Clock/ClientOrderIdFactory 边界。
+- `ClaimPolicy`、`ClaimedMessage`、`PublishFailure`、`OutboxMutationResult`、`SnapshotLookup`、`RecoveryPage` 等 Port DTO。
 - Expand-only PostgreSQL migration、约束和索引。
 - Repository 注册幂等、CAS save、Snapshot/full Journal recovery。
-- Outbox claim/lease/reclaim/publish acknowledgement 与 dead-letter 行为。
+- Outbox claim/lease/reclaim/publish acknowledgement/renew 与 dead-letter 行为；所有 Store 操作必须有 deadline。
+- 全量恢复订单分页枚举、Snapshot 损坏诊断、Journal projection rebuild。
 - PostgreSQL service CI、并发/kill-boundary/恢复集成测试。
 
 ## Acceptance criteria
@@ -47,13 +49,16 @@ verification:
 - [ ] Journal append-only、版本连续且 checksum chain 可验证。
 - [ ] Snapshot checksum 损坏时从完整 Journal 重建；Journal 损坏保持恢复屏障关闭。
 - [ ] Outbox Worker 崩溃后可 reclaim；相同 message_id 允许重复发布但不产生新业务事实。
-- [ ] claim token fencing、最大尝试、dead-letter、critical lag 安全动作符合 STORAGE-OUTBOX。
+- [ ] claim token fencing、lease 未过期校验、最大尝试、dead-letter、critical lag 安全动作符合 STORAGE-OUTBOX。
+- [ ] 旧 Worker 在 lease 过期后不能 renew、mark_published 或 release_failed，返回 QQ-STORAGE-7004。
+- [ ] ClientOrderIdFactory 在 Broker 副作用前生成/校验 ID；唯一约束竞争按 QQ-STORAGE-7006 或 bounded retry 处理。
+- [ ] 恢复可通过 list_recovery_order_ids 分页枚举所有订单，并能通过 Journal 安全重建 orders projection。
 - [ ] PostgreSQL integration tests 不使用 skip/sleep 掩盖缺少服务或竞态。
 
 ## Required evidence
 
 - 全部 verification commands、CI PostgreSQL job、migration upgrade/downgrade 安全说明。
-- 并发注册/CAS、事务中断、invalid snapshot、journal gap、publish-before-ack crash 的测试证据。
+- 并发注册/CAS、order_id/client_order_id 唯一竞争、事务中断、invalid snapshot、journal gap、projection rebuild、publish-before-ack crash、lease-expired ack/renew/release fenced 的测试证据。
 
 ## Risks and rollback
 
