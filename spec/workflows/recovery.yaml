@@ -7,14 +7,33 @@ workflow:
     - {id: connect_postgresql_redis, owner: Supervisor, failure: SAFE}
     - {id: restore_system_mode_kill_switch, owner: TradingCore, failure: HALTED}
     - {id: acquire_lease_fencing, owner: OMS, failure: STANDBY}
-    - {id: restore_snapshot_and_journal, owner: OMS, failure: HALTED}
+    - id: restore_snapshot_and_journal
+      owner: OMS
+      failure: HALTED
+      order_restore:
+        - page_order_ids_with_OrderRepository_list_recovery_order_ids
+        - read_journal_head
+        - load_highest_valid_snapshot_not_above_head_with_SnapshotLookup_status
+        - verify_snapshot_checksum_and_journal_head_checksum
+        - record_QQ-STORAGE-7003_discard_snapshot_and_full_journal_replay_when_snapshot_invalid
+        - verify_contiguous_versions_and_checksum_chain
+        - restore_identity_state_facts_conflicts_sequences_and_mappings
+        - compare_rebuilt_state_with_orders_projection
+        - rebuild_projection_from_journal_when_projection_mismatch
     - {id: connect_broker, owner: BrokerGateway, failure: SAFE}
     - {id: query_open_orders, owner: Reconciliation, failure: SAFE}
     - {id: query_trades_overlap_window, owner: Reconciliation, failure: SAFE}
     - {id: query_account_positions, owner: Reconciliation, failure: SAFE}
     - {id: classify_differences, owner: Reconciliation, failure: HALTED_IF_UNSAFE}
     - {id: apply_approved_repairs, owner: Reconciliation, failure: SAFE}
-    - {id: verify_outbox_inbox_projection_lag, owner: Supervisor, failure: SAFE}
+    - id: verify_outbox_inbox_projection_lag
+      owner: Supervisor
+      failure: SAFE
+      checks:
+        - no_critical_order_message_dead_letter
+        - expired_outbox_leases_reclaimable
+        - outbox_oldest_pending_age_within_recovery_budget
+        - consumer_inbox_and_projection_lag_within_budget
     - {id: open_recovery_barrier, owner: TradingCore, guard: all_completion_conditions}
     - {id: start_market_and_strategies, owner: Supervisor, guard: recovery_barrier_open}
   completion_conditions:
@@ -24,3 +43,10 @@ workflow:
     - no_unapproved_p0_p1_difference
     - valid_fencing_token
     - recovery_report_persisted
+    - order_journal_versions_and_checksums_verified
+    - no_critical_order_outbox_dead_letter
+  order_failure_rules:
+    invalid_snapshot: "diagnose QQ-STORAGE-7003, discard snapshot for this recovery attempt, and replay full Journal"
+    journal_gap_or_corruption: "QQ-RECOVERY-8002 + HALTED; never open barrier"
+    orders_projection_mismatch: "call OrderRepository.rebuild_projection_from_journal with expected journal head checksum, preserve evidence, open case"
+    outbox_publish_uncertain: "retain same message_id and allow duplicate publication"

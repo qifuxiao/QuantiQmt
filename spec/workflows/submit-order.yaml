@@ -6,11 +6,15 @@ workflow:
     - id: validate_intent
       owner: OrderApplication
       failure: reject_without_side_effect
+      identity_rule: "intent_id must be canonical lower-case UUID compatible with oms.order_registered.v1"
+      invalid_identity: QQ-OMS-5001
     - id: register_order
       owner: OMS
       transaction: "Order + OrderRegistered + Outbox"
       idempotency_key: intent_id
       failure: no_broker_side_effect
+      contract: WF-ORDER-COMMIT.registration
+      persisted_identity: [order_id, intent_id, client_order_id]
     - id: build_risk_snapshot
       owner: OrderApplication
       failure: fail_closed
@@ -43,3 +47,7 @@ workflow:
     - RiskDecision
     - ExecutionAttemptStarted
     - BrokerReportOrExplicitUnknown
+  persistence:
+    accepted_transition_contract: WF-ORDER-COMMIT.transition_commit
+    duplicate_intent: identical_no_op_or_QQ-STORAGE-7001
+    commit_uncertain: query_before_retry_same_ids_and_message_ids

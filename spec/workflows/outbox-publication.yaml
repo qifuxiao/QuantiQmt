@@ -1,0 +1,63 @@
+workflow:
+  id: WF-OUTBOX-PUBLICATION
+  owner: OutboxWorker
+  input: STORAGE-OUTBOX
+  steps:
+    - id: claim_batch
+      owner: OutboxStore
+      transaction: short_claim_transaction
+      ordering: "available_at, created_at, message_id"
+      concurrency: skip_locked_or_equivalent
+      deadline: required_deadline_monotonic_ns
+    - id: publish_one
+      owner: EventPublisher
+      outside_database_transaction: true
+      timeout: required_bounded_deadline
+    - id: handle_receipt
+      owner: OutboxWorker
+      receipt_semantics: backbone_accepted_not_business_processed
+    - id: mark_published
+      owner: OutboxStore
+      guard: matching_claim_token_and_lease_not_expired
+      deadline: required_deadline_monotonic_ns
+    - id: release_or_dead_letter
+      owner: OutboxStore
+      guard: matching_claim_token_and_lease_not_expired
+      deadline: required_deadline_monotonic_ns
+    - id: renew_lease
+      owner: OutboxStore
+      when: "publish may exceed remaining lease but request deadline still allows progress"
+      guard: matching_claim_token_and_lease_not_expired
+      deadline: required_deadline_monotonic_ns
+  failure_paths:
+    worker_crash_before_publish: lease_expiry_then_reclaim
+    worker_crash_after_publish_before_mark: duplicate_publish_after_reclaim
+    publish_timeout: retry_with_same_message_id_after_backoff
+    claim_token_lost_or_lease_expired: QQ-STORAGE-7004_no_mutation
+    publish_ack_after_lease_expired: "QQ-STORAGE-7004; do not mark published, allow reclaim and duplicate publish with same message_id"
+    max_attempts_reached: dead_letter_and_alert
+    database_unavailable: stop_claiming_keep_rows_durable
+    backbone_unavailable: bounded_retry_no_delete
+  backpressure:
+    queue_measure: pending_plus_expired_claimed
+    batch_and_in_flight: bounded_by_policy
+    critical_lag_action: reject_new_risk_and_enter_safe_mode
+    control_capacity: reserved
+  observability:
+    logs: [message_id, message_type, aggregate_id, aggregate_version, attempt_count, claim_token, error_code]
+    metrics:
+      - outbox_pending_total
+      - outbox_oldest_pending_age_seconds
+      - outbox_publish_latency_seconds
+      - outbox_retry_total
+      - outbox_reclaim_total
+      - outbox_dead_letter_total
+      - outbox_claim_token_conflict_total
+    prohibited_metric_labels: [message_id, aggregate_id, correlation_id]
+  correctness:
+    delivery: at_least_once
+    duplicate_publication: expected
+    same_message_id_on_retry: required
+    global_order: not_guaranteed
+    per_aggregate_audit_order: aggregate_version
+    business_consumer_idempotency: required

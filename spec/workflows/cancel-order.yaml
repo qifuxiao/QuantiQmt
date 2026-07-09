@@ -10,6 +10,10 @@ workflow:
     - {id: broker_cancel, owner: BrokerGateway, timeout: CANCEL_UNKNOWN}
     - {id: merge_cancel_or_trade_report, owner: OMS, duplicate_safe: true, out_of_order_safe: true}
   forbidden: [blind_retry_after_unknown_outcome, ignore_trade_during_cancel]
+  persistence:
+    transition_contract: WF-ORDER-COMMIT.transition_commit
+    request_idempotency_key: cancel_request_id
+    unknown_retry_ids: "same cancel_request_id and execution attempt identity"
   fact_merge:
     trade_identity: "broker+account_id+trading_day+trade_id"
     order_report_identity: "broker+account_id+trading_day+report_id"

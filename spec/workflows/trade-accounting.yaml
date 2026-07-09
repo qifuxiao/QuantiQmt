@@ -22,3 +22,5 @@ workflow:
     stale_or_out_of_order: "deduplicate by trade identity, then add unseen trade quantity irrespective of arrival order"
     during_cancel: "trade remains authoritative in CANCEL_PENDING and CANCEL_UNKNOWN"
     invalid_quantity: "reject QQ-OMS-5002 before state/version mutation"
+    persistence: "accepted Order transition follows WF-ORDER-COMMIT.transition_commit"
+    duplicate_persistence: "no Journal, Outbox, Ledger or aggregate version increment"
