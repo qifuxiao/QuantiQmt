@@ -1,5 +1,5 @@
 catalog:
-  version: 2
+  version: 3
   format: "QQ-{DOMAIN}-{NUMBER}"
   ranges:
     COMMON: [1000, 1999]
@@ -24,6 +24,42 @@ errors:
     name: RISK_SNAPSHOT_STALE
     category: BUSINESS
     retry: after_fresh_snapshot
+  - code: QQ-RISK-4003
+    name: RISK_SNAPSHOT_PARTIAL
+    category: DATA_QUALITY
+    retry: after_complete_snapshot
+  - code: QQ-RISK-4004
+    name: RISK_SNAPSHOT_VERSION_MISMATCH
+    category: CONFLICT
+    retry: rebuild_consistent_input
+  - code: QQ-RISK-4005
+    name: RISK_EVALUATION_TIMEOUT
+    category: DEPENDENCY
+    retry: never_same_order_version_without_new_input
+  - code: QQ-RISK-4006
+    name: RISK_SNAPSHOT_UNAVAILABLE
+    category: DEPENDENCY
+    retry: after_source_recovery
+  - code: QQ-RISK-4007
+    name: RISK_RULE_SET_INVALID
+    category: CONFIGURATION
+    retry: after_valid_rule_set_activation
+  - code: QQ-RISK-4008
+    name: RISK_INPUT_INVALID
+    category: DATA_QUALITY
+    retry: rebuild_input
+  - code: QQ-RISK-4009
+    name: RISK_REDUCTION_EVIDENCE_INVALID
+    category: BUSINESS
+    retry: after_fresh_position_evidence
+  - code: QQ-RISK-4010
+    name: RISK_SNAPSHOT_TIMEOUT
+    category: DEPENDENCY
+    retry: after_snapshot_builder_recovery
+  - code: QQ-RISK-4011
+    name: RISK_RULE_SET_VERSION_MISMATCH
+    category: CONFLICT
+    retry: rebuild_input_with_active_rule_set
   - code: QQ-OMS-5001
     name: INVALID_ORDER_INTENT
     category: BUSINESS
@@ -82,4 +118,5 @@ governance:
   canonical_explanation: docs/70-Observability/Error-Code-Catalog.md
 compatibility:
   version_2_additive_codes: [QQ-OMS-5001, QQ-STORAGE-7001, QQ-STORAGE-7003, QQ-STORAGE-7004, QQ-STORAGE-7006, QQ-RECOVERY-8002]
+  version_3_additive_codes: [QQ-RISK-4003, QQ-RISK-4004, QQ-RISK-4005, QQ-RISK-4006, QQ-RISK-4007, QQ-RISK-4008, QQ-RISK-4009, QQ-RISK-4010, QQ-RISK-4011]
   existing_code_meanings_changed: false

@@ -12,3 +12,12 @@ workflow:
     - one_risk_decision_uses_one_rule_set_version
     - secrets_are_references_not_plaintext
     - partial_silent_activation_is_forbidden
+  risk_rule_set:
+    schema: CONTRACT-RISK-RULE-SET-V1
+    hard_limit_source: accepted_immutable_system_hard_limit_policy
+    validation:
+      - hard_limit_policy_hash_matches_canonical_policy
+      - hard_limit_policy_version_is_accepted
+      - candidate_system_hard_limits_equal_accepted_policy
+      - dynamic_rules_do_not_relax_hard_limits
+    failure: QQ-RISK-4007_and_reject_candidate_without_partial_activation
