@@ -13,7 +13,7 @@ tasks:
   - {id: TASK-011, path: completed/TASK-011-complete-core-message-specs.md, status: completed, depends_on: [TASK-000]}
   - {id: TASK-012, path: completed/TASK-012-order-merge-semantics.md, status: completed, depends_on: [TASK-002]}
   - {id: TASK-013, path: completed/TASK-013-order-persistence-contracts.md, status: completed, depends_on: [TASK-003, TASK-012]}
-  - {id: TASK-014, path: active/TASK-014-implementation-readiness.md, status: active, depends_on: [TASK-013]}
+  - {id: TASK-014, path: completed/TASK-014-implementation-readiness.md, status: completed, depends_on: [TASK-013]}
   - {id: TASK-015, path: backlog/TASK-015-risk-contracts.md, status: ready, depends_on: [TASK-014]}
   - {id: TASK-016, path: backlog/TASK-016-strategy-runtime-contracts.md, status: ready, depends_on: [TASK-014]}
   - {id: TASK-017, path: backlog/TASK-017-execution-broker-contracts.md, status: ready, depends_on: [TASK-014]}
