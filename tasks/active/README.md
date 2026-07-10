@@ -1,5 +1,5 @@
 # Active Tasks
 
-当前没有 active task。
+当前 active task：`TASK-014-implementation-readiness.md`。
 
-TASK-013 已完成并进入 `tasks/completed/`。TASK-004 仍保持 blocked；后续建议先执行系统性规范与任务队列优化，再恢复实现任务。
+TASK-014 用于系统性优化规范与任务队列。TASK-004 仍保持 blocked；在 TASK-014 完成前，不直接恢复 TASK-004/005/008 等实现任务。
