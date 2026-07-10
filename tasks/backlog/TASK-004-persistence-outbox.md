@@ -1,7 +1,7 @@
 ---
 id: TASK-004
 title: Implement Order persistence boundary, journal, snapshot, and outbox
-status: blocked
+status: ready
 depends_on: [TASK-002, TASK-003, TASK-013]
 spec_refs: [INV-CONSISTENCY, REPO-ORDER, STORAGE-SOT, STORAGE-ORDER-PERSISTENCE, STORAGE-OUTBOX, PORTS-ORDER-PERSISTENCE, WF-ORDER-COMMIT, WF-OUTBOX-PUBLICATION, WF-RECOVERY, CONTRACT-MESSAGE-ENVELOPE-V1, CONTRACT-ORDER-REGISTERED-V1, CONTRACT-ORDER-STATUS-V1, CONTRACT-ERROR-CATALOG]
 allowed_paths:
@@ -59,8 +59,10 @@ verification:
 
 - 全部 verification commands、CI PostgreSQL job、migration upgrade/downgrade 安全说明。
 - 并发注册/CAS、order_id/client_order_id 唯一竞争、事务中断、invalid snapshot、journal gap、projection rebuild、publish-before-ack crash、lease-expired ack/renew/release fenced 的测试证据。
+- Review 必须确认未修改 `src/quantiqmt/order/domain/**`，未调用 Broker、Redis Event Backbone 或外部网络。
 
 ## Risks and rollback
 
 - Migration 只允许 expand；必须提供 downgrade safety 分析，禁止为满足形式要求编写破坏数据的 downgrade。
 - 未验证恢复前不得打开新 OrderIntent 屏障。
+- Rollback 只允许停止 writers/workers 并保留 PostgreSQL rows；禁止删除 Journal、Snapshot 或 Outbox 审计数据。

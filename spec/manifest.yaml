@@ -1,8 +1,8 @@
 specification:
   name: quantiqmt
-  version: 0.4.0
+  version: 0.5.0
   status: accepted
-  updated: 2026-07-09
+  updated: 2026-07-10
   normative_root: spec
   explanatory_root: docs
 
@@ -114,39 +114,28 @@ catalogs:
   reviews:
     - id: REVIEW-BASELINE-0.1
       path: reviews/BASELINE-0.1-REVIEW.md
+    - id: REVIEW-IMPLEMENTATION-READINESS-0.5
+      path: reviews/IMPLEMENTATION-READINESS-0.5.md
 
 change:
-  id: SPEC-0.4-ORDER-PERSISTENCE
-  compatibility: additive_contracts_with_end_to_end_identifier_clarification
-  previous_version: 0.3.0
+  id: SPEC-0.5-IMPLEMENTATION-READINESS
+  compatibility: no_runtime_contract_change
+  previous_version: 0.4.0
   public_message_schema_changes: none
-  error_catalog_change: additive_only
-  identifier_clarification: "OrderIntent V1 is wire-compatible; values unable to satisfy active OrderRegistered UUID contract are rejected as QQ-OMS-5001 before persistence"
-  implementation_contract_clarifications:
-    - outbox_ports_define_claim_policy_claimed_message_publish_failure_and_deadline
-    - outbox_lease_fencing_requires_unexpired_lease_for_renew_publish_ack_and_release
-    - order_journal_checksum_has_fixed_genesis_component
-    - order_outbox_public_event_envelope_and_payload_time_mapping_are_deterministic
-    - recovery_ports_define_order_enumeration_snapshot_diagnostics_and_projection_rebuild
-    - client_order_id_factory_port_defined_before_TASK-004_implementation
-    - unique_identifier_collision_uses_QQ-STORAGE-7006
-    - client_order_id_factory_uses_registration_draft_without_client_order_id
-    - order_snapshot_dto_is_defined_for_snapshot_store_and_recovery
-    - invalid_snapshot_requires_full_journal_replay_for_current_recovery_attempt
-    - outbox_envelope_schema_version_mapping_is_explicit
-  affected_tasks: [TASK-004]
+  storage_schema_changes: none
+  error_catalog_change: none
+  runtime_code_change: none
+  review_added: REVIEW-IMPLEMENTATION-READINESS-0.5
+  task_queue_change: "TASK-004 restored to ready; TASK-005 and TASK-008 blocked until L4 contract tasks; Phase backlog expanded"
+  affected_tasks: [TASK-004, TASK-005, TASK-006, TASK-007, TASK-008, TASK-009, TASK-010, TASK-015, TASK-016, TASK-017, TASK-018, TASK-019, TASK-020, TASK-021, TASK-022, TASK-023, TASK-024, TASK-025, TASK-026, TASK-027]
   deployment_order:
-    - deploy_expand_only_database_migrations
-    - deploy_repository_with_dual_version_readiness_check
-    - verify_registration_journal_snapshot_and_outbox_recovery
-    - enable_order_writes
-    - enable_outbox_workers
-    - open_recovery_barrier_after_lag_and_dead_letter_checks
+    - merge_task_queue_metadata
+    - review_next_task_activation
+    - start_only_ready_or_active_tasks
   migration:
-    existing_production_rows: none_expected_before_TASK-004
-    if_rows_exist: "stop writes, derive identity and journal chain from audited source, verify checksums, then resume"
+    runtime_data: not_applicable
+    task_queue: "existing open PRs must rebase and follow the new blocked/ready states"
     destructive_backfill: forbidden
   rollback:
-    before_new_writes: revert_application_and_expand_only_schema_may_remain
-    after_new_journal_writes: "only implementations supporting STORAGE-ORDER-PERSISTENCE v1 may run"
-    outbox: "stop workers without deleting rows; rollback publisher while retaining same message IDs"
+    runtime_data: not_applicable
+    task_queue: "revert this metadata change; no persisted production data affected"
