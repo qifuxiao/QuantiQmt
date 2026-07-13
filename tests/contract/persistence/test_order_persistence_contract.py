@@ -248,3 +248,24 @@ def test_release_failed_dead_letters_non_retryable_failures(registry: SchemaRegi
     )
     assert result.applied is True
     assert store.outbox_records[0].status is OutboxStatus.DEAD_LETTER
+
+
+def test_retryable_failure_reaches_max_attempts_before_next_claim(
+    registry: SchemaRegistry,
+) -> None:
+    store = InMemoryOrderPersistence(now=NOW)
+    store.register(registered_commit(registry), deadline_monotonic_ns=DEADLINE)
+    policy = ClaimPolicy(10, 1000, 1, 10, 100, "2", "0")
+    claimed = store.claim("worker-a", policy, deadline_monotonic_ns=DEADLINE)[0]
+
+    result = store.release_failed(
+        claimed.message_id,
+        claimed.claim_token,
+        PublishFailure("PUBLISH_FAILED", "temporary backbone outage", retryable=True),
+        deadline_monotonic_ns=DEADLINE,
+    )
+
+    assert result.applied is True
+    assert store.claim("worker-b", policy, deadline_monotonic_ns=DEADLINE) == ()
+    assert store.outbox_records[0].status is OutboxStatus.DEAD_LETTER
+    assert store.outbox_records[0].last_error_code == "MAX_ATTEMPTS_REACHED"

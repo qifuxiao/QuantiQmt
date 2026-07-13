@@ -114,6 +114,27 @@ def test_postgres_outbox_claim_lease_fencing_and_dead_letter(
     ).applied
 
 
+def test_postgres_retryable_failure_reaches_max_attempts_before_next_claim(
+    postgres_store: PostgresOrderPersistence, registry: SchemaRegistry
+) -> None:
+    postgres_store.register(registered_commit(registry), deadline_monotonic_ns=DEADLINE)
+    policy = ClaimPolicy(10, 1000, 1, 10, 100, "2", "0")
+    claimed = postgres_store.claim("worker-a", policy, deadline_monotonic_ns=DEADLINE)[0]
+
+    assert postgres_store.release_failed(
+        claimed.message_id,
+        claimed.claim_token,
+        PublishFailure("PUBLISH_FAILED", "temporary backbone outage", retryable=True),
+        deadline_monotonic_ns=DEADLINE,
+    ).applied
+
+    assert postgres_store.claim("worker-b", policy, deadline_monotonic_ns=DEADLINE) == ()
+    assert asyncio.run(_outbox_status(claimed.message_id)) == (
+        "DEAD_LETTER",
+        "MAX_ATTEMPTS_REACHED",
+    )
+
+
 async def _truncate_tables(dsn: str) -> None:
     asyncpg = _asyncpg()
     connection = await asyncpg.connect(dsn)
@@ -124,6 +145,25 @@ async def _truncate_tables(dsn: str) -> None:
             RESTART IDENTITY
             """
         )
+    finally:
+        await connection.close()
+
+
+async def _outbox_status(message_id: str) -> tuple[str, str | None]:
+    dsn = os.environ["QUANTIQMT_POSTGRES_DSN"]
+    asyncpg = _asyncpg()
+    connection = await asyncpg.connect(dsn)
+    try:
+        row = await connection.fetchrow(
+            """
+            SELECT status, last_error_code
+            FROM outbox_messages
+            WHERE message_id = $1
+            """,
+            message_id,
+        )
+        assert row is not None
+        return str(row["status"]), row["last_error_code"]
     finally:
         await connection.close()
 

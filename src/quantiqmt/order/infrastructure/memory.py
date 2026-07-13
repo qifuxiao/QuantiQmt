@@ -294,13 +294,27 @@ class InMemoryOrderPersistence:
         _require_deadline(deadline_monotonic_ns)
         if not worker_id.strip():
             raise ValueError("worker_id must be non-empty")
+        for message_id, record in tuple(self._outbox.items()):
+            if (
+                record.status is OutboxStatus.PENDING
+                and record.attempt_count >= policy.max_attempts
+            ):
+                self._outbox[message_id] = replace(
+                    record,
+                    status=OutboxStatus.DEAD_LETTER,
+                    last_error_code="MAX_ATTEMPTS_REACHED",
+                    last_error_detail="outbox max_attempts reached before claim",
+                    updated_at=self._now,
+                )
         selected = [
             record
             for record in sorted(
                 self._outbox.values(),
                 key=lambda item: (item.available_at, item.created_at, item.message_id),
             )
-            if record.status is OutboxStatus.PENDING
+            if (
+                record.status is OutboxStatus.PENDING and record.attempt_count < policy.max_attempts
+            )
             or (record.status is OutboxStatus.CLAIMED and _expired(record.lease_until, self._now))
         ][: policy.batch_size]
         claimed: list[ClaimedMessage] = []

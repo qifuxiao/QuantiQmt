@@ -436,12 +436,24 @@ class PostgresOrderPersistence:
         connection = await self._connect()
         try:
             async with connection.transaction():
+                await connection.execute(
+                    """
+                    UPDATE outbox_messages
+                    SET status = 'DEAD_LETTER',
+                        last_error_code = 'MAX_ATTEMPTS_REACHED',
+                        last_error_detail = 'outbox max_attempts reached before claim',
+                        updated_at = transaction_timestamp()
+                    WHERE status = 'PENDING'
+                      AND attempt_count >= $1
+                    """,
+                    policy.max_attempts,
+                )
                 rows = await connection.fetch(
                     """
                     WITH selected AS (
                         SELECT message_id
                         FROM outbox_messages
-                        WHERE status = 'PENDING'
+                        WHERE (status = 'PENDING' AND attempt_count < $4)
                            OR (status = 'CLAIMED' AND lease_until <= transaction_timestamp())
                         ORDER BY available_at, created_at, message_id
                         LIMIT $1
@@ -462,6 +474,7 @@ class PostgresOrderPersistence:
                     policy.batch_size,
                     worker_id,
                     str(policy.lease_duration_ms),
+                    policy.max_attempts,
                 )
                 return tuple(_claimed_from_row(row) for row in rows)
         finally:
