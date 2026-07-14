@@ -4,11 +4,12 @@
   "title": "RiskInputV1",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_version", "input_version", "evaluation_time", "rule_set_version", "rule_set_hash", "order", "account", "portfolio", "market"],
+  "required": ["schema_version", "input_version", "evaluation_time", "valuation_currency", "rule_set_version", "rule_set_hash", "order", "account", "portfolio", "market"],
   "properties": {
     "schema_version": {"const": 1},
     "input_version": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
     "evaluation_time": {"type": "string", "format": "date-time", "pattern": "Z$"},
+    "valuation_currency": {"$ref": "#/$defs/currency"},
     "rule_set_version": {"type": "string", "minLength": 1, "maxLength": 64},
     "rule_set_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
     "order": {"$ref": "#/$defs/orderSnapshot"},
@@ -21,6 +22,10 @@
       "type": "string",
       "format": "uuid",
       "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+    },
+    "currency": {
+      "type": "string",
+      "pattern": "^[A-Z]{3}$"
     },
     "decimal": {
       "type": "string",
@@ -112,7 +117,7 @@
       "properties": {
         "metadata": {"$ref": "#/$defs/snapshotMetadata"},
         "account_id": {"type": "string", "minLength": 1, "maxLength": 128},
-        "currency": {"type": "string", "pattern": "^[A-Z]{3}$"},
+        "currency": {"$ref": "#/$defs/currency"},
         "equity": {"$ref": "#/$defs/nullableDecimal"},
         "available_cash": {"$ref": "#/$defs/nullableDecimal"},
         "projected_available_cash": {"$ref": "#/$defs/nullableDecimal"},
@@ -147,7 +152,7 @@
         "metadata": {"$ref": "#/$defs/snapshotMetadata"},
         "portfolio_id": {"type": "string", "minLength": 1, "maxLength": 128},
         "account_id": {"type": "string", "minLength": 1, "maxLength": 128},
-        "base_currency": {"type": "string", "pattern": "^[A-Z]{3}$"},
+        "base_currency": {"$ref": "#/$defs/currency"},
         "scope_metrics": {"type": "array", "items": {"$ref": "#/$defs/scopeMetrics"}, "minItems": 4, "maxItems": 4}
       }
     },
@@ -159,7 +164,7 @@
         "metadata": {"$ref": "#/$defs/snapshotMetadata"},
         "instrument_id": {"type": "string", "minLength": 1, "maxLength": 64},
         "trading_status": {"enum": ["TRADING", "HALTED", "SUSPENDED", "CLOSED", "UNKNOWN"]},
-        "currency": {"type": "string", "pattern": "^[A-Z]{3}$"},
+        "currency": {"$ref": "#/$defs/currency"},
         "risk_price": {"type": ["string", "null"], "pattern": "^(?=.*[1-9])(0|[1-9][0-9]{0,17})(\\.[0-9]{1,8})?$"},
         "risk_price_source": {"enum": ["LIMIT_PRICE", "MARKET_WORST_CASE", "UNAVAILABLE"]},
         "reference_price": {"type": ["string", "null"], "pattern": "^(?=.*[1-9])(0|[1-9][0-9]{0,17})(\\.[0-9]{1,8})?$"},

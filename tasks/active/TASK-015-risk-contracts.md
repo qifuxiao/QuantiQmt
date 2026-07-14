@@ -3,9 +3,22 @@ id: TASK-015
 title: Complete Risk engine L4 contracts
 status: active
 depends_on: [TASK-014]
-spec_refs: [INV-RISK, INV-CONSISTENCY, WF-SUBMIT-ORDER, CONTRACT-RISK-ORDER-EVALUATED-V1, CONTRACT-ERROR-CATALOG, NFR-PERFORMANCE, NFR-OBSERVABILITY]
-allowed_paths: [spec/manifest.yaml, spec/contracts/**, spec/interfaces/**, spec/workflows/**, spec/nfr/**, tasks/active/README.md, tasks/active/TASK-015-risk-contracts.md, tasks/backlog/TASK-005-risk-engine.md, tasks/index.yaml]
-forbidden_paths: [src/**, tests/**, migrations/**]
+spec_refs: [INV-RISK, INV-CONSISTENCY, WF-SUBMIT-ORDER, CONTRACT-RISK-ORDER-EVALUATED-V1, CONTRACT-RISK-ORDER-EVALUATED-V2, CONTRACT-ERROR-CATALOG, NFR-PERFORMANCE, NFR-OBSERVABILITY]
+allowed_paths:
+  - spec/manifest.yaml
+  - spec/contracts/**
+  - spec/interfaces/**
+  - spec/workflows/**
+  - spec/nfr/**
+  - tests/contract/messages/**
+  - tasks/active/README.md
+  - tasks/active/TASK-015-risk-contracts.md
+  - tasks/backlog/TASK-005-risk-engine.md
+  - tasks/index.yaml
+
+forbidden_paths:
+  - src/**
+  - migrations/**
 verification:
   commands:
     - poetry run python scripts/validate_specs.py
@@ -33,15 +46,19 @@ verification:
 
 ## Evidence
 
+- 人类项目成员明确授权本任务将 `tests/contract/messages/**` 加入 `allowed_paths`，并仅移除与该精确授权冲突的 `tests/**` forbidden 条目；该授权只覆盖 Risk 契约 Schema 的 golden fixtures、生成器和消息契约验证。其他 `tests/**` 目录仍未授权，`src/**`、`migrations/**` 继续禁止，且不得用于业务代码、其他测试或范围外重构。
 - Spec 0.6.0 新增机器可校验的 RiskInput、RuleSet、RiskDecision、RiskAuditOutput schema，以及 `PORTS-RISK` 纯 evaluator/runner 逻辑签名。
 - 固定 synthetic/hard/scoped rule ordering、strict-result aggregation、canonical hash/UUID5、hard-limit policy、Decimal metrics 和完整 QQ-RISK fail-closed taxonomy。
 - reduce-only 仅允许版本匹配、数量不超、signed projection 绝对仓位下降且不翻仓的显式 evidence；hard/validity/timeout/trading/instrument guards 不可豁免。
-- `risk.order_evaluated.v1` 公共 schema 保持不变；PORTS-RISK 定义从完整 internal audit output 到现有权威审计事件的严格兼容投影。
+- `risk.order_evaluated.v1` 公共 schema 保持不变并作为 lossy compatibility projection；新增 `risk.order_evaluated.v2` 以完整 RiskAuditOutput 作为 typed 权威审计事件。
+- V1 冻结单一 ISO `valuation_currency`，所有金额 hard/dynamic limit 与 Input/RuleSet/account/portfolio/market 精确匹配，跨币种/FX fail-closed。
+- RiskRuleResult 以 DECIMAL/INTEGER/BOOLEAN/STRING/STRING_SET 判别值保留逐规则 measured/limit；latency 仅位于与结果一对一 join 的 RuleTiming。
 - TASK-005 已引用全部冻结契约并具备实现级 deliverables、property-test matrix 与独立 Review activation gate。
-- `poetry run python scripts/validate_specs.py`: passed。
-- `poetry run pytest tests/spec tests/contract`: passed，143 tests。
-- RiskAuditOutput → RiskDecision URN cross-schema reference: resolved。
-- 未修改 `src/**`、`tests/**`、`migrations/**`；TASK-015 保持 active，等待独立 Review。
+- bundled Poetry `run python scripts/validate_specs.py`: passed；裸 `poetry` 不在 PATH。
+- bundled Poetry `run pytest tests/spec tests/contract`: passed，159 tests。
+- self-contained RiskOrderEvaluatedV2 是 RiskAuditOutput/RiskDecision 的唯一机器源；两个内部契约的 Draft 2020-12 URN/JSON Pointer 引用已做 runtime resolution validation。
+- v2 BOOLEAN 与 STRING/STRING_SET typed values 通过 runtime/official validator；旧 decimal-string boolean 编码被拒绝；v1 version-aware golden fixtures 保持通过。
+- 未修改 `src/**`、`migrations/**`；TASK-015 保持 active，等待独立 Review。
 
 ## Review focus
 

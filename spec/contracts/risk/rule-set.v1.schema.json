@@ -4,12 +4,13 @@
   "title": "RiskRuleSetV1",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_version", "rule_set_id", "rule_set_version", "content_hash", "hard_limit_policy_version", "hard_limit_policy_hash", "evaluation_timeout_us", "freshness_limits_ms", "system_hard_limits", "reduce_only_policy", "rules"],
+  "required": ["schema_version", "rule_set_id", "rule_set_version", "content_hash", "valuation_currency", "hard_limit_policy_version", "hard_limit_policy_hash", "evaluation_timeout_us", "freshness_limits_ms", "system_hard_limits", "reduce_only_policy", "rules"],
   "properties": {
     "schema_version": {"const": 1},
     "rule_set_id": {"type": "string", "format": "uuid", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"},
     "rule_set_version": {"type": "string", "minLength": 1, "maxLength": 64},
     "content_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "valuation_currency": {"$ref": "#/$defs/currency"},
     "hard_limit_policy_version": {"type": "string", "minLength": 1, "maxLength": 64},
     "hard_limit_policy_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
     "evaluation_timeout_us": {"type": "integer", "minimum": 1, "maximum": 4000},
@@ -53,10 +54,11 @@
     "rules": {"type": "array", "items": {"$ref": "#/$defs/rule"}, "maxItems": 4096}
   },
   "$defs": {
+    "currency": {"type": "string", "pattern": "^[A-Z]{3}$"},
     "nonNegativeDecimal": {"type": "string", "pattern": "^(0|[1-9][0-9]{0,17})(\\.[0-9]{1,8})?$"},
     "limit": {
       "oneOf": [
-        {"type": "object", "additionalProperties": false, "required": ["kind", "value"], "properties": {"kind": {"const": "DECIMAL"}, "value": {"$ref": "#/$defs/nonNegativeDecimal"}}},
+        {"type": "object", "additionalProperties": false, "required": ["kind", "value", "currency"], "properties": {"kind": {"const": "DECIMAL"}, "value": {"$ref": "#/$defs/nonNegativeDecimal"}, "currency": {"type": ["string", "null"], "pattern": "^[A-Z]{3}$"}}},
         {"type": "object", "additionalProperties": false, "required": ["kind", "value"], "properties": {"kind": {"const": "INTEGER"}, "value": {"type": "integer", "minimum": 0}}},
         {"type": "object", "additionalProperties": false, "required": ["kind", "value"], "properties": {"kind": {"const": "BOOLEAN"}, "value": {"type": "boolean"}}},
         {"type": "object", "additionalProperties": false, "required": ["kind", "values"], "properties": {"kind": {"const": "STRING_SET"}, "values": {"type": "array", "items": {"type": "string", "minLength": 1, "maxLength": 128}, "minItems": 1, "maxItems": 10000, "uniqueItems": true}}}
@@ -77,7 +79,9 @@
         "reduction_exception": {"enum": ["NEVER", "ALLOW_IF_VERIFIED"]}
       },
       "allOf": [
-        {"if": {"properties": {"scope": {"const": "SYSTEM"}}}, "then": {"properties": {"scope_id": {"type": "null"}}}, "else": {"properties": {"scope_id": {"type": "string"}}}}
+        {"if": {"properties": {"scope": {"const": "SYSTEM"}}}, "then": {"properties": {"scope_id": {"type": "null"}}}, "else": {"properties": {"scope_id": {"type": "string"}}}},
+        {"if": {"properties": {"metric": {"enum": ["ORDER_NOTIONAL", "AVAILABLE_CASH", "PROJECTED_GROSS_EXPOSURE", "PROJECTED_NET_EXPOSURE_ABS", "DAILY_LOSS"]}}, "required": ["metric"]}, "then": {"properties": {"limit": {"type": "object", "required": ["kind", "value", "currency"], "properties": {"kind": {"const": "DECIMAL"}, "currency": {"$ref": "#/$defs/currency"}}}}}},
+        {"if": {"properties": {"metric": {"const": "PROJECTED_LEVERAGE"}}, "required": ["metric"]}, "then": {"properties": {"limit": {"type": "object", "required": ["kind", "value", "currency"], "properties": {"kind": {"const": "DECIMAL"}, "currency": {"type": "null"}}}}}}
       ]
     }
   }

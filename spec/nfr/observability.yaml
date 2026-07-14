@@ -59,8 +59,23 @@ nfr:
     - measured_value
     - limit_value
     - exception_applied
+  risk_internal_rule_timing_required_fields:
+    - evaluation_index
+    - rule_id
     - latency_us
-  risk_public_audit_required_fields:
+  risk_internal_joined_rule_audit_view:
+    join_key: [evaluation_index, rule_id]
+    required_sources: [decision.rule_results, rule_timings]
+    includes_rule_result_and_latency: true
+  risk_v2_authoritative_audit_required_fields:
+    - schema_version
+    - decision
+    - evaluated_at
+    - total_latency_us
+    - evaluation_timeout_us
+    - completed_rule_count
+    - rule_timings
+  risk_v1_compatibility_audit_required_fields:
     - decision_id
     - order_id
     - expected_order_version

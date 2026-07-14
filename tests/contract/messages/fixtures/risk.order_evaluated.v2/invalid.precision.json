@@ -1,0 +1,70 @@
+{
+  "schema_version": 1,
+  "decision": {
+    "schema_version": 1,
+    "decision_id": "550e8400-e29b-41d4-a716-446655440000",
+    "decision_origin": "EVALUATOR",
+    "input_version": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "semantic_decision_hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "order_id": "550e8400-e29b-41d4-a716-446655440001",
+    "expected_order_version": 1,
+    "decision": "PASS",
+    "primary_reason_code": "RISK_ALL_APPLICABLE_RULES_PASSED",
+    "error_code": null,
+    "rule_set_version": "r1",
+    "rule_set_hash": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "snapshot_states": {
+      "account": {
+        "snapshot_version": "a1",
+        "quality": "FRESH",
+        "age_ms": 0,
+        "max_age_ms": 1000
+      },
+      "portfolio": {
+        "snapshot_version": "p1",
+        "quality": "FRESH",
+        "age_ms": 0,
+        "max_age_ms": 1000
+      },
+      "market": {
+        "snapshot_version": "m1",
+        "quality": "FRESH",
+        "age_ms": 0,
+        "max_age_ms": 1000
+      }
+    },
+    "rule_results": [
+      {
+        "evaluation_index": 0,
+        "rule_id": "RULE.TRADING_ENABLED",
+        "phase": "SCOPED_RULE",
+        "scope": "SYSTEM",
+        "scope_id": null,
+        "priority": 1,
+        "metric": "TRADING_ENABLED",
+        "result": "PASS",
+        "reason_code": "RISK_RULE_PASSED",
+        "measured_value": {
+          "kind": "BOOLEAN",
+          "value": true
+        },
+        "limit_value": {
+          "kind": "BOOLEAN",
+          "value": true
+        },
+        "exception_applied": false
+      }
+    ]
+  },
+  "evaluated_at": "2026-07-02T02:00:00Z",
+  "total_latency_us": 0.5,
+  "evaluation_timeout_us": 4000,
+  "completed_rule_count": 1,
+  "rule_timings": [
+    {
+      "evaluation_index": 0,
+      "rule_id": "RULE.TRADING_ENABLED",
+      "latency_us": 1
+    }
+  ]
+}

@@ -2,30 +2,5 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "urn:quantiqmt:contract:risk-audit-output:v1",
   "title": "RiskAuditOutputV1",
-  "type": "object",
-  "additionalProperties": false,
-  "required": ["schema_version", "decision", "evaluated_at", "total_latency_us", "evaluation_timeout_us", "completed_rule_count", "rule_timings"],
-  "properties": {
-    "schema_version": {"const": 1},
-    "decision": {"$ref": "urn:quantiqmt:contract:risk-decision:v1"},
-    "evaluated_at": {"type": "string", "format": "date-time", "pattern": "Z$"},
-    "total_latency_us": {"type": "integer", "minimum": 0},
-    "evaluation_timeout_us": {"type": "integer", "minimum": 1, "maximum": 4000},
-    "completed_rule_count": {"type": "integer", "minimum": 0, "maximum": 8192},
-    "rule_timings": {
-      "type": "array",
-      "minItems": 1,
-      "maxItems": 8192,
-      "items": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": ["evaluation_index", "rule_id", "latency_us"],
-        "properties": {
-          "evaluation_index": {"type": "integer", "minimum": 0},
-          "rule_id": {"type": "string", "minLength": 1, "maxLength": 128},
-          "latency_us": {"type": "integer", "minimum": 0}
-        }
-      }
-    }
-  }
+  "$ref": "urn:quantiqmt:event:risk.order_evaluated:v2"
 }

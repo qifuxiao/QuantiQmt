@@ -22,13 +22,19 @@ JSON Schema decode/typed DTO construction 位于 Port 之前。结构无效的 R
 
 - canonical JSON MUST 使用 RFC 8785 JSON Canonicalization Scheme：UTF-8、对象 key 按规范排序、数组保序、无 Unicode normalization；所有 Decimal 仍是普通字符串，禁止 float/NaN/Infinity。`input_version` 是 RiskInput 去掉自身 `input_version` 后 canonical bytes 的 SHA-256 64 位小写 hex。收到的 hash 不匹配时以 `QQ-RISK-4008` 拒绝。
 - `content_hash` 对 RuleSet 去掉自身 `content_hash` 后使用同一算法。hash 不匹配、重复 `rule_id`、重复 `(scope, scope_id)` metrics 行或非法 metric/operator/limit 组合以 `QQ-RISK-4007` 拒绝。
-- `hard_limit_policy_hash` 是 `{hard_limit_policy_version, system_hard_limits}` 的 RFC 8785 canonical SHA-256。该 policy 由安全治理的 immutable baseline 发布，不属于普通 hot config；ConfigService 只能引用当前 accepted policy，不能在 RuleSet candidate 中改值。hash 不匹配或 candidate policy 未被接受均以 `QQ-RISK-4007` 拒绝激活。
+- `hard_limit_policy_hash` 是 `{hard_limit_policy_version, valuation_currency, system_hard_limits}` 的 RFC 8785 canonical SHA-256。该 policy 由安全治理的 immutable baseline 发布，不属于普通 hot config；ConfigService 只能引用当前 accepted policy，不能在 RuleSet candidate 中改值。hash 不匹配或 candidate policy 未被接受均以 `QQ-RISK-4007` 拒绝激活。
 - RiskInput 的 `rule_set_version/rule_set_hash` MUST 分别等于传入 RuleSet 的 `rule_set_version/content_hash`，否则以 `QQ-RISK-4011` / `RISK_RULE_SET_VERSION_MISMATCH` 拒绝。
 - Order `checksum` 对去掉自身 checksum 的 Order Snapshot 计算；其他 Snapshot 的 `metadata.checksum` 对去掉该 checksum 的完整 Snapshot 计算，算法同上。checksum 不匹配以 `QQ-RISK-4008` 拒绝。TIMEOUT/UNAVAILABLE Snapshot 的 `snapshot_version` 是 Snapshot builder attempt identity，checksum 覆盖 null data 和失败 quality，不能伪装成源数据版本。
 - `decision_id` MUST 为 `uuid5(UUID("b5a6c3cc-2be0-5e6f-a9ec-2d9a4e769979"), input_version + ":" + content_hash)`；不得使用 UUID4。hash 校验失败时输出使用重新计算的实际 input/rule-set hash，不能以调用方声称的错误 hash 生成 identity。`semantic_decision_hash` 对 RiskDecision 去掉 `decision_id` 和自身 hash 后按上述 canonical JSON 计算。
 - DTO 在构造后 MUST deep immutable；不得在一次决策中切换 `rule_set_version` 或任何 Snapshot version。
 
 RiskDecision 的 `order_id/expected_order_version` MUST 等于 Input Order 的 `order_id/aggregate_version`；`input_version` 使用已验证或重新计算的实际 hash；`rule_set_version/rule_set_hash` 使用本次唯一 RuleSet；三个 `snapshot_states` 逐一记录 version、派生 quality、age 和对应 max age。Decision 不携带 business timestamp 或 latency，所有运行时测量只进入 RiskAuditOutput。
+
+### V1 单一计价币种
+
+V1 不支持跨币种求值或 FX 换算。`RiskInput.valuation_currency`、`RiskRuleSet.valuation_currency`、`account.currency`、`portfolio.base_currency` 和 `market.currency` MUST 是完全相同的 ISO 4217 三位大写代码。Order 的 `limit_price`、Market 的价格字段、Account 的全部金额字段、四个 scope metrics 的 exposure 字段，以及 `ORDER_NOTIONAL`，均以该唯一币种计价；`PROJECTED_LEVERAGE` 是无币种比率。
+
+`system_hard_limits` 中 `max_order_notional`、`max_projected_gross_exposure`、`max_projected_net_exposure_abs`、`max_daily_loss` 的币种由 RuleSet 顶层 `valuation_currency` 唯一指定。金额 metric 的动态 `DECIMAL` limit 必须携带同一非 null `currency`；`PROJECTED_LEVERAGE` 的 `DECIMAL.currency` 必须为 null。Input 内部币种不一致以 `QQ-RISK-4008` 拒绝，RuleSet 内部 limit 币种不一致以 `QQ-RISK-4007` 拒绝，分别合法但 Input 与 RuleSet 的 `valuation_currency` 不一致以 `QQ-RISK-4011` 拒绝。实现不得直接比较不同币种的名义数字、不得自行读取汇率，也不得通过全部拒绝来代替这项确定性校验；未来支持跨币种必须发布新 RiskInput/RuleSet 契约，携带不可变、版本化 FX snapshot 和 Decimal 舍入规则。
 
 ## Snapshot 质量和一致性
 
@@ -78,6 +84,20 @@ MUST 校验：Order/Account/Portfolio 的 `account_id` 相同；Order/Portfolio 
 | `CANCEL_RATIO_BPS` | 匹配 scope metrics 的同名值；SYSTEM 映射 ACCOUNT row | `MAX / INTEGER` | all |
 
 不合法 scope/metric 组合使 RuleSet invalid。缺少适用 metric、出现多个相同 scope metrics、货币不一致、Decimal 溢出/非法、`reference_price <= 0` 或复算不一致均为 `QQ-RISK-4008`，不得使用默认 0。`MAX` 通过条件为 measured <= limit，`MIN` 为 measured >= limit，`BOOLEAN_TRUE` 为 measured is true，`IN_SET` 为 measured 属于 values；不得做字符串数值比较。所有金额/价格/比例最终判断 MUST 使用 Decimal，禁止 float。
+
+### RiskRuleResult typed value
+
+`measured_value` 和 `limit_value` 只允许 null 或下列带 `kind` 判别的值，禁止数字编码 boolean/string/set：
+
+| kind | payload | canonical 规则 |
+|---|---|---|
+| `DECIMAL` | `value: decimal string`, `currency: ISO code \| null` | 金额 metric 的 currency 等于本次 `valuation_currency`；`PROJECTED_LEVERAGE` 为 null |
+| `INTEGER` | `value: integer` | JSON integer，不转 decimal string |
+| `BOOLEAN` | `value: boolean` | 只允许 JSON true/false |
+| `STRING` | `value: string` | `INSTRUMENT_ALLOWED` measured 为 `order.instrument_id` |
+| `STRING_SET` | `values: string[]` | 唯一且按 Unicode code point 升序，`INSTRUMENT_ALLOWED` limit 使用此类型 |
+
+metric 与 typed value 的映射固定：`TRADING_ENABLED=BOOLEAN/BOOLEAN`；`INSTRUMENT_ALLOWED=STRING/STRING_SET`；`ORDER_QUANTITY`、`PRICE_DEVIATION_BPS`、`POSITION_QUANTITY`、`ORDER_COUNT_WINDOW`、`CANCEL_RATIO_BPS=INTEGER/INTEGER`；`ORDER_NOTIONAL`、`AVAILABLE_CASH`、`PROJECTED_GROSS_EXPOSURE`、`PROJECTED_NET_EXPOSURE_ABS`、`PROJECTED_LEVERAGE`、`DAILY_LOSS=DECIMAL/DECIMAL`。适用的 SYSTEM_HARD_LIMIT/SCOPED_RULE 必须记录非 null measured/limit；scope 不匹配的 NOT_APPLICABLE 可令 measured 为 null，但仍记录 typed limit。Synthetic validity/timeout 只有在该 guard 没有语义测量值或限额时才可使用 null，禁止以 null 隐藏已参与判断的值。
 
 ## RuleSet 校验和硬限额
 
@@ -172,10 +192,12 @@ Runner 在每个确定性规则边界前后读取 monotonic_ns，使用整数向
 
 elapsed 达到 `evaluation_timeout_us`（`total_latency_us >= evaluation_timeout_us`）时，即使当前 `next()` 尚未返回，Runner 也 MUST 停止等待并产生 `decision_origin=TIMEOUT_GUARD` 的 REJECT，追加 `RISK.SYSTEM.EVALUATION_TIMEOUT` 结果，error=`QQ-RISK-4005`，保留已完成结果，丢弃未完成结果。执行必须位于有界 cancellable worker；若底层不能证明已取消，attempt fencing 仍必须永久丢弃其 late output，且不能让超时 worker 无界堆积。相同 input_version 不得重评，重试必须重建含新 evaluation_time 的 RiskInput，因此产生新 input_version/decision_id。
 
-Runner MUST 产生 `CONTRACT-RISK-AUDIT-OUTPUT-V1`：`decision` 是完整 RiskDecision；`evaluation_timeout_us` 等于本次 RuleSet 值；`rule_timings` 按 evaluation_index 排序并与 Decision 的每个 rule result 以 `(evaluation_index, rule_id)` 一一对应；`total_latency_us >= sum(rule_timings.latency_us)`；正常完成时 `completed_rule_count=len(rule_results)`，timeout 时等于 timeout guard 之前完成的规则数。该 DTO 是 Runner 的完整内部审计/测量输出，不创建新的 Storage authority。
+Runner MUST 产生 `CONTRACT-RISK-AUDIT-OUTPUT-V1`：`decision` 是完整 RiskDecision；`evaluation_timeout_us` 等于本次 RuleSet 值；`rule_timings` 按 evaluation_index 排序并与 Decision 的每个 rule result 以 `(evaluation_index, rule_id)` 一一对应；`total_latency_us >= sum(rule_timings.latency_us)`；正常完成时 `completed_rule_count=len(rule_results)`，timeout 时等于 timeout guard 之前完成的规则数。RiskRuleResult 是确定性 Decision 的组成部分且不含 latency；RuleTiming 是 Runner 测量值。NFR 所需的逐规则审计视图是二者按该复合 key 一对一 join 的结果，不得把 `latency_us` 写回 RiskRuleResult 或语义 hash。
 
-已发布的 `risk.order_evaluated.v1` schema 保持不变，并按 `STORAGE-SOT` 继续作为 RiskDecision 的权威持久化审计事件：顶层 identity/decision/rule_set 逐字段取 Decision；`snapshot_versions` 取三个 `snapshot_states.snapshot_version`；每个公开 `rule_results` 投影 `rule_id/result/reason_code/measured_value/limit_value` 并从匹配 timing 取 `latency_us`；`evaluated_at` 取 AuditOutput。V1 不承载 input hash、snapshot quality、phase/scope/priority、exception、total latency或 error code；消费者不得猜测这些缺失字段，需要公共扩展时必须发布新 message version。不得向 v1 payload 添加 schema 未声明字段。
+`risk.order_evaluated.v2` 的自包含 schema 是 `CONTRACT-RISK-AUDIT-OUTPUT-V1` 与 `CONTRACT-RISK-DECISION-V1` 的唯一机器字段源；两个内部契约通过 URN/JSON Pointer 引用它。Event envelope 的 `schema_version=2`，payload 内的 `schema_version=1` 表示 RiskAuditOutput DTO 版本，二者不得混淆。该 v2 事件按 `STORAGE-SOT` 作为 RiskDecision 的权威持久化审计事件；因此 typed measured/limit、完整 Decision 和独立 RuleTiming 均可无歧义复盘。权威 v2 与兼容 v1 Outbox record MUST 和 approved OMS transition 在同一事务持久化，二者成功前不得执行。
 
-Event envelope MUST 使用 `message_id=decision_id`、`correlation_id=order.intent_id`、`causation_id` 为触发 Risk 的 OrderRegistered message id、`aggregate_id=order_id`、`aggregate_version=expected_order_version`、`partition_key=order_id`。OMS 只能在 `expected_order_version` 匹配时应用 Decision；冲突返回 `QQ-COMMON-1003`，重新读取后由 Application 明确决定是否以新 input_version 重评。
+已发布的 `risk.order_evaluated.v1` schema 保持不变，仅作为兼容投影：顶层 identity/decision/rule_set 逐字段取 Decision；`snapshot_versions` 取三个 `snapshot_states.snapshot_version`；每个公开 `rule_results` 投影 `rule_id/result/reason_code` 并从匹配 timing 取 `latency_us`。typed `DECIMAL` 投影其 `value` decimal string；`INTEGER` 仅在无前导零的十进制表示满足 v1 decimal pattern 时投影该 string，超出 v1 18 位范围时投影 null；`BOOLEAN`、`STRING`、`STRING_SET` 不能无损表示，必须投影为 null。measured/limit 各自独立按此规则投影，不得发明数值编码。V1 不再是完整权威审计，不承载 input hash、snapshot quality、phase/scope/priority、exception、total latency或 error code；消费者不得猜测这些缺失字段。不得向 v1 payload 添加 schema 未声明字段。
+
+两个 Event envelope 的 `correlation_id=order.intent_id`、`causation_id` 为触发 Risk 的 OrderRegistered message id、`aggregate_id=order_id`、`aggregate_version=expected_order_version`、`partition_key=order_id`。为保留 v1 已发布 identity，v1 `message_id=decision_id`；v2 `message_id=uuid5(UUID("b5a6c3cc-2be0-5e6f-a9ec-2d9a4e769979"), decision_id + ":risk.order_evaluated.v2")`。OMS 只能在 `expected_order_version` 匹配时应用 Decision；冲突返回 `QQ-COMMON-1003`，重新读取后由 Application 明确决定是否以新 input_version 重评。
 
 指标必须至少包含 `risk_evaluation_latency_us` histogram、`risk_rule_latency_us` histogram、`risk_decisions_total{decision,origin,error_code}` counter、`risk_fail_closed_total{reason}` counter。禁止使用 order/account/instrument/correlation 等高基数字段作为 metric label。

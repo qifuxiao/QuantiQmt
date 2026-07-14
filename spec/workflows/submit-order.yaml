@@ -68,7 +68,8 @@ workflow:
     commit_uncertain: query_before_retry_same_ids_and_message_ids
   risk_audit:
     output_contract: CONTRACT-RISK-AUDIT-OUTPUT-V1
-    event: risk.order_evaluated.v1
-    public_projection_mapping: PORTS-RISK
-    public_projection_persist_before_execution: true
-    audit_publish_failure: "fail closed; approved transition and risk.order_evaluated.v1 must be committed before execution"
+    authoritative_event: risk.order_evaluated.v2
+    compatibility_event: risk.order_evaluated.v1
+    event_projection_mapping: PORTS-RISK
+    both_events_persist_before_execution: true
+    audit_publish_failure: "fail closed; approved transition and both risk audit Outbox records must be committed before execution"

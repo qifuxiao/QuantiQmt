@@ -16,8 +16,9 @@ workflow:
     schema: CONTRACT-RISK-RULE-SET-V1
     hard_limit_source: accepted_immutable_system_hard_limit_policy
     validation:
-      - hard_limit_policy_hash_matches_canonical_policy
+      - hard_limit_policy_hash_matches_canonical_policy_including_valuation_currency
       - hard_limit_policy_version_is_accepted
+      - candidate_valuation_currency_equals_accepted_policy
       - candidate_system_hard_limits_equal_accepted_policy
       - dynamic_rules_do_not_relax_hard_limits
     failure: QQ-RISK-4007_and_reject_candidate_without_partial_activation
