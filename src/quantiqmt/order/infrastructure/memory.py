@@ -7,11 +7,14 @@ PostgreSQL driver is wired underneath the same ports.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
+from decimal import ROUND_CEILING, Decimal
 from enum import StrEnum
+from time import monotonic_ns
 from types import MappingProxyType
-from typing import Literal
+from typing import Any, Literal, cast
 
 from quantiqmt.order.application.persistence.errors import (
     IdempotencyConflict,
@@ -25,6 +28,7 @@ from quantiqmt.order.application.persistence.model import (
     JournalAppend,
     JsonValue,
     OrderCommit,
+    OrderRegistration,
     OrderSnapshot,
     OutboxMutationResult,
     PersistedOrder,
@@ -39,7 +43,7 @@ from quantiqmt.order.application.persistence.serialization import (
     snapshot_checksum,
 )
 from quantiqmt.order.domain import OrderState, OrderVersionConflict
-from quantiqmt.shared import Identifier, require_utc
+from quantiqmt.shared import Identifier, InstrumentId, Price, Quantity, parse_utc, require_utc
 
 
 class OutboxStatus(StrEnum):
@@ -71,6 +75,11 @@ class OutboxRecord:
     available_at: datetime
     created_at: datetime
     updated_at: datetime
+    claim_max_attempts: int | None = None
+    claim_initial_retry_delay_ms: int | None = None
+    claim_max_retry_delay_ms: int | None = None
+    claim_backoff_multiplier: str | None = None
+    claim_jitter_ratio: str | None = None
     claimed_by: str | None = None
     claim_token: Identifier | None = None
     lease_until: datetime | None = None
@@ -192,8 +201,8 @@ class InMemoryOrderPersistence:
         self, order_id: Identifier, *, deadline_monotonic_ns: int
     ) -> RecoveryLoad:
         _require_deadline(deadline_monotonic_ns)
-        self._verify_journal_chain(order_id.value)
-        persisted = self._orders.get(order_id.value)
+        records = self._verify_journal_chain(order_id.value)
+        persisted = self._persisted_from_journal_records(order_id.value, records)
         if persisted is None:
             raise JournalCommitFailed("order projection is missing")
         return RecoveryLoad(persisted, source="FULL_JOURNAL")
@@ -251,9 +260,10 @@ class InMemoryOrderPersistence:
         head = records[-1].entry_checksum
         if expected_journal_head_checksum is not None and expected_journal_head_checksum != head:
             raise OrderVersionConflict("journal head changed during projection rebuild")
-        persisted = self._orders.get(order_id.value)
+        persisted = self._persisted_from_journal_records(order_id.value, records)
         if persisted is None:
             raise JournalCommitFailed("cannot rebuild without committed post-state payload")
+        self._orders[order_id.value] = persisted
         return RecoveryLoad(persisted, source="FULL_JOURNAL")
 
     def write(self, snapshot: OrderSnapshot, *, deadline_monotonic_ns: int) -> None:
@@ -272,8 +282,15 @@ class InMemoryOrderPersistence:
         if not candidates:
             return SnapshotLookup(None, "ABSENT")
         records = self._journal.get(order_id.value, [])
-        head = records[-1].entry_checksum if records else None
         selected = candidates[0]
+        head = next(
+            (
+                record.entry_checksum
+                for record in records
+                if record.append.aggregate_version == selected.aggregate_version
+            ),
+            None,
+        )
         if (
             snapshot_checksum(selected.state_payload) != selected.snapshot_checksum
             or selected.journal_head_checksum != head
@@ -297,11 +314,17 @@ class InMemoryOrderPersistence:
         for message_id, record in tuple(self._outbox.items()):
             if (
                 record.status is OutboxStatus.PENDING
-                and record.attempt_count >= policy.max_attempts
-            ):
+                or (
+                    record.status is OutboxStatus.CLAIMED
+                    and _expired(record.lease_until, self._now)
+                )
+            ) and record.attempt_count >= policy.max_attempts:
                 self._outbox[message_id] = replace(
                     record,
                     status=OutboxStatus.DEAD_LETTER,
+                    claimed_by=None,
+                    claim_token=None,
+                    lease_until=None,
                     last_error_code="MAX_ATTEMPTS_REACHED",
                     last_error_detail="outbox max_attempts reached before claim",
                     updated_at=self._now,
@@ -313,9 +336,15 @@ class InMemoryOrderPersistence:
                 key=lambda item: (item.available_at, item.created_at, item.message_id),
             )
             if (
-                record.status is OutboxStatus.PENDING and record.attempt_count < policy.max_attempts
+                record.status is OutboxStatus.PENDING
+                and record.attempt_count < policy.max_attempts
+                and record.available_at <= self._now
             )
-            or (record.status is OutboxStatus.CLAIMED and _expired(record.lease_until, self._now))
+            or (
+                record.status is OutboxStatus.CLAIMED
+                and record.attempt_count < policy.max_attempts
+                and _expired(record.lease_until, self._now)
+            )
         ][: policy.batch_size]
         claimed: list[ClaimedMessage] = []
         for record in selected:
@@ -325,6 +354,11 @@ class InMemoryOrderPersistence:
                 record,
                 status=OutboxStatus.CLAIMED,
                 attempt_count=record.attempt_count + 1,
+                claim_max_attempts=policy.max_attempts,
+                claim_initial_retry_delay_ms=policy.initial_retry_delay_ms,
+                claim_max_retry_delay_ms=policy.max_retry_delay_ms,
+                claim_backoff_multiplier=policy.backoff_multiplier,
+                claim_jitter_ratio=policy.jitter_ratio,
                 claimed_by=worker_id,
                 claim_token=token,
                 lease_until=lease_until,
@@ -366,15 +400,26 @@ class InMemoryOrderPersistence:
         if not self._owns_live_claim(record, claim_token):
             return OutboxMutationResult(False, "QQ-STORAGE-7004", "claim token missing or expired")
         assert record is not None
-        status = OutboxStatus.PENDING if failure.retryable else OutboxStatus.DEAD_LETTER
+        max_attempts = record.claim_max_attempts or 1
+        should_retry = failure.retryable and record.attempt_count < max_attempts
+        status = OutboxStatus.PENDING if should_retry else OutboxStatus.DEAD_LETTER
+        available_at = (
+            self._now + timedelta(milliseconds=_retry_delay_ms(record))
+            if should_retry
+            else record.available_at
+        )
         self._outbox[message_id] = replace(
             record,
             status=status,
             claimed_by=None,
             claim_token=None,
             lease_until=None,
-            available_at=self._now,
-            last_error_code=failure.error_code,
+            available_at=available_at,
+            last_error_code=(
+                "MAX_ATTEMPTS_REACHED"
+                if failure.retryable and not should_retry
+                else failure.error_code
+            ),
             last_error_detail=failure.error_detail,
             updated_at=self._now,
         )
@@ -454,6 +499,24 @@ class InMemoryOrderPersistence:
             previous = record.entry_checksum
         return records
 
+    def _persisted_from_journal_records(
+        self, order_id: str, records: list[JournalRecord]
+    ) -> PersistedOrder | None:
+        if not records:
+            return None
+        post_state = records[-1].append.payload.get("post_state")
+        if not isinstance(post_state, Mapping):
+            raise JournalCommitFailed("journal entry is missing committed post_state")
+        current = self._orders.get(order_id)
+        fingerprint = (
+            current.registration_fingerprint
+            if current is not None
+            else str(post_state.get("registration_fingerprint", ""))
+        )
+        if not fingerprint:
+            return None
+        return _persisted_from_state_payload(post_state, fingerprint)
+
     def _owns_live_claim(self, record: OutboxRecord | None, claim_token: Identifier) -> bool:
         return bool(
             record
@@ -467,10 +530,21 @@ class InMemoryOrderPersistence:
 def _require_deadline(deadline_monotonic_ns: int) -> None:
     if not isinstance(deadline_monotonic_ns, int) or deadline_monotonic_ns <= 0:
         raise ValueError("deadline_monotonic_ns is required and must be positive")
+    if deadline_monotonic_ns <= monotonic_ns():
+        raise TimeoutError("deadline_monotonic_ns has expired")
 
 
 def _expired(value: datetime | None, now: datetime) -> bool:
     return value is None or value <= now
+
+
+def _retry_delay_ms(record: OutboxRecord) -> int:
+    initial = record.claim_initial_retry_delay_ms or 10
+    maximum = record.claim_max_retry_delay_ms or initial
+    multiplier = Decimal(record.claim_backoff_multiplier or "1")
+    exponent = max(record.attempt_count - 1, 0)
+    delay = Decimal(initial) * (multiplier**exponent)
+    return int(min(delay, Decimal(maximum)).to_integral_value(rounding=ROUND_CEILING))
 
 
 def _claimed_message(record: OutboxRecord) -> ClaimedMessage:
@@ -487,6 +561,59 @@ def _claimed_message(record: OutboxRecord) -> ClaimedMessage:
         lease_until=record.lease_until,
         attempt_count=record.attempt_count,
     )
+
+
+def _persisted_from_state_payload(
+    payload: Mapping[str, Any], registration_fingerprint: str
+) -> PersistedOrder:
+    registration_payload = cast(Mapping[str, Any], payload["registration"])
+    registration = OrderRegistration(
+        Identifier(str(registration_payload["order_id"])),
+        Identifier(str(registration_payload["intent_id"])),
+        str(registration_payload["client_order_id"]),
+        str(registration_payload["account_id"]),
+        InstrumentId(str(registration_payload["instrument_id"])),
+        registration_payload["side"],
+        registration_payload["position_effect"],
+        registration_payload["order_type"],
+        Quantity(int(registration_payload["quantity"])),
+        Price(str(registration_payload["limit_price"]))
+        if registration_payload["limit_price"] is not None
+        else None,
+        registration_payload["time_in_force"],
+        str(registration_payload["owner_strategy_id"]),
+        str(registration_payload["owner_strategy_version"]),
+        parse_utc(str(registration_payload["registered_at"])),
+    )
+    from quantiqmt.order.domain import FactIdentity, Order, ProcessedFact
+
+    order = Order(
+        Identifier(str(payload["order_id"])),
+        Quantity(int(payload["quantity"])),
+        state=OrderState(str(payload["state"])),
+        cumulative_quantity=Quantity(int(payload["cumulative_quantity"])),
+        version=int(payload["aggregate_version"]),
+        processed_facts={
+            FactIdentity(str(item["namespace"]), str(item["key"])): ProcessedFact(
+                str(item["fingerprint"]),
+                Quantity(int(item["trade_quantity"]))
+                if item.get("trade_quantity") is not None
+                else None,
+            )
+            for item in cast(list[Mapping[str, Any]], payload.get("processed_facts", []))
+        },
+        fact_conflicts={
+            FactIdentity(str(item["namespace"]), str(item["key"])): frozenset(
+                str(value) for value in cast(list[object], item["conflicting_fingerprints"])
+            )
+            for item in cast(list[Mapping[str, Any]], payload.get("fact_conflicts", []))
+        },
+        broker_sequences={
+            str(item["stream"]): int(item["last_observed_sequence"])
+            for item in cast(list[Mapping[str, Any]], payload.get("broker_sequences", []))
+        },
+    )
+    return PersistedOrder(registration, order, registration_fingerprint)
 
 
 def _optional_str(value: object) -> str | None:

@@ -11,12 +11,14 @@ from quantiqmt.order.application.persistence import (
     JournalAppend,
     OrderCommit,
     OrderRegistration,
+    OrderSnapshot,
     PersistedOrder,
     PublishFailure,
     build_order_registered_envelope,
     build_order_status_changed_envelope,
     order_state_payload,
     registration_fingerprint,
+    snapshot_checksum,
 )
 from quantiqmt.order.domain import (
     GuardEvidence,
@@ -33,7 +35,7 @@ INTENT_ID = Identifier("550e8400-e29b-41d4-a716-446655440001")
 JOURNAL_ID_1 = Identifier("550e8400-e29b-41d4-a716-446655440002")
 JOURNAL_ID_2 = Identifier("550e8400-e29b-41d4-a716-446655440003")
 NOW = datetime(2026, 7, 10, 1, 2, 3, tzinfo=UTC)
-DEADLINE = 1
+DEADLINE = 2**63
 
 
 @pytest.fixture(scope="module")
@@ -205,6 +207,65 @@ def test_recovery_paging_and_journal_checksum_chain(registry: SchemaRegistry) ->
     assert rebuilt.persisted_order.registration.intent_id == INTENT_ID
 
 
+def test_recovery_rebuilds_projection_from_journal_post_state(
+    registry: SchemaRegistry,
+) -> None:
+    store = InMemoryOrderPersistence(now=NOW)
+    registered = store.register(registered_commit(registry), deadline_monotonic_ns=DEADLINE)
+    committed = transition_commit(registry, registered.persisted_order)
+    store.save(committed, expected_version=1, deadline_monotonic_ns=DEADLINE)
+    corrupted_projection = PersistedOrder(
+        committed.persisted_order.registration,
+        Order(ORDER_ID, Quantity(100)),
+        committed.persisted_order.registration_fingerprint,
+    )
+    store._orders[ORDER_ID.value] = corrupted_projection
+
+    loaded = store.load_for_recovery(ORDER_ID, deadline_monotonic_ns=DEADLINE)
+    rebuilt = store.rebuild_projection_from_journal(
+        ORDER_ID,
+        expected_journal_head_checksum=store.journal_records[-1].entry_checksum,
+        deadline_monotonic_ns=DEADLINE,
+    )
+
+    assert loaded.persisted_order.order.version == 2
+    assert loaded.persisted_order.order.state is OrderState.RISK_PENDING
+    assert rebuilt.persisted_order.order.version == 2
+    assert store.get(ORDER_ID, deadline_monotonic_ns=DEADLINE).order.version == 2  # type: ignore[union-attr]
+
+
+def test_snapshot_lookup_accepts_valid_older_snapshot_with_later_journal(
+    registry: SchemaRegistry,
+) -> None:
+    store = InMemoryOrderPersistence(now=NOW)
+    registered = store.register(registered_commit(registry), deadline_monotonic_ns=DEADLINE)
+    payload = order_state_payload(registered.persisted_order)
+    store.write(
+        OrderSnapshot(
+            Identifier("550e8400-e29b-41d4-a716-446655440010"),
+            ORDER_ID,
+            1,
+            1,
+            payload,
+            store.journal_records[-1].entry_checksum,
+            snapshot_checksum(payload),
+            NOW,
+        ),
+        deadline_monotonic_ns=DEADLINE,
+    )
+    store.save(
+        transition_commit(registry, registered.persisted_order),
+        expected_version=1,
+        deadline_monotonic_ns=DEADLINE,
+    )
+
+    lookup = store.latest_for_recovery(ORDER_ID, deadline_monotonic_ns=DEADLINE)
+
+    assert lookup.status == "VALID"
+    assert lookup.snapshot is not None
+    assert lookup.snapshot.aggregate_version == 1
+
+
 def test_outbox_claim_publish_reclaim_and_expired_token_fencing(registry: SchemaRegistry) -> None:
     store = InMemoryOrderPersistence(now=NOW)
     store.register(registered_commit(registry), deadline_monotonic_ns=DEADLINE)
@@ -269,3 +330,23 @@ def test_retryable_failure_reaches_max_attempts_before_next_claim(
     assert store.claim("worker-b", policy, deadline_monotonic_ns=DEADLINE) == ()
     assert store.outbox_records[0].status is OutboxStatus.DEAD_LETTER
     assert store.outbox_records[0].last_error_code == "MAX_ATTEMPTS_REACHED"
+
+
+def test_retryable_failure_waits_until_backoff_available_at(
+    registry: SchemaRegistry,
+) -> None:
+    store = InMemoryOrderPersistence(now=NOW)
+    store.register(registered_commit(registry), deadline_monotonic_ns=DEADLINE)
+    policy = ClaimPolicy(10, 1000, 3, 50, 500, "2", "0")
+    claimed = store.claim("worker-a", policy, deadline_monotonic_ns=DEADLINE)[0]
+
+    assert store.release_failed(
+        claimed.message_id,
+        claimed.claim_token,
+        PublishFailure("PUBLISH_FAILED", "temporary backbone outage", retryable=True),
+        deadline_monotonic_ns=DEADLINE,
+    ).applied
+
+    assert store.claim("worker-b", policy, deadline_monotonic_ns=DEADLINE) == ()
+    store.advance(timedelta(milliseconds=50))
+    assert len(store.claim("worker-b", policy, deadline_monotonic_ns=DEADLINE)) == 1

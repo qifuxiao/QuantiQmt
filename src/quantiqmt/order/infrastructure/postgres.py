@@ -7,6 +7,7 @@ import importlib
 import json
 from collections.abc import Coroutine, Mapping
 from datetime import UTC, datetime
+from time import monotonic_ns
 from types import MappingProxyType
 from typing import Any, Literal, cast
 
@@ -57,27 +58,27 @@ class PostgresOrderPersistence:
 
     def apply_migration(self, sql: str, *, deadline_monotonic_ns: int) -> None:
         _require_deadline(deadline_monotonic_ns)
-        self._run(self._apply_migration(sql))
+        self._run(self._apply_migration(sql), deadline_monotonic_ns)
 
     def register(self, commit: OrderCommit, *, deadline_monotonic_ns: int) -> RegisterOutcome:
         _require_deadline(deadline_monotonic_ns)
-        return self._run(self._register(commit))
+        return self._run(self._register(commit), deadline_monotonic_ns)
 
     def get(self, order_id: Identifier, *, deadline_monotonic_ns: int) -> PersistedOrder | None:
         _require_deadline(deadline_monotonic_ns)
-        return self._run(self._get_by("order_id", order_id.value))
+        return self._run(self._get_by("order_id", order_id.value), deadline_monotonic_ns)
 
     def get_by_intent(
         self, intent_id: Identifier, *, deadline_monotonic_ns: int
     ) -> PersistedOrder | None:
         _require_deadline(deadline_monotonic_ns)
-        return self._run(self._get_by("intent_id", intent_id.value))
+        return self._run(self._get_by("intent_id", intent_id.value), deadline_monotonic_ns)
 
     def get_by_client_order_id(
         self, client_order_id: str, *, deadline_monotonic_ns: int
     ) -> PersistedOrder | None:
         _require_deadline(deadline_monotonic_ns)
-        return self._run(self._get_by("client_order_id", client_order_id))
+        return self._run(self._get_by("client_order_id", client_order_id), deadline_monotonic_ns)
 
     def save(
         self,
@@ -87,13 +88,13 @@ class PostgresOrderPersistence:
         deadline_monotonic_ns: int,
     ) -> PersistedOrder:
         _require_deadline(deadline_monotonic_ns)
-        return self._run(self._save(commit, expected_version))
+        return self._run(self._save(commit, expected_version), deadline_monotonic_ns)
 
     def load_for_recovery(
         self, order_id: Identifier, *, deadline_monotonic_ns: int
     ) -> RecoveryLoad:
         _require_deadline(deadline_monotonic_ns)
-        return self._run(self._load_for_recovery(order_id))
+        return self._run(self._load_for_recovery(order_id), deadline_monotonic_ns)
 
     def list_recovery_order_ids(
         self,
@@ -104,7 +105,10 @@ class PostgresOrderPersistence:
         deadline_monotonic_ns: int,
     ) -> RecoveryPage:
         _require_deadline(deadline_monotonic_ns)
-        return self._run(self._list_recovery_order_ids(scope, page_size, page_token))
+        return self._run(
+            self._list_recovery_order_ids(scope, page_size, page_token),
+            deadline_monotonic_ns,
+        )
 
     def rebuild_projection_from_journal(
         self,
@@ -115,30 +119,31 @@ class PostgresOrderPersistence:
     ) -> RecoveryLoad:
         _require_deadline(deadline_monotonic_ns)
         return self._run(
-            self._rebuild_projection_from_journal(order_id, expected_journal_head_checksum)
+            self._rebuild_projection_from_journal(order_id, expected_journal_head_checksum),
+            deadline_monotonic_ns,
         )
 
     def write(self, snapshot: OrderSnapshot, *, deadline_monotonic_ns: int) -> None:
         _require_deadline(deadline_monotonic_ns)
-        self._run(self._write_snapshot(snapshot))
+        self._run(self._write_snapshot(snapshot), deadline_monotonic_ns)
 
     def latest_for_recovery(
         self, order_id: Identifier, *, deadline_monotonic_ns: int
     ) -> SnapshotLookup:
         _require_deadline(deadline_monotonic_ns)
-        return self._run(self._latest_for_recovery(order_id))
+        return self._run(self._latest_for_recovery(order_id), deadline_monotonic_ns)
 
     def claim(
         self, worker_id: str, policy: ClaimPolicy, *, deadline_monotonic_ns: int
     ) -> tuple[ClaimedMessage, ...]:
         _require_deadline(deadline_monotonic_ns)
-        return self._run(self._claim(worker_id, policy))
+        return self._run(self._claim(worker_id, policy), deadline_monotonic_ns)
 
     def mark_published(
         self, message_id: str, claim_token: Identifier, *, deadline_monotonic_ns: int
     ) -> OutboxMutationResult:
         _require_deadline(deadline_monotonic_ns)
-        return self._run(self._mark_published(message_id, claim_token))
+        return self._run(self._mark_published(message_id, claim_token), deadline_monotonic_ns)
 
     def release_failed(
         self,
@@ -149,7 +154,9 @@ class PostgresOrderPersistence:
         deadline_monotonic_ns: int,
     ) -> OutboxMutationResult:
         _require_deadline(deadline_monotonic_ns)
-        return self._run(self._release_failed(message_id, claim_token, failure))
+        return self._run(
+            self._release_failed(message_id, claim_token, failure), deadline_monotonic_ns
+        )
 
     def renew(
         self,
@@ -160,13 +167,14 @@ class PostgresOrderPersistence:
         deadline_monotonic_ns: int,
     ) -> OutboxMutationResult:
         _require_deadline(deadline_monotonic_ns)
-        return self._run(self._renew(message_id, claim_token, policy))
+        return self._run(self._renew(message_id, claim_token, policy), deadline_monotonic_ns)
 
-    def _run[T](self, awaitable: Coroutine[Any, Any, T]) -> T:
+    def _run[T](self, awaitable: Coroutine[Any, Any, T], deadline_monotonic_ns: int) -> T:
+        timeout_seconds = _deadline_timeout_seconds(deadline_monotonic_ns)
         try:
             asyncio.get_running_loop()
         except RuntimeError:
-            return asyncio.run(awaitable)
+            return asyncio.run(asyncio.wait_for(awaitable, timeout=timeout_seconds))
         raise RuntimeError("PostgresOrderPersistence sync facade cannot run inside an event loop")
 
     async def _connect(self) -> Any:
@@ -194,6 +202,7 @@ class PostgresOrderPersistence:
             await connection.close()
 
     async def _register(self, commit: OrderCommit) -> RegisterOutcome:
+        _validate_registration_commit(commit)
         connection = await self._connect()
         try:
             async with connection.transaction():
@@ -245,6 +254,8 @@ class PostgresOrderPersistence:
             await connection.close()
 
     async def _save(self, commit: OrderCommit, expected_version: int) -> PersistedOrder:
+        if commit.journal.event_type != "ORDER_TRANSITION_APPLIED":
+            raise JournalCommitFailed("save requires ORDER_TRANSITION_APPLIED journal entry")
         connection = await self._connect()
         try:
             async with connection.transaction():
@@ -286,8 +297,8 @@ class PostgresOrderPersistence:
     async def _load_for_recovery(self, order_id: Identifier) -> RecoveryLoad:
         connection = await self._connect()
         try:
-            await self._verify_journal_chain(connection, order_id.value)
-            persisted = await self._fetch_by(connection, "order_id", order_id.value)
+            records = await self._verify_journal_chain(connection, order_id.value)
+            persisted = await self._persisted_from_journal_records(connection, records)
             if persisted is None:
                 raise JournalCommitFailed("order projection is missing")
             return RecoveryLoad(persisted, source="FULL_JOURNAL")
@@ -364,9 +375,11 @@ class PostgresOrderPersistence:
                 and expected_journal_head_checksum != head
             ):
                 raise OrderVersionConflict("journal head changed during projection rebuild")
-            persisted = await self._fetch_by(connection, "order_id", order_id.value)
+            persisted = await self._persisted_from_journal_records(connection, records)
             if persisted is None:
-                raise JournalCommitFailed("order projection is missing")
+                raise JournalCommitFailed("cannot rebuild without committed post-state payload")
+            async with connection.transaction():
+                await self._update_order_projection(connection, persisted)
             return RecoveryLoad(persisted, source="FULL_JOURNAL")
         finally:
             await connection.close()
@@ -413,7 +426,9 @@ class PostgresOrderPersistence:
             if row is None:
                 return SnapshotLookup(None, "ABSENT")
             snapshot = _snapshot_from_row(row)
-            head = await self._latest_journal_checksum(connection, order_id.value)
+            head = await self._journal_checksum_at_version(
+                connection, order_id.value, snapshot.aggregate_version
+            )
             if (
                 snapshot_checksum(snapshot.state_payload) != snapshot.snapshot_checksum
                 or head != snapshot.journal_head_checksum
@@ -440,11 +455,15 @@ class PostgresOrderPersistence:
                     """
                     UPDATE outbox_messages
                     SET status = 'DEAD_LETTER',
+                        claimed_by = NULL,
+                        claim_token = NULL,
+                        lease_until = NULL,
                         last_error_code = 'MAX_ATTEMPTS_REACHED',
                         last_error_detail = 'outbox max_attempts reached before claim',
                         updated_at = transaction_timestamp()
-                    WHERE status = 'PENDING'
+                    WHERE status IN ('PENDING', 'CLAIMED')
                       AND attempt_count >= $1
+                      AND (status = 'PENDING' OR lease_until <= transaction_timestamp())
                     """,
                     policy.max_attempts,
                 )
@@ -453,8 +472,16 @@ class PostgresOrderPersistence:
                     WITH selected AS (
                         SELECT message_id
                         FROM outbox_messages
-                        WHERE (status = 'PENDING' AND attempt_count < $4)
-                           OR (status = 'CLAIMED' AND lease_until <= transaction_timestamp())
+                        WHERE (
+                            status = 'PENDING'
+                            AND attempt_count < $4
+                            AND available_at <= transaction_timestamp()
+                        )
+                           OR (
+                               status = 'CLAIMED'
+                               AND attempt_count < $4
+                               AND lease_until <= transaction_timestamp()
+                           )
                         ORDER BY available_at, created_at, message_id
                         LIMIT $1
                         FOR UPDATE SKIP LOCKED
@@ -462,6 +489,11 @@ class PostgresOrderPersistence:
                     UPDATE outbox_messages AS outbox
                     SET status = 'CLAIMED',
                         attempt_count = outbox.attempt_count + 1,
+                        claim_max_attempts = $4,
+                        claim_initial_retry_delay_ms = $5,
+                        claim_max_retry_delay_ms = $6,
+                        claim_backoff_multiplier = $7,
+                        claim_jitter_ratio = $8,
                         claimed_by = $2,
                         claim_token = gen_random_uuid(),
                         lease_until = transaction_timestamp()
@@ -475,6 +507,10 @@ class PostgresOrderPersistence:
                     worker_id,
                     str(policy.lease_duration_ms),
                     policy.max_attempts,
+                    policy.initial_retry_delay_ms,
+                    policy.max_retry_delay_ms,
+                    policy.backoff_multiplier,
+                    policy.jitter_ratio,
                 )
                 return tuple(_claimed_from_row(row) for row in rows)
         finally:
@@ -512,27 +548,53 @@ class PostgresOrderPersistence:
     ) -> OutboxMutationResult:
         connection = await self._connect()
         try:
-            status = "PENDING" if failure.retryable else "DEAD_LETTER"
             row = await connection.fetchrow(
                 """
                 UPDATE outbox_messages
-                SET status = $3,
+                SET status = CASE
+                        WHEN $3::boolean AND attempt_count < claim_max_attempts THEN 'PENDING'
+                        ELSE 'DEAD_LETTER'
+                    END,
                     claimed_by = NULL,
                     claim_token = NULL,
                     lease_until = NULL,
-                    available_at = transaction_timestamp(),
-                    last_error_code = $4,
+                    available_at = CASE
+                        WHEN $3::boolean AND attempt_count < claim_max_attempts
+                        THEN transaction_timestamp()
+                            + (
+                                LEAST(
+                                    claim_max_retry_delay_ms,
+                                    CEIL(
+                                        claim_initial_retry_delay_ms
+                                        * POWER(
+                                            claim_backoff_multiplier::numeric,
+                                            GREATEST(attempt_count - 1, 0)
+                                        )
+                                    )::integer
+                                )::text || ' milliseconds'
+                            )::interval
+                        ELSE available_at
+                    END,
+                    last_error_code = CASE
+                        WHEN $3::boolean AND attempt_count >= claim_max_attempts
+                        THEN 'MAX_ATTEMPTS_REACHED'
+                        ELSE $4
+                    END,
                     last_error_detail = $5,
                     updated_at = transaction_timestamp()
                 WHERE message_id = $1
                   AND claim_token = $2::uuid
                   AND status = 'CLAIMED'
                   AND lease_until > transaction_timestamp()
+                  AND claim_max_attempts IS NOT NULL
+                  AND claim_initial_retry_delay_ms IS NOT NULL
+                  AND claim_max_retry_delay_ms IS NOT NULL
+                  AND claim_backoff_multiplier IS NOT NULL
                 RETURNING message_id
                 """,
                 message_id,
                 claim_token.value,
-                status,
+                failure.retryable,
                 failure.error_code,
                 failure.error_detail,
             )
@@ -593,6 +655,91 @@ class PostgresOrderPersistence:
             order_id,
         )
         return str(row["entry_checksum"]) if row is not None else None
+
+    async def _journal_checksum_at_version(
+        self, connection: Any, order_id: str, aggregate_version: int
+    ) -> str | None:
+        row = await connection.fetchrow(
+            """
+            SELECT entry_checksum
+            FROM order_journal
+            WHERE order_id = $1::uuid AND aggregate_version = $2
+            """,
+            order_id,
+            aggregate_version,
+        )
+        return str(row["entry_checksum"]) if row is not None else None
+
+    async def _persisted_from_journal_records(
+        self, connection: Any, records: list[Any]
+    ) -> PersistedOrder | None:
+        if not records:
+            return None
+        last = records[-1]
+        payload = cast(Mapping[str, Any], last["payload"])
+        post_state = payload.get("post_state")
+        if not isinstance(post_state, Mapping):
+            raise JournalCommitFailed("journal entry is missing committed post_state")
+        current = await self._fetch_by(connection, "order_id", str(last["order_id"]))
+        fingerprint = (
+            current.registration_fingerprint
+            if current is not None
+            else str(post_state.get("registration_fingerprint", ""))
+        )
+        if not fingerprint:
+            return None
+        return _persisted_from_state_payload(post_state, fingerprint)
+
+    async def _update_order_projection(self, connection: Any, persisted: PersistedOrder) -> None:
+        registration = persisted.registration
+        updated = await connection.execute(
+            """
+            UPDATE orders
+            SET client_order_id = $2,
+                registration_fingerprint = $3,
+                account_id = $4,
+                instrument_id = $5,
+                owner_strategy_id = $6,
+                owner_strategy_version = $7,
+                order_type = $8,
+                side = $9,
+                position_effect = $10,
+                time_in_force = $11,
+                quantity = $12,
+                limit_price = $13,
+                state = $14,
+                cumulative_quantity = $15,
+                aggregate_version = $16,
+                state_payload = $17,
+                registered_at = $18,
+                updated_at = transaction_timestamp()
+            WHERE order_id = $1::uuid
+            """,
+            registration.order_id.value,
+            registration.client_order_id,
+            persisted.registration_fingerprint,
+            registration.account_id,
+            registration.instrument_id.value,
+            registration.owner_strategy_id,
+            registration.owner_strategy_version,
+            registration.order_type,
+            registration.side,
+            registration.position_effect,
+            registration.time_in_force,
+            registration.quantity.value,
+            (
+                registration.limit_price.to_primitive()
+                if registration.limit_price is not None
+                else None
+            ),
+            persisted.order.state.value,
+            persisted.order.cumulative_quantity.value,
+            persisted.order.version,
+            _json(persisted),
+            registration.registered_at,
+        )
+        if updated != "UPDATE 1":
+            raise JournalCommitFailed("order projection is missing")
 
     async def _insert_order(self, connection: Any, persisted: PersistedOrder) -> None:
         registration = persisted.registration
@@ -723,6 +870,12 @@ class PostgresOrderPersistence:
 
 def _persisted_from_row(row: Any) -> PersistedOrder:
     payload = cast(Mapping[str, Any], row["state_payload"])
+    return _persisted_from_state_payload(payload, str(row["registration_fingerprint"]))
+
+
+def _persisted_from_state_payload(
+    payload: Mapping[str, Any], registration_fingerprint: str
+) -> PersistedOrder:
     registration_payload = cast(Mapping[str, Any], payload["registration"])
     registration = OrderRegistration(
         Identifier(str(registration_payload["order_id"])),
@@ -752,7 +905,7 @@ def _persisted_from_row(row: Any) -> PersistedOrder:
         fact_conflicts=_fact_conflicts(payload.get("fact_conflicts", [])),
         broker_sequences=_broker_sequences(payload.get("broker_sequences", [])),
     )
-    return PersistedOrder(registration, order, str(row["registration_fingerprint"]))
+    return PersistedOrder(registration, order, registration_fingerprint)
 
 
 def _processed_facts(values: object) -> dict[FactIdentity, ProcessedFact]:
@@ -815,6 +968,20 @@ def _mutation_result(applied: bool) -> OutboxMutationResult:
     return OutboxMutationResult(False, "QQ-STORAGE-7004", "claim token missing or expired")
 
 
+def _validate_registration_commit(commit: OrderCommit) -> None:
+    if commit.persisted_order.order.version != 1 or commit.journal.aggregate_version != 1:
+        raise JournalCommitFailed("register requires aggregate version 1")
+    if commit.journal.event_type != "ORDER_REGISTERED":
+        raise JournalCommitFailed("register requires ORDER_REGISTERED journal entry")
+    if not commit.outbox_messages:
+        raise JournalCommitFailed("register requires at least one outbox message")
+    if not any(
+        message.to_primitive().get("message_type") == "oms.order_registered.v1"
+        for message in commit.outbox_messages
+    ):
+        raise JournalCommitFailed("register requires oms.order_registered.v1 outbox message")
+
+
 def _json(persisted: PersistedOrder) -> Mapping[str, object]:
     from quantiqmt.order.application.persistence.serialization import order_state_payload
 
@@ -875,6 +1042,13 @@ def _optional_str(value: object) -> str | None:
 def _require_deadline(deadline_monotonic_ns: int) -> None:
     if not isinstance(deadline_monotonic_ns, int) or deadline_monotonic_ns <= 0:
         raise ValueError("deadline_monotonic_ns is required and must be positive")
+    if deadline_monotonic_ns <= monotonic_ns():
+        raise TimeoutError("deadline_monotonic_ns has expired")
+
+
+def _deadline_timeout_seconds(deadline_monotonic_ns: int) -> float:
+    _require_deadline(deadline_monotonic_ns)
+    return max((deadline_monotonic_ns - monotonic_ns()) / 1_000_000_000, 0.001)
 
 
 def _is_unique_violation(exc: Exception) -> bool:

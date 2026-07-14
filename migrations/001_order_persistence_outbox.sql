@@ -105,6 +105,11 @@ CREATE TABLE IF NOT EXISTS outbox_messages (
     status varchar(16) NOT NULL,
     attempt_count integer NOT NULL DEFAULT 0,
     available_at timestamptz NOT NULL,
+    claim_max_attempts integer,
+    claim_initial_retry_delay_ms integer,
+    claim_max_retry_delay_ms integer,
+    claim_backoff_multiplier varchar(32),
+    claim_jitter_ratio varchar(32),
     claimed_by varchar(128),
     claim_token uuid,
     lease_until timestamptz,
@@ -120,6 +125,15 @@ CREATE TABLE IF NOT EXISTS outbox_messages (
         CHECK (aggregate_version IS NULL OR aggregate_version >= 1),
     CONSTRAINT outbox_status_enum CHECK (status IN ('PENDING', 'CLAIMED', 'PUBLISHED', 'DEAD_LETTER')),
     CONSTRAINT outbox_attempt_count_non_negative CHECK (attempt_count >= 0),
+    CONSTRAINT outbox_claim_policy_bounds CHECK (
+        claim_max_attempts IS NULL OR (
+            claim_max_attempts BETWEEN 1 AND 100
+            AND claim_initial_retry_delay_ms >= 10
+            AND claim_max_retry_delay_ms >= claim_initial_retry_delay_ms
+            AND claim_backoff_multiplier IS NOT NULL
+            AND claim_jitter_ratio IS NOT NULL
+        )
+    ),
     CONSTRAINT outbox_pending_fields
         CHECK (status <> 'PENDING' OR (
             claimed_by IS NULL AND claim_token IS NULL AND lease_until IS NULL AND published_at IS NULL
@@ -142,3 +156,30 @@ CREATE INDEX IF NOT EXISTS outbox_claim_scan_idx
     ON outbox_messages (status, available_at, created_at, message_id);
 CREATE INDEX IF NOT EXISTS outbox_aggregate_audit_idx
     ON outbox_messages (aggregate_id, aggregate_version);
+
+ALTER TABLE outbox_messages
+    ADD COLUMN IF NOT EXISTS claim_max_attempts integer,
+    ADD COLUMN IF NOT EXISTS claim_initial_retry_delay_ms integer,
+    ADD COLUMN IF NOT EXISTS claim_max_retry_delay_ms integer,
+    ADD COLUMN IF NOT EXISTS claim_backoff_multiplier varchar(32),
+    ADD COLUMN IF NOT EXISTS claim_jitter_ratio varchar(32);
+
+CREATE OR REPLACE FUNCTION reject_order_journal_mutation()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    RAISE EXCEPTION 'order_journal is append-only'
+        USING ERRCODE = 'integrity_constraint_violation';
+END;
+$$;
+
+DROP TRIGGER IF EXISTS order_journal_append_only_update ON order_journal;
+CREATE TRIGGER order_journal_append_only_update
+BEFORE UPDATE ON order_journal
+FOR EACH ROW EXECUTE FUNCTION reject_order_journal_mutation();
+
+DROP TRIGGER IF EXISTS order_journal_append_only_delete ON order_journal;
+CREATE TRIGGER order_journal_append_only_delete
+BEFORE DELETE ON order_journal
+FOR EACH ROW EXECUTE FUNCTION reject_order_journal_mutation();
