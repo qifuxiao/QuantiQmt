@@ -339,7 +339,11 @@ class PostgresOrderPersistence:
                 rows = await connection.fetch(
                     """
                     SELECT order_id::text AS order_id
-                    FROM orders
+                    FROM (
+                        SELECT order_id FROM orders
+                        UNION
+                        SELECT order_id FROM order_journal
+                    ) AS recovery_ids
                     WHERE ($1::uuid IS NULL OR order_id > $1::uuid)
                     ORDER BY order_id
                     LIMIT $2
@@ -350,11 +354,16 @@ class PostgresOrderPersistence:
             else:
                 rows = await connection.fetch(
                     """
-                    SELECT order_id::text AS order_id
-                    FROM orders
-                    WHERE ($1::uuid IS NULL OR order_id > $1::uuid)
-                      AND state = ANY($3::text[])
-                    ORDER BY order_id
+                    SELECT recovery_ids.order_id::text AS order_id
+                    FROM (
+                        SELECT order_id FROM orders
+                        UNION
+                        SELECT order_id FROM order_journal
+                    ) AS recovery_ids
+                    LEFT JOIN orders ON orders.order_id = recovery_ids.order_id
+                    WHERE ($1::uuid IS NULL OR recovery_ids.order_id > $1::uuid)
+                      AND (orders.order_id IS NULL OR orders.state = ANY($3::text[]))
+                    ORDER BY recovery_ids.order_id
                     LIMIT $2
                     """,
                     page_token,

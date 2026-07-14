@@ -54,6 +54,22 @@ class OutboxStatus(StrEnum):
     DEAD_LETTER = "DEAD_LETTER"
 
 
+_ACTIVE_OR_UNKNOWN_RECOVERY_STATES = frozenset(
+    {
+        OrderState.REGISTERED,
+        OrderState.RISK_PENDING,
+        OrderState.APPROVED,
+        OrderState.SUBMITTING,
+        OrderState.SUBMIT_UNKNOWN,
+        OrderState.SUBMITTED,
+        OrderState.PARTIALLY_FILLED,
+        OrderState.CANCEL_PENDING,
+        OrderState.CANCEL_UNKNOWN,
+        OrderState.SUSPENDED,
+    }
+)
+
+
 @dataclass(frozen=True, slots=True)
 class JournalRecord:
     append: JournalAppend
@@ -223,24 +239,13 @@ class InMemoryOrderPersistence:
         _require_deadline(deadline_monotonic_ns)
         if not 1 <= page_size <= 1000:
             raise ValueError("page_size must be between 1 and 1000")
-        ids = sorted(self._orders)
+        ids = sorted(set(self._orders) | set(self._journal))
         if scope == "ACTIVE_OR_UNKNOWN":
             ids = [
                 order_id
                 for order_id in ids
-                if self._orders[order_id].order.state
-                in {
-                    OrderState.REGISTERED,
-                    OrderState.RISK_PENDING,
-                    OrderState.APPROVED,
-                    OrderState.SUBMITTING,
-                    OrderState.SUBMIT_UNKNOWN,
-                    OrderState.SUBMITTED,
-                    OrderState.PARTIALLY_FILLED,
-                    OrderState.CANCEL_PENDING,
-                    OrderState.CANCEL_UNKNOWN,
-                    OrderState.SUSPENDED,
-                }
+                if order_id not in self._orders
+                or self._orders[order_id].order.state in _ACTIVE_OR_UNKNOWN_RECOVERY_STATES
             ]
         start = 0 if page_token is None else ids.index(page_token) + 1
         page = ids[start : start + page_size]

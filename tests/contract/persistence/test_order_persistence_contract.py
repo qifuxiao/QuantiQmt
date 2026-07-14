@@ -237,6 +237,18 @@ def test_recovery_rebuilds_projection_from_journal_post_state(
     assert store.get(ORDER_ID, deadline_monotonic_ns=DEADLINE).order.version == 2  # type: ignore[union-attr]
 
     del store._orders[ORDER_ID.value]
+    journal_only_page = store.list_recovery_order_ids(
+        scope="ALL", page_size=10, page_token=None, deadline_monotonic_ns=DEADLINE
+    )
+    journal_only_active_page = store.list_recovery_order_ids(
+        scope="ACTIVE_OR_UNKNOWN",
+        page_size=10,
+        page_token=None,
+        deadline_monotonic_ns=DEADLINE,
+    )
+    assert ORDER_ID in journal_only_page.order_ids
+    assert ORDER_ID in journal_only_active_page.order_ids
+
     missing_rebuilt = store.rebuild_projection_from_journal(
         ORDER_ID,
         expected_journal_head_checksum=store.journal_records[-1].entry_checksum,

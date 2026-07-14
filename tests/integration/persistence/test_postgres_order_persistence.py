@@ -152,8 +152,21 @@ def test_postgres_rebuilds_corrupted_projection_from_journal(
     assert stored.order.version == 2
 
     asyncio.run(_delete_order_projection_bypassing_fk(ORDER_ID.value))
+    journal_only_page = postgres_store.list_recovery_order_ids(
+        scope="ALL", page_size=10, page_token=None, deadline_monotonic_ns=DEADLINE
+    )
+    journal_only_active_page = postgres_store.list_recovery_order_ids(
+        scope="ACTIVE_OR_UNKNOWN",
+        page_size=10,
+        page_token=None,
+        deadline_monotonic_ns=DEADLINE,
+    )
+    assert ORDER_ID in journal_only_page.order_ids
+    assert ORDER_ID in journal_only_active_page.order_ids
+
+    recovered_order_id = journal_only_page.order_ids[0]
     missing_rebuilt = postgres_store.rebuild_projection_from_journal(
-        ORDER_ID,
+        recovered_order_id,
         expected_journal_head_checksum=asyncio.run(_journal_head_checksum(ORDER_ID.value)),
         deadline_monotonic_ns=DEADLINE,
     )
