@@ -128,10 +128,15 @@ CREATE TABLE IF NOT EXISTS outbox_messages (
     CONSTRAINT outbox_claim_policy_bounds CHECK (
         claim_max_attempts IS NULL OR (
             claim_max_attempts BETWEEN 1 AND 100
-            AND claim_initial_retry_delay_ms >= 10
+            AND claim_initial_retry_delay_ms BETWEEN 10 AND 60000
+            AND claim_max_retry_delay_ms BETWEEN 10 AND 3600000
             AND claim_max_retry_delay_ms >= claim_initial_retry_delay_ms
-            AND claim_backoff_multiplier IS NOT NULL
-            AND claim_jitter_ratio IS NOT NULL
+            AND claim_backoff_multiplier ~ '^[0-9]+(\.[0-9]+)?$'
+            AND claim_backoff_multiplier::numeric > 1
+            AND claim_backoff_multiplier::numeric <= 10
+            AND claim_jitter_ratio ~ '^[0-9]+(\.[0-9]+)?$'
+            AND claim_jitter_ratio::numeric >= 0
+            AND claim_jitter_ratio::numeric <= 1
         )
     ),
     CONSTRAINT outbox_pending_fields

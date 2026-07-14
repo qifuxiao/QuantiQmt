@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
+from decimal import Decimal, InvalidOperation
 from types import MappingProxyType
 from typing import Literal
 
@@ -217,11 +218,18 @@ class ClaimPolicy:
             raise ValueError("lease_duration_ms must be between 1000 and 300000")
         if not 1 <= self.max_attempts <= 100:
             raise ValueError("max_attempts must be between 1 and 100")
-        if (
-            self.initial_retry_delay_ms < 10
-            or self.max_retry_delay_ms < self.initial_retry_delay_ms
-        ):
+        if not 10 <= self.initial_retry_delay_ms <= 60000:
+            raise ValueError("initial_retry_delay_ms must be between 10 and 60000")
+        if not 10 <= self.max_retry_delay_ms <= 3600000:
+            raise ValueError("max_retry_delay_ms must be between 10 and 3600000")
+        if self.max_retry_delay_ms < self.initial_retry_delay_ms:
             raise ValueError("retry delay bounds are invalid")
+        multiplier = _decimal_config(self.backoff_multiplier, "backoff_multiplier")
+        if not Decimal("1") < multiplier <= Decimal("10"):
+            raise ValueError("backoff_multiplier must be > 1 and <= 10")
+        jitter = _decimal_config(self.jitter_ratio, "jitter_ratio")
+        if not Decimal("0") <= jitter <= Decimal("1"):
+            raise ValueError("jitter_ratio must be between 0 and 1")
 
 
 @dataclass(frozen=True, slots=True)
@@ -278,6 +286,16 @@ def _validate_registration_common(value: OrderRegistration | OrderRegistrationDr
 def _require_sha256_hex(value: str, field: str) -> None:
     if len(value) != 64 or any(ch not in "0123456789abcdef" for ch in value):
         raise ValueError(f"{field} must be lowercase sha256 hex")
+
+
+def _decimal_config(value: str, field: str) -> Decimal:
+    try:
+        decimal = Decimal(value)
+    except InvalidOperation as exc:
+        raise ValueError(f"{field} must be a decimal string") from exc
+    if not decimal.is_finite():
+        raise ValueError(f"{field} must be finite")
+    return decimal
 
 
 def _freeze_json(value: object) -> JsonValue:

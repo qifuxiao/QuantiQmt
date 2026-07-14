@@ -36,6 +36,7 @@ from quantiqmt.order.application.persistence.model import (
 from quantiqmt.order.application.persistence.serialization import (
     canonical_json_bytes,
     journal_checksum,
+    journal_with_registration_fingerprint,
     snapshot_checksum,
 )
 from quantiqmt.order.domain import (
@@ -226,7 +227,12 @@ class PostgresOrderPersistence:
                 if previous is not None:
                     raise UniqueIdentifierCollision("order_id already exists without intent replay")
                 await self._insert_order(connection, commit.persisted_order)
-                await self._insert_journal(connection, commit.journal, None)
+                await self._insert_journal(
+                    connection,
+                    commit.journal,
+                    None,
+                    commit.persisted_order.registration_fingerprint,
+                )
                 await self._insert_outbox(connection, commit)
                 return RegisterOutcome(commit.persisted_order, created=True)
         except Exception as exc:
@@ -284,7 +290,12 @@ class PostgresOrderPersistence:
                     raise OrderVersionConflict("expected version does not match stored projection")
                 if commit.persisted_order.order.version != expected_version + 1:
                     raise JournalCommitFailed("commit version must equal expected_version + 1")
-                await self._insert_journal(connection, commit.journal, previous)
+                await self._insert_journal(
+                    connection,
+                    commit.journal,
+                    previous,
+                    commit.persisted_order.registration_fingerprint,
+                )
                 await self._insert_outbox(connection, commit)
                 return commit.persisted_order
         except Exception as exc:
@@ -429,9 +440,8 @@ class PostgresOrderPersistence:
             head = await self._journal_checksum_at_version(
                 connection, order_id.value, snapshot.aggregate_version
             )
-            if (
-                snapshot_checksum(snapshot.state_payload) != snapshot.snapshot_checksum
-                or head != snapshot.journal_head_checksum
+            if snapshot_checksum(snapshot) != snapshot.snapshot_checksum or (
+                head != snapshot.journal_head_checksum
             ):
                 return SnapshotLookup(
                     None,
@@ -570,6 +580,7 @@ class PostgresOrderPersistence:
                                             claim_backoff_multiplier::numeric,
                                             GREATEST(attempt_count - 1, 0)
                                         )
+                                        * (1 + claim_jitter_ratio::numeric)
                                     )::integer
                                 )::text || ' milliseconds'
                             )::interval
@@ -590,6 +601,7 @@ class PostgresOrderPersistence:
                   AND claim_initial_retry_delay_ms IS NOT NULL
                   AND claim_max_retry_delay_ms IS NOT NULL
                   AND claim_backoff_multiplier IS NOT NULL
+                  AND claim_jitter_ratio IS NOT NULL
                 RETURNING message_id
                 """,
                 message_id,
@@ -680,42 +692,48 @@ class PostgresOrderPersistence:
         post_state = payload.get("post_state")
         if not isinstance(post_state, Mapping):
             raise JournalCommitFailed("journal entry is missing committed post_state")
-        current = await self._fetch_by(connection, "order_id", str(last["order_id"]))
-        fingerprint = (
-            current.registration_fingerprint
-            if current is not None
-            else str(post_state.get("registration_fingerprint", ""))
-        )
+        fingerprint = str(post_state.get("registration_fingerprint", ""))
         if not fingerprint:
             return None
         return _persisted_from_state_payload(post_state, fingerprint)
 
     async def _update_order_projection(self, connection: Any, persisted: PersistedOrder) -> None:
         registration = persisted.registration
-        updated = await connection.execute(
+        await connection.execute(
             """
-            UPDATE orders
-            SET client_order_id = $2,
-                registration_fingerprint = $3,
-                account_id = $4,
-                instrument_id = $5,
-                owner_strategy_id = $6,
-                owner_strategy_version = $7,
-                order_type = $8,
-                side = $9,
-                position_effect = $10,
-                time_in_force = $11,
-                quantity = $12,
-                limit_price = $13,
-                state = $14,
-                cumulative_quantity = $15,
-                aggregate_version = $16,
-                state_payload = $17,
-                registered_at = $18,
+            INSERT INTO orders (
+                order_id, intent_id, client_order_id, registration_fingerprint,
+                account_id, instrument_id, owner_strategy_id, owner_strategy_version,
+                order_type, side, position_effect, time_in_force, quantity, limit_price,
+                state, cumulative_quantity, aggregate_version, state_payload,
+                registered_at, updated_at
+            )
+            VALUES (
+                $1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, $10,
+                $11, $12, $13, $14, $15, $16, $17, $18, $19, transaction_timestamp()
+            )
+            ON CONFLICT (order_id) DO UPDATE
+            SET client_order_id = EXCLUDED.client_order_id,
+                registration_fingerprint = EXCLUDED.registration_fingerprint,
+                account_id = EXCLUDED.account_id,
+                instrument_id = EXCLUDED.instrument_id,
+                owner_strategy_id = EXCLUDED.owner_strategy_id,
+                owner_strategy_version = EXCLUDED.owner_strategy_version,
+                order_type = EXCLUDED.order_type,
+                side = EXCLUDED.side,
+                position_effect = EXCLUDED.position_effect,
+                time_in_force = EXCLUDED.time_in_force,
+                quantity = EXCLUDED.quantity,
+                limit_price = EXCLUDED.limit_price,
+                state = EXCLUDED.state,
+                cumulative_quantity = EXCLUDED.cumulative_quantity,
+                aggregate_version = EXCLUDED.aggregate_version,
+                state_payload = EXCLUDED.state_payload,
+                registered_at = EXCLUDED.registered_at,
                 updated_at = transaction_timestamp()
-            WHERE order_id = $1::uuid
             """,
             registration.order_id.value,
+            registration.intent_id.value,
             registration.client_order_id,
             persisted.registration_fingerprint,
             registration.account_id,
@@ -738,8 +756,6 @@ class PostgresOrderPersistence:
             _json(persisted),
             registration.registered_at,
         )
-        if updated != "UPDATE 1":
-            raise JournalCommitFailed("order projection is missing")
 
     async def _insert_order(self, connection: Any, persisted: PersistedOrder) -> None:
         registration = persisted.registration
@@ -784,8 +800,13 @@ class PostgresOrderPersistence:
         )
 
     async def _insert_journal(
-        self, connection: Any, append: JournalAppend, previous_entry_checksum: str | None
+        self,
+        connection: Any,
+        append: JournalAppend,
+        previous_entry_checksum: str | None,
+        registration_fingerprint: str,
     ) -> None:
+        append = journal_with_registration_fingerprint(append, registration_fingerprint)
         await connection.execute(
             """
             INSERT INTO order_journal (

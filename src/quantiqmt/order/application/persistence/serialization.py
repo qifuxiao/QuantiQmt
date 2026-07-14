@@ -14,6 +14,7 @@ from quantiqmt.order.application.persistence.model import (
     JsonValue,
     MutableJsonValue,
     OrderRegistration,
+    OrderSnapshot,
     PersistedOrder,
 )
 from quantiqmt.order.domain import FactIdentity, ProcessedFact
@@ -108,6 +109,7 @@ def order_state_payload(persisted: PersistedOrder) -> dict[str, MutableJsonValue
             for stream, sequence in sorted(order.broker_sequences.items())
         ],
         "provisional_mappings": [],
+        "registration_fingerprint": persisted.registration_fingerprint,
     }
 
 
@@ -115,6 +117,28 @@ def journal_checksum(entry: JournalAppend, previous_entry_checksum: str | None) 
     previous_component = previous_entry_checksum or GENESIS_PREVIOUS_COMPONENT
     entry_component = canonical_json_bytes(journal_payload_without_checksums(entry))
     return sha256_lower_hex(previous_component.encode("utf-8") + b"\n" + entry_component)
+
+
+def journal_with_registration_fingerprint(
+    entry: JournalAppend, registration_fingerprint: str
+) -> JournalAppend:
+    payload = _mutable_json(entry.payload)
+    if not isinstance(payload, dict):
+        raise TypeError("journal payload must be an object")
+    post_state = payload.get("post_state")
+    if not isinstance(post_state, dict):
+        raise ValueError("journal payload must contain post_state object")
+    post_state["registration_fingerprint"] = registration_fingerprint
+    return JournalAppend(
+        entry.journal_id,
+        entry.order_id,
+        entry.aggregate_version,
+        entry.event_type,
+        cast(Mapping[str, JsonValue], payload),
+        entry.occurred_at,
+        entry.correlation_id,
+        entry.causation_id,
+    )
 
 
 def journal_payload_without_checksums(entry: JournalAppend) -> dict[str, MutableJsonValue]:
@@ -131,8 +155,22 @@ def journal_payload_without_checksums(entry: JournalAppend) -> dict[str, Mutable
     }
 
 
-def snapshot_checksum(payload: Mapping[str, JsonValue]) -> str:
-    return sha256_lower_hex(canonical_json_bytes(payload))
+def snapshot_payload_without_checksum(snapshot: OrderSnapshot) -> dict[str, MutableJsonValue]:
+    return {
+        "snapshot_id": snapshot.snapshot_id.value,
+        "order_id": snapshot.order_id.value,
+        "aggregate_version": snapshot.aggregate_version,
+        "schema_version": snapshot.schema_version,
+        "state_payload": _mutable_json(snapshot.state_payload),
+        "journal_head_checksum": snapshot.journal_head_checksum,
+        "created_at": format_utc(snapshot.created_at),
+    }
+
+
+def snapshot_checksum(snapshot: OrderSnapshot | Mapping[str, JsonValue]) -> str:
+    if isinstance(snapshot, OrderSnapshot):
+        return sha256_lower_hex(canonical_json_bytes(snapshot_payload_without_checksum(snapshot)))
+    return sha256_lower_hex(canonical_json_bytes(snapshot))
 
 
 def _normalize_json(value: object) -> object:

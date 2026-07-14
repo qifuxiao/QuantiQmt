@@ -40,6 +40,7 @@ from quantiqmt.order.application.persistence.model import (
 )
 from quantiqmt.order.application.persistence.serialization import (
     journal_checksum,
+    journal_with_registration_fingerprint,
     snapshot_checksum,
 )
 from quantiqmt.order.domain import OrderState, OrderVersionConflict
@@ -143,7 +144,9 @@ class InMemoryOrderPersistence:
         if not commit.outbox_messages:
             raise JournalCommitFailed("register requires at least one outbox message")
 
-        records = self._prepare_journal(order_id, commit.journal)
+        records = self._prepare_journal(
+            order_id, commit.journal, persisted.registration_fingerprint
+        )
         outbox = self._prepare_outbox(commit)
         self._orders[order_id] = persisted
         self._intent_index[intent_id] = order_id
@@ -190,7 +193,9 @@ class InMemoryOrderPersistence:
         if commit.journal.event_type != "ORDER_TRANSITION_APPLIED":
             raise JournalCommitFailed("save requires ORDER_TRANSITION_APPLIED journal entry")
 
-        records = self._prepare_journal(order_id, commit.journal)
+        records = self._prepare_journal(
+            order_id, commit.journal, persisted.registration_fingerprint
+        )
         outbox = self._prepare_outbox(commit)
         self._orders[order_id] = persisted
         self._journal[order_id] = records
@@ -292,7 +297,7 @@ class InMemoryOrderPersistence:
             None,
         )
         if (
-            snapshot_checksum(selected.state_payload) != selected.snapshot_checksum
+            snapshot_checksum(selected) != selected.snapshot_checksum
             or selected.journal_head_checksum != head
         ):
             return SnapshotLookup(
@@ -445,12 +450,15 @@ class InMemoryOrderPersistence:
         )
         return OutboxMutationResult(True, "OK")
 
-    def _prepare_journal(self, order_id: str, append: JournalAppend) -> list[JournalRecord]:
+    def _prepare_journal(
+        self, order_id: str, append: JournalAppend, registration_fingerprint: str
+    ) -> list[JournalRecord]:
         current = list(self._journal.get(order_id, ()))
         expected_version = len(current) + 1
         if append.aggregate_version != expected_version:
             raise JournalCommitFailed("journal versions must be contiguous")
         previous = current[-1].entry_checksum if current else None
+        append = journal_with_registration_fingerprint(append, registration_fingerprint)
         current.append(
             JournalRecord(
                 append,
@@ -507,12 +515,7 @@ class InMemoryOrderPersistence:
         post_state = records[-1].append.payload.get("post_state")
         if not isinstance(post_state, Mapping):
             raise JournalCommitFailed("journal entry is missing committed post_state")
-        current = self._orders.get(order_id)
-        fingerprint = (
-            current.registration_fingerprint
-            if current is not None
-            else str(post_state.get("registration_fingerprint", ""))
-        )
+        fingerprint = str(post_state.get("registration_fingerprint", ""))
         if not fingerprint:
             return None
         return _persisted_from_state_payload(post_state, fingerprint)
@@ -542,8 +545,9 @@ def _retry_delay_ms(record: OutboxRecord) -> int:
     initial = record.claim_initial_retry_delay_ms or 10
     maximum = record.claim_max_retry_delay_ms or initial
     multiplier = Decimal(record.claim_backoff_multiplier or "1")
+    jitter = Decimal(record.claim_jitter_ratio or "0")
     exponent = max(record.attempt_count - 1, 0)
-    delay = Decimal(initial) * (multiplier**exponent)
+    delay = Decimal(initial) * (multiplier**exponent) * (Decimal("1") + jitter)
     return int(min(delay, Decimal(maximum)).to_integral_value(rounding=ROUND_CEILING))
 
 

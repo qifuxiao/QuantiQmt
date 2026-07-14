@@ -34,10 +34,12 @@ from quantiqmt.order.application.persistence.model import (
 from quantiqmt.order.application.persistence.serialization import (
     canonical_json_bytes,
     journal_checksum,
+    journal_with_registration_fingerprint,
     order_state_payload,
     registration_fingerprint,
     registration_to_payload,
     snapshot_checksum,
+    snapshot_payload_without_checksum,
 )
 
 __all__ = [
@@ -68,8 +70,10 @@ __all__ = [
     "canonical_json_bytes",
     "deterministic_message_id",
     "journal_checksum",
+    "journal_with_registration_fingerprint",
     "order_state_payload",
     "registration_fingerprint",
     "registration_to_payload",
     "snapshot_checksum",
+    "snapshot_payload_without_checksum",
 ]

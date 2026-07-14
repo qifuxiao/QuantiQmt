@@ -10,11 +10,13 @@ from quantiqmt.order.application.persistence import (
     JournalAppend,
     OrderRegistration,
     OrderRegistrationDraft,
+    OrderSnapshot,
     PersistedOrder,
     canonical_json_bytes,
     deterministic_message_id,
     order_state_payload,
     registration_fingerprint,
+    snapshot_checksum,
 )
 from quantiqmt.order.domain import Order
 from quantiqmt.shared import Identifier, InstrumentId, Price, Quantity
@@ -88,6 +90,7 @@ def test_state_payload_contains_recovery_collections_in_deterministic_order() ->
     )
     payload = order_state_payload(persisted)
     assert payload["aggregate_version"] == 1
+    assert payload["registration_fingerprint"] == persisted.registration_fingerprint
     assert payload["processed_facts"] == []
     assert payload["broker_sequences"] == []
     assert payload["registration"]["limit_price"] == "10.01000000"  # type: ignore[index]
@@ -120,7 +123,140 @@ def test_journal_payload_is_immutable_and_rejects_json_float() -> None:
 def test_claim_policy_bounds_and_deterministic_message_id() -> None:
     with pytest.raises(ValueError):
         ClaimPolicy(0, 1000, 1, 10, 10, "2", "0")
+    with pytest.raises(ValueError):
+        ClaimPolicy(1, 999, 1, 10, 10, "2", "0")
+    with pytest.raises(ValueError):
+        ClaimPolicy(1, 1000, 101, 10, 10, "2", "0")
+    with pytest.raises(ValueError):
+        ClaimPolicy(1, 1000, 1, 60001, 60001, "2", "0")
+    with pytest.raises(ValueError):
+        ClaimPolicy(1, 1000, 1, 10, 3600001, "2", "0")
+    with pytest.raises(ValueError):
+        ClaimPolicy(1, 1000, 1, 10, 10, "1", "0")
+    with pytest.raises(ValueError):
+        ClaimPolicy(1, 1000, 1, 10, 10, "10.1", "0")
+    with pytest.raises(ValueError):
+        ClaimPolicy(1, 1000, 1, 10, 10, "2", "-0.1")
+    with pytest.raises(ValueError):
+        ClaimPolicy(1, 1000, 1, 10, 10, "2", "1.1")
     first = deterministic_message_id("oms.order_registered.v1", ORDER_ID.value, 1)
     second = deterministic_message_id("oms.order_registered.v1", ORDER_ID.value, 1)
     assert first == second
     assert len(first) == 64
+
+
+def test_snapshot_checksum_covers_all_fields_except_checksum() -> None:
+    payload = {"order_id": ORDER_ID.value, "aggregate_version": 1}
+    base = OrderSnapshot(
+        Identifier("550e8400-e29b-41d4-a716-446655440010"),
+        ORDER_ID,
+        1,
+        1,
+        payload,
+        "a" * 64,
+        "0" * 64,
+        NOW,
+    )
+    digest = snapshot_checksum(base)
+    same_with_different_checksum = OrderSnapshot(
+        base.snapshot_id,
+        base.order_id,
+        base.aggregate_version,
+        base.schema_version,
+        base.state_payload,
+        base.journal_head_checksum,
+        "f" * 64,
+        base.created_at,
+    )
+
+    assert snapshot_checksum(same_with_different_checksum) == digest
+    assert (
+        snapshot_checksum(
+            OrderSnapshot(
+                Identifier("550e8400-e29b-41d4-a716-446655440011"),
+                base.order_id,
+                base.aggregate_version,
+                base.schema_version,
+                base.state_payload,
+                base.journal_head_checksum,
+                base.snapshot_checksum,
+                base.created_at,
+            )
+        )
+        != digest
+    )
+    assert (
+        snapshot_checksum(
+            OrderSnapshot(
+                base.snapshot_id,
+                Identifier("550e8400-e29b-41d4-a716-446655440012"),
+                base.aggregate_version,
+                base.schema_version,
+                base.state_payload,
+                base.journal_head_checksum,
+                base.snapshot_checksum,
+                base.created_at,
+            )
+        )
+        != digest
+    )
+    assert (
+        snapshot_checksum(
+            OrderSnapshot(
+                base.snapshot_id,
+                base.order_id,
+                2,
+                base.schema_version,
+                {"order_id": ORDER_ID.value, "aggregate_version": 2},
+                base.journal_head_checksum,
+                base.snapshot_checksum,
+                base.created_at,
+            )
+        )
+        != digest
+    )
+    assert (
+        snapshot_checksum(
+            OrderSnapshot(
+                base.snapshot_id,
+                base.order_id,
+                base.aggregate_version,
+                base.schema_version,
+                {"order_id": ORDER_ID.value, "aggregate_version": 1, "state": "REGISTERED"},
+                base.journal_head_checksum,
+                base.snapshot_checksum,
+                base.created_at,
+            )
+        )
+        != digest
+    )
+    assert (
+        snapshot_checksum(
+            OrderSnapshot(
+                base.snapshot_id,
+                base.order_id,
+                base.aggregate_version,
+                base.schema_version,
+                base.state_payload,
+                "b" * 64,
+                base.snapshot_checksum,
+                base.created_at,
+            )
+        )
+        != digest
+    )
+    assert (
+        snapshot_checksum(
+            OrderSnapshot(
+                base.snapshot_id,
+                base.order_id,
+                base.aggregate_version,
+                base.schema_version,
+                base.state_payload,
+                base.journal_head_checksum,
+                base.snapshot_checksum,
+                datetime(2026, 7, 10, 1, 2, 4, tzinfo=UTC),
+            )
+        )
+        != digest
+    )

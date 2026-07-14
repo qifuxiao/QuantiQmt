@@ -123,13 +123,15 @@ def test_postgres_rebuilds_corrupted_projection_from_journal(
         _execute(
             """
             UPDATE orders
-            SET state = 'REGISTERED',
+            SET registration_fingerprint = $2,
+                state = 'REGISTERED',
                 cumulative_quantity = 0,
                 aggregate_version = 1,
                 state_payload = jsonb_set(state_payload, '{aggregate_version}', '1'::jsonb)
             WHERE order_id = $1::uuid
             """,
             ORDER_ID.value,
+            "f" * 64,
         )
     )
 
@@ -142,9 +144,21 @@ def test_postgres_rebuilds_corrupted_projection_from_journal(
     stored = postgres_store.get(ORDER_ID, deadline_monotonic_ns=DEADLINE)
 
     assert loaded.persisted_order.order.version == 2
+    assert loaded.persisted_order.registration_fingerprint == (
+        committed.persisted_order.registration_fingerprint
+    )
     assert rebuilt.persisted_order.order.version == 2
     assert stored is not None
     assert stored.order.version == 2
+
+    asyncio.run(_delete_order_projection_bypassing_fk(ORDER_ID.value))
+    missing_rebuilt = postgres_store.rebuild_projection_from_journal(
+        ORDER_ID,
+        expected_journal_head_checksum=asyncio.run(_journal_head_checksum(ORDER_ID.value)),
+        deadline_monotonic_ns=DEADLINE,
+    )
+    assert missing_rebuilt.persisted_order.order.version == 2
+    assert postgres_store.get(ORDER_ID, deadline_monotonic_ns=DEADLINE) is not None
 
 
 def test_postgres_snapshot_lookup_accepts_valid_older_snapshot_with_later_journal(
@@ -154,16 +168,26 @@ def test_postgres_snapshot_lookup_accepts_valid_older_snapshot_with_later_journa
         registered_commit(registry), deadline_monotonic_ns=DEADLINE
     )
     payload = order_state_payload(registered.persisted_order)
+    draft = OrderSnapshot(
+        ORDER_ID,
+        ORDER_ID,
+        1,
+        1,
+        payload,
+        asyncio.run(_journal_head_checksum(ORDER_ID.value)),
+        "0" * 64,
+        registered.persisted_order.registration.registered_at,
+    )
     postgres_store.write(
         OrderSnapshot(
-            ORDER_ID,
-            ORDER_ID,
-            1,
-            1,
-            payload,
-            asyncio.run(_journal_head_checksum(ORDER_ID.value)),
-            snapshot_checksum(payload),
-            registered.persisted_order.registration.registered_at,
+            draft.snapshot_id,
+            draft.order_id,
+            draft.aggregate_version,
+            draft.schema_version,
+            draft.state_payload,
+            draft.journal_head_checksum,
+            snapshot_checksum(draft),
+            draft.created_at,
         ),
         deadline_monotonic_ns=DEADLINE,
     )
@@ -235,7 +259,7 @@ def test_postgres_retryable_failure_waits_until_backoff_available_at(
     postgres_store: PostgresOrderPersistence, registry: SchemaRegistry
 ) -> None:
     postgres_store.register(registered_commit(registry), deadline_monotonic_ns=DEADLINE)
-    policy = ClaimPolicy(10, 1000, 3, 50, 500, "2", "0")
+    policy = ClaimPolicy(10, 1000, 3, 50, 500, "2", "0.5")
     claimed = postgres_store.claim("worker-a", policy, deadline_monotonic_ns=DEADLINE)[0]
 
     assert postgres_store.release_failed(
@@ -245,8 +269,38 @@ def test_postgres_retryable_failure_waits_until_backoff_available_at(
         deadline_monotonic_ns=DEADLINE,
     ).applied
     assert postgres_store.claim("worker-b", policy, deadline_monotonic_ns=DEADLINE) == ()
+    asyncio.run(_make_outbox_available(claimed.message_id, milliseconds_before_now=-50))
+    assert postgres_store.claim("worker-b", policy, deadline_monotonic_ns=DEADLINE) == ()
     asyncio.run(_make_outbox_available(claimed.message_id))
     assert len(postgres_store.claim("worker-b", policy, deadline_monotonic_ns=DEADLINE)) == 1
+
+
+def test_postgres_order_journal_rejects_update_and_delete(
+    postgres_store: PostgresOrderPersistence, registry: SchemaRegistry
+) -> None:
+    postgres_store.register(registered_commit(registry), deadline_monotonic_ns=DEADLINE)
+
+    with pytest.raises(Exception, match="order_journal is append-only"):
+        asyncio.run(
+            _execute(
+                """
+                UPDATE order_journal
+                SET payload = payload
+                WHERE order_id = $1::uuid
+                """,
+                ORDER_ID.value,
+            )
+        )
+    with pytest.raises(Exception, match="order_journal is append-only"):
+        asyncio.run(
+            _execute(
+                """
+                DELETE FROM order_journal
+                WHERE order_id = $1::uuid
+                """,
+                ORDER_ID.value,
+            )
+        )
 
 
 async def _truncate_tables(dsn: str) -> None:
@@ -270,6 +324,18 @@ async def _execute(sql: str, *args: object) -> None:
     try:
         await connection.execute(sql, *args)
     finally:
+        await connection.close()
+
+
+async def _delete_order_projection_bypassing_fk(order_id: str) -> None:
+    dsn = os.environ["QUANTIQMT_POSTGRES_DSN"]
+    asyncpg = _asyncpg()
+    connection = await asyncpg.connect(dsn)
+    try:
+        await connection.execute("SET session_replication_role = replica")
+        await connection.execute("DELETE FROM orders WHERE order_id = $1::uuid", order_id)
+    finally:
+        await connection.execute("SET session_replication_role = origin")
         await connection.close()
 
 
@@ -313,7 +379,7 @@ async def _outbox_status(message_id: str) -> tuple[str, str | None]:
         await connection.close()
 
 
-async def _make_outbox_available(message_id: str) -> None:
+async def _make_outbox_available(message_id: str, *, milliseconds_before_now: int = 1) -> None:
     dsn = os.environ["QUANTIQMT_POSTGRES_DSN"]
     asyncpg = _asyncpg()
     connection = await asyncpg.connect(dsn)
@@ -321,10 +387,12 @@ async def _make_outbox_available(message_id: str) -> None:
         await connection.execute(
             """
             UPDATE outbox_messages
-            SET available_at = transaction_timestamp() - interval '1 millisecond'
+            SET available_at = transaction_timestamp()
+                - ($2::integer::text || ' milliseconds')::interval
             WHERE message_id = $1
             """,
             message_id,
+            milliseconds_before_now,
         )
     finally:
         await connection.close()

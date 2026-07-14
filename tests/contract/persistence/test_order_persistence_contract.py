@@ -217,7 +217,7 @@ def test_recovery_rebuilds_projection_from_journal_post_state(
     corrupted_projection = PersistedOrder(
         committed.persisted_order.registration,
         Order(ORDER_ID, Quantity(100)),
-        committed.persisted_order.registration_fingerprint,
+        "f" * 64,
     )
     store._orders[ORDER_ID.value] = corrupted_projection
 
@@ -230,8 +230,20 @@ def test_recovery_rebuilds_projection_from_journal_post_state(
 
     assert loaded.persisted_order.order.version == 2
     assert loaded.persisted_order.order.state is OrderState.RISK_PENDING
+    assert loaded.persisted_order.registration_fingerprint == (
+        committed.persisted_order.registration_fingerprint
+    )
     assert rebuilt.persisted_order.order.version == 2
     assert store.get(ORDER_ID, deadline_monotonic_ns=DEADLINE).order.version == 2  # type: ignore[union-attr]
+
+    del store._orders[ORDER_ID.value]
+    missing_rebuilt = store.rebuild_projection_from_journal(
+        ORDER_ID,
+        expected_journal_head_checksum=store.journal_records[-1].entry_checksum,
+        deadline_monotonic_ns=DEADLINE,
+    )
+    assert missing_rebuilt.persisted_order.order.version == 2
+    assert store.get(ORDER_ID, deadline_monotonic_ns=DEADLINE) is not None
 
 
 def test_snapshot_lookup_accepts_valid_older_snapshot_with_later_journal(
@@ -240,16 +252,26 @@ def test_snapshot_lookup_accepts_valid_older_snapshot_with_later_journal(
     store = InMemoryOrderPersistence(now=NOW)
     registered = store.register(registered_commit(registry), deadline_monotonic_ns=DEADLINE)
     payload = order_state_payload(registered.persisted_order)
+    draft = OrderSnapshot(
+        Identifier("550e8400-e29b-41d4-a716-446655440010"),
+        ORDER_ID,
+        1,
+        1,
+        payload,
+        store.journal_records[-1].entry_checksum,
+        "0" * 64,
+        NOW,
+    )
     store.write(
         OrderSnapshot(
-            Identifier("550e8400-e29b-41d4-a716-446655440010"),
-            ORDER_ID,
-            1,
-            1,
-            payload,
-            store.journal_records[-1].entry_checksum,
-            snapshot_checksum(payload),
-            NOW,
+            draft.snapshot_id,
+            draft.order_id,
+            draft.aggregate_version,
+            draft.schema_version,
+            draft.state_payload,
+            draft.journal_head_checksum,
+            snapshot_checksum(draft),
+            draft.created_at,
         ),
         deadline_monotonic_ns=DEADLINE,
     )
@@ -337,7 +359,7 @@ def test_retryable_failure_waits_until_backoff_available_at(
 ) -> None:
     store = InMemoryOrderPersistence(now=NOW)
     store.register(registered_commit(registry), deadline_monotonic_ns=DEADLINE)
-    policy = ClaimPolicy(10, 1000, 3, 50, 500, "2", "0")
+    policy = ClaimPolicy(10, 1000, 3, 50, 500, "2", "0.5")
     claimed = store.claim("worker-a", policy, deadline_monotonic_ns=DEADLINE)[0]
 
     assert store.release_failed(
@@ -349,4 +371,6 @@ def test_retryable_failure_waits_until_backoff_available_at(
 
     assert store.claim("worker-b", policy, deadline_monotonic_ns=DEADLINE) == ()
     store.advance(timedelta(milliseconds=50))
+    assert store.claim("worker-b", policy, deadline_monotonic_ns=DEADLINE) == ()
+    store.advance(timedelta(milliseconds=25))
     assert len(store.claim("worker-b", policy, deadline_monotonic_ns=DEADLINE)) == 1
