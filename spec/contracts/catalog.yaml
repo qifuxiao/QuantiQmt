@@ -1,6 +1,6 @@
 catalog:
   id: CONTRACT-CATALOG
-  version: 2
+  version: 3
   status: accepted
 messages:
   - {name: strategy.submit_order_intent.v1, kind: command, owner: OrderApplication, schema: commands/strategy.submit_order_intent.v1.schema.json, status: active}
@@ -18,6 +18,7 @@ messages:
   - {name: strategy.state_changed.v1, kind: event, publisher: StrategyRuntime, consumers: [ControlPlane, Alert], status: planned}
   - {name: strategy.intent_rejected.v1, kind: event, publisher: OrderApplication, consumers: [StrategyRuntime, Audit], status: planned}
   - {name: risk.order_evaluated.v1, kind: event, publisher: RiskEngine, consumers: [OrderApplication, Audit, Metrics], schema: events/risk.order_evaluated.v1.schema.json, status: active}
+  - {name: risk.order_evaluated.v2, kind: event, publisher: RiskEngine, consumers: [OrderApplication, Audit, Metrics], schema: events/risk.order_evaluated.v2.schema.json, status: active}
   - {name: risk.limit_breached.v1, kind: event, publisher: RiskEngine, consumers: [ControlPlane, Alert], status: planned}
   - {name: risk.rule_set_activated.v1, kind: event, publisher: ConfigService, consumers: [RiskEngine, Audit], status: planned}
   - {name: oms.order_registered.v1, kind: event, publisher: OMS, consumers: [Risk, StrategyRuntime, Audit], schema: events/oms.order_registered.v1.schema.json, status: active}

@@ -39,3 +39,65 @@ nfr:
     - unknown_order_stuck
     - reconciliation_p0_p1
     - stale_fencing_token
+  risk_internal_audit_output_required_fields:
+    - decision
+    - evaluated_at
+    - total_latency_us
+    - evaluation_timeout_us
+    - completed_rule_count
+    - rule_timings
+  risk_internal_rule_result_required_fields:
+    - evaluation_index
+    - rule_id
+    - phase
+    - scope
+    - scope_id
+    - priority
+    - metric
+    - result
+    - reason_code
+    - measured_value
+    - limit_value
+    - exception_applied
+  risk_internal_rule_timing_required_fields:
+    - evaluation_index
+    - rule_id
+    - latency_us
+  risk_internal_joined_rule_audit_view:
+    join_key: [evaluation_index, rule_id]
+    required_sources: [decision.rule_results, rule_timings]
+    includes_rule_result_and_latency: true
+    semantic_validator_required: true
+    cardinality: exactly_one_timing_per_result_including_timeout_guard
+    order: contiguous_evaluation_index_from_zero
+  risk_audit_semantic_invariants:
+    - unique_rule_result_rule_id
+    - result_and_timing_indices_contiguous_from_zero
+    - timing_order_matches_result_order
+    - exact_result_timing_identity_and_cardinality
+    - total_latency_not_less_than_timing_sum
+    - origin_specific_completed_rule_count
+    - timeout_guard_unique_last_timed_and_excluded_from_completed_count
+  risk_v2_authoritative_audit_required_fields:
+    - schema_version
+    - decision
+    - evaluated_at
+    - total_latency_us
+    - evaluation_timeout_us
+    - completed_rule_count
+    - rule_timings
+  risk_v1_compatibility_audit_required_fields:
+    - decision_id
+    - order_id
+    - expected_order_version
+    - decision
+    - rule_set_version
+    - snapshot_versions
+    - rule_results
+    - evaluated_at
+  risk_metrics:
+    - "risk_evaluation_latency_us histogram"
+    - "risk_rule_latency_us histogram"
+    - "risk_decisions_total{decision,origin,error_code} counter"
+    - "risk_fail_closed_total{reason} counter"
+  risk_metric_forbidden_labels: [order_id, account_id, portfolio_id, strategy_id, instrument_id, correlation_id, decision_id, rule_id]

@@ -18,14 +18,29 @@ workflow:
     - id: build_risk_snapshot
       owner: OrderApplication
       failure: fail_closed
+      output_contract: CONTRACT-RISK-INPUT-V1
+      guards:
+        - immutable_input_version_verified
+        - order_account_portfolio_instrument_identity_match
+        - one_version_per_snapshot_source
+      failure_errors: [QQ-RISK-4003, QQ-RISK-4004, QQ-RISK-4006, QQ-RISK-4008, QQ-RISK-4010]
     - id: evaluate_risk
       owner: RiskEngine
-      timeout: fail_closed
-      output: RiskDecision
+      input_contracts: [CONTRACT-RISK-INPUT-V1, CONTRACT-RISK-RULE-SET-V1]
+      output_contract: CONTRACT-RISK-DECISION-V1
+      timeout: QQ-RISK-4005
+      timeout_semantics: "RiskEvaluationRunner uses monotonic time, emits TIMEOUT_GUARD REJECT, and never allows a late PASS to replace it"
+      pure_evaluator: "no I/O, database, broker, mutable global state, business clock, or monotonic clock"
+      ordering: PORTS-RISK
     - id: apply_risk_decision
       owner: OMS
       guard: expected_order_version
       reject_terminal: REJECTED
+      version_conflict: QQ-COMMON-1003
+      pass_requires:
+        - decision_origin_is_evaluator
+        - semantic_hash_verified
+        - input_and_rule_set_versions_match_request
     - id: start_execution_attempt
       owner: ExecutionEngine
       guard: "leader && valid_fencing_token && trading_mode_allows"
@@ -51,3 +66,13 @@ workflow:
     accepted_transition_contract: WF-ORDER-COMMIT.transition_commit
     duplicate_intent: identical_no_op_or_QQ-STORAGE-7001
     commit_uncertain: query_before_retry_same_ids_and_message_ids
+  risk_audit:
+    output_contract: CONTRACT-RISK-AUDIT-OUTPUT-V1
+    semantic_validator: PORTS-RISK.RiskAuditSemanticValidator
+    validate_before: [v1_projection, approved_transition_and_audit_outbox_commit]
+    validation_failure: "fail closed; do not repair/reorder, do not project or publish v1/v2, and do not enter execution"
+    authoritative_event: risk.order_evaluated.v2
+    compatibility_event: risk.order_evaluated.v1
+    event_projection_mapping: PORTS-RISK
+    both_events_persist_before_execution: true
+    audit_publish_failure: "fail closed; approved transition and both risk audit Outbox records must be committed before execution"

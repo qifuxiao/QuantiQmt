@@ -1,6 +1,6 @@
 specification:
   name: quantiqmt
-  version: 0.5.0
+  version: 0.6.0
   status: accepted
   updated: 2026-07-10
   normative_root: spec
@@ -43,6 +43,16 @@ catalogs:
       path: contracts/events/oms.order_registered.v1.schema.json
     - id: CONTRACT-RISK-ORDER-EVALUATED-V1
       path: contracts/events/risk.order_evaluated.v1.schema.json
+    - id: CONTRACT-RISK-ORDER-EVALUATED-V2
+      path: contracts/events/risk.order_evaluated.v2.schema.json
+    - id: CONTRACT-RISK-INPUT-V1
+      path: contracts/risk/risk-input.v1.schema.json
+    - id: CONTRACT-RISK-RULE-SET-V1
+      path: contracts/risk/rule-set.v1.schema.json
+    - id: CONTRACT-RISK-DECISION-V1
+      path: contracts/risk/risk-decision.v1.schema.json
+    - id: CONTRACT-RISK-AUDIT-OUTPUT-V1
+      path: contracts/risk/risk-audit-output.v1.schema.json
     - id: CONTRACT-EXECUTION-ATTEMPT-STARTED-V1
       path: contracts/events/execution.attempt_started.v1.schema.json
     - id: CONTRACT-EXECUTION-OUTCOME-UNKNOWN-V1
@@ -62,6 +72,8 @@ catalogs:
       path: interfaces/strategy-ports.md
     - id: PORTS-ORDER-PERSISTENCE
       path: interfaces/order-persistence-ports.md
+    - id: PORTS-RISK
+      path: interfaces/risk-ports.md
   state_machines:
     - id: SM-ORDER
       path: state-machines/order.yaml
@@ -118,24 +130,30 @@ catalogs:
       path: reviews/IMPLEMENTATION-READINESS-0.5.md
 
 change:
-  id: SPEC-0.5-IMPLEMENTATION-READINESS
-  compatibility: no_runtime_contract_change
-  previous_version: 0.4.0
-  public_message_schema_changes: none
+  id: SPEC-0.6-RISK-L4-CONTRACTS
+  compatibility: backward_compatible_additive_contracts_events_and_errors
+  previous_version: 0.5.0
+  public_message_schema_changes: "additive risk.order_evaluated.v2; its standard schema plus mandatory PORTS-RISK semantic validator define audit validity; published risk.order_evaluated.v1 schema and identity remain unchanged as a lossy compatibility projection"
   storage_schema_changes: none
-  error_catalog_change: none
+  error_catalog_change: "catalog v3 adds QQ-RISK-4003 through QQ-RISK-4011; existing meanings unchanged"
   runtime_code_change: none
-  review_added: REVIEW-IMPLEMENTATION-READINESS-0.5
-  task_queue_change: "TASK-004 restored to ready; TASK-005 and TASK-008 blocked until L4 contract tasks; Phase backlog expanded"
-  affected_tasks: [TASK-004, TASK-005, TASK-006, TASK-007, TASK-008, TASK-009, TASK-010, TASK-015, TASK-016, TASK-017, TASK-018, TASK-019, TASK-020, TASK-021, TASK-022, TASK-023, TASK-024, TASK-025, TASK-026, TASK-027]
+  semantic_validation_change: "RiskAuditOutput requires fail-closed cross-field semantic validation before v1 projection, v1/v2 Outbox persistence, or Execution; timeout guard is last and timed but excluded from completed_rule_count"
+  internal_contracts_added: [CONTRACT-RISK-INPUT-V1, CONTRACT-RISK-RULE-SET-V1, CONTRACT-RISK-DECISION-V1, CONTRACT-RISK-AUDIT-OUTPUT-V1, PORTS-RISK]
+  public_contracts_added: [CONTRACT-RISK-ORDER-EVALUATED-V2]
+  task_queue_change: "TASK-015 activated; TASK-005 remains blocked until TASK-015 is independently reviewed and marked completed, after which its frozen contracts are implementation-ready"
+  affected_tasks: [TASK-005, TASK-006, TASK-015, TASK-022, TASK-025]
   deployment_order:
-    - merge_task_queue_metadata
-    - review_next_task_activation
-    - start_only_ready_or_active_tasks
+    - merge_and_independently_review_task_015_specs
+    - implement_and_activate_task_005_against_spec_0_6
+    - enable_spec_0_6_risk_evaluator_and_atomic_v2_authoritative_plus_v1_compatibility_audit_outbox
   migration:
     runtime_data: not_applicable
-    task_queue: "existing open PRs must rebase and follow the new blocked/ready states"
+    public_events: "no backfill; new decisions atomically persist authoritative risk.order_evaluated.v2 plus unchanged lossy risk.order_evaluated.v1 compatibility projection until all v1 consumers migrate"
+    rule_sets: "validate candidate RuleSet against CONTRACT-RISK-RULE-SET-V1 and content_hash before activation; no legacy implicit rule configuration may be auto-converted"
+    task_queue: "TASK-005 may be activated only after independent Review moves TASK-015 to completed"
     destructive_backfill: forbidden
   rollback:
     runtime_data: not_applicable
-    task_queue: "revert this metadata change; no persisted production data affected"
+    public_events: "rollback consumers to v1 is wire-compatible but loses complete typed audit for new decisions; keep trading fail-closed unless authoritative v2 persistence remains enabled"
+    rule_sets: "keep trading fail-closed and reactivate the last independently validated immutable RuleSet; do not synthesize permissive defaults"
+    task_queue: "return TASK-005 to blocked if any L4 contract ambiguity is found; no persisted production data is changed by this task"

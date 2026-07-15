@@ -28,3 +28,12 @@ nfr:
     - report_average_only
     - achieve_latency_by_dropping_order_messages
     - weaken_audit_or_risk_for_performance
+  risk_measurement:
+    clock: monotonic_ns
+    total_latency_us: ceil_integer_delta_ns_div_1000
+    per_rule_latency_us: "measure each deterministic rule boundary outside the pure evaluator"
+    timeout_source: rule_set.evaluation_timeout_us
+    timeout_result: "QQ-RISK-4005 TIMEOUT_GUARD REJECT"
+    late_pass_replacement: forbidden
+    worker_pool: "bounded max_in_flight with zero unbounded queue growth"
+    saturation_result: "QQ-RISK-4005 TIMEOUT_GUARD REJECT"
