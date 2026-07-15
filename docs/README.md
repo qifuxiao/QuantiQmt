@@ -46,6 +46,7 @@ QuantiQmt 是面向长期生产运行的量化交易系统，不是策略研究�
    - [Error Code Catalog](70-Observability/Error-Code-Catalog.md)
 14. [部署与生产运维](80-Deployment/Production-Operations.md)
    - [Configuration Specification](80-Deployment/Configuration-Specification.md)
+   - [Local Development Environment](80-Deployment/Local-Development-Environment.md)
 15. [测试、故障演练与生产准入](90-Quality/Test-And-Production-Acceptance.md)
    - [Testing Standard](90-Quality/Testing-Standard.md)
 

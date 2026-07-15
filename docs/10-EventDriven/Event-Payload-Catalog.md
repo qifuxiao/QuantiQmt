@@ -1,7 +1,7 @@
 # Event Payload Catalog
 
 > Status: Proposed  
-> 以下是规范性 Payload V1。所有事件还必须携带 Message Envelope V1。
+> 以下是 Payload 语义总览，不是机器可执行 Schema。字段、类型、精度、必填项、兼容性和 active/planned 状态以 `spec/contracts/**`、`spec/contracts/catalog.yaml` 与 `spec/manifest.yaml` 为准。
 
 ## 通用规则
 

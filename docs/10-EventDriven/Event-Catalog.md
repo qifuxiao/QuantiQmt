@@ -1,9 +1,9 @@
 # Event Catalog
 
 > Status: Proposed  
-> 本表是事件名称、所有权和路由的唯一目录。新增、删除或改变事件语义必须更新本文并评审兼容性。
+> 本表是事件名称、所有权和路由的解释性总览。实现、激活状态、Schema 路由和兼容性规则以 `spec/manifest.yaml` 与 `spec/contracts/catalog.yaml` 为准；本文不得与 `spec/` 形成第二套契约。
 
-事件表示已发生事实；动作请求必须使用 Command。字段定义见 [Event-Payload-Catalog.md](Event-Payload-Catalog.md)，信封与版本规则见 [Message-Contracts.md](Message-Contracts.md)。
+事件表示已发生事实；动作请求必须使用 Command。字段解释见 [Event-Payload-Catalog.md](Event-Payload-Catalog.md)，信封与版本规则见 [Message-Contracts.md](Message-Contracts.md)。新增、删除或改变事件语义必须先通过 spec-change task 更新 `spec/contracts/catalog.yaml` 及相应 Schema。
 
 ## Market Data
 
