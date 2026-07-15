@@ -192,11 +192,25 @@ Runner 在每个确定性规则边界前后读取 monotonic_ns，使用整数向
 
 elapsed 达到 `evaluation_timeout_us`（`total_latency_us >= evaluation_timeout_us`）时，即使当前 `next()` 尚未返回，Runner 也 MUST 停止等待并产生 `decision_origin=TIMEOUT_GUARD` 的 REJECT，追加 `RISK.SYSTEM.EVALUATION_TIMEOUT` 结果，error=`QQ-RISK-4005`，保留已完成结果，丢弃未完成结果。执行必须位于有界 cancellable worker；若底层不能证明已取消，attempt fencing 仍必须永久丢弃其 late output，且不能让超时 worker 无界堆积。相同 input_version 不得重评，重试必须重建含新 evaluation_time 的 RiskInput，因此产生新 input_version/decision_id。
 
-Runner MUST 产生 `CONTRACT-RISK-AUDIT-OUTPUT-V1`：`decision` 是完整 RiskDecision；`evaluation_timeout_us` 等于本次 RuleSet 值；`rule_timings` 按 evaluation_index 排序并与 Decision 的每个 rule result 以 `(evaluation_index, rule_id)` 一一对应；`total_latency_us >= sum(rule_timings.latency_us)`；正常完成时 `completed_rule_count=len(rule_results)`，timeout 时等于 timeout guard 之前完成的规则数。RiskRuleResult 是确定性 Decision 的组成部分且不含 latency；RuleTiming 是 Runner 测量值。NFR 所需的逐规则审计视图是二者按该复合 key 一对一 join 的结果，不得把 `latency_us` 写回 RiskRuleResult 或语义 hash。
+Runner MUST 产生 `CONTRACT-RISK-AUDIT-OUTPUT-V1`：`decision` 是完整 RiskDecision；`evaluation_timeout_us` 等于本次 RuleSet 值。RiskRuleResult 是确定性 Decision 的组成部分且不含 latency；RuleTiming 是 Runner 测量值。NFR 所需的逐规则审计视图是二者按复合 key 一对一 join 的结果，不得把 `latency_us` 写回 RiskRuleResult 或语义 hash。
 
-`risk.order_evaluated.v2` 的自包含 schema 是 `CONTRACT-RISK-AUDIT-OUTPUT-V1` 与 `CONTRACT-RISK-DECISION-V1` 的唯一机器字段源；两个内部契约通过 URN/JSON Pointer 引用它。Event envelope 的 `schema_version=2`，payload 内的 `schema_version=1` 表示 RiskAuditOutput DTO 版本，二者不得混淆。该 v2 事件按 `STORAGE-SOT` 作为 RiskDecision 的权威持久化审计事件；因此 typed measured/limit、完整 Decision 和独立 RuleTiming 均可无歧义复盘。权威 v2 与兼容 v1 Outbox record MUST 和 approved OMS transition 在同一事务持久化，二者成功前不得执行。
+### RiskAuditSemanticValidator
 
-已发布的 `risk.order_evaluated.v1` schema 保持不变，仅作为兼容投影：顶层 identity/decision/rule_set 逐字段取 Decision；`snapshot_versions` 取三个 `snapshot_states.snapshot_version`；每个公开 `rule_results` 投影 `rule_id/result/reason_code` 并从匹配 timing 取 `latency_us`。typed `DECIMAL` 投影其 `value` decimal string；`INTEGER` 仅在无前导零的十进制表示满足 v1 decimal pattern 时投影该 string，超出 v1 18 位范围时投影 null；`BOOLEAN`、`STRING`、`STRING_SET` 不能无损表示，必须投影为 null。measured/limit 各自独立按此规则投影，不得发明数值编码。V1 不再是完整权威审计，不承载 input hash、snapshot quality、phase/scope/priority、exception、total latency或 error code；消费者不得猜测这些缺失字段。不得向 v1 payload 添加 schema 未声明字段。
+标准 Draft 2020-12 Schema 负责 RiskAuditOutput 字段、类型和局部结构；跨数组和跨字段不变量由规范性 `RiskAuditSemanticValidator.validate(audit: RiskAuditOutputV1) -> None` 强制执行。TASK-005 MUST 实现该 validator。Runner 生成完整 audit 后、生成 v1 compatibility projection 前、以及权威 v2 与兼容 v1 Outbox 写入前 MUST 调用它。任一检查失败 MUST fail-closed：不得修补、重排、去重或猜测 audit，不得生成 v1，不得持久化或发布 v1/v2，不得应用 approved transition 或进入 Execution。
+
+Validator MUST 按以下顺序检查并在首个失败处拒绝：
+
+1. `decision.rule_results` 非空，数组位置 `i` 的 `evaluation_index == i`，所有 `rule_id` 唯一；RuleSet 本身的 rule_id 唯一性仍由 RuleSet validator 在求值前保证。
+2. `rule_timings` 数量严格等于 `rule_results` 数量；数组位置 `i` 的 `evaluation_index == i`，timing 的 `(evaluation_index, rule_id)` 必须逐项等于 result，不得 missing、duplicate、extra 或 unsorted。
+3. `total_latency_us >= sum(rule_timings[*].latency_us)`，使用无溢出的非负整数求和。
+4. `EVALUATOR` 与 `INPUT_GUARD`：不得存在 `phase=TIMEOUT_GUARD` 或 `rule_id=RISK.SYSTEM.EVALUATION_TIMEOUT`；`completed_rule_count == len(rule_results)`。EVALUATOR 可 PASS/REJECT；INPUT_GUARD 必须 REJECT。
+5. `TIMEOUT_GUARD`：Decision 必须 REJECT 且 primary/error 分别为 `RISK_EVALUATION_TIMEOUT`/`QQ-RISK-4005`；唯一 timeout result 必须是最后一条，`phase=TIMEOUT_GUARD`、`rule_id=RISK.SYSTEM.EVALUATION_TIMEOUT`、`result=REJECT`、`reason_code=RISK_EVALUATION_TIMEOUT`；其 timing 必须存在并与其 index/id 匹配；`completed_rule_count == len(rule_results)-1`，明确只计 timeout 前已完成的确定性规则、不计 synthetic timeout guard；`total_latency_us >= evaluation_timeout_us`。
+
+因此三种 origin 都为每条已发布 RuleResult 保存一条 RuleTiming；只有 TIMEOUT_GUARD 的 `completed_rule_count` 排除最后的 synthetic guard。任何 schema-valid 但未通过上述 validator 的对象都不是有效 RiskAuditOutput。
+
+`risk.order_evaluated.v2` 的自包含 schema 是 `CONTRACT-RISK-AUDIT-OUTPUT-V1` 与 `CONTRACT-RISK-DECISION-V1` 的唯一机器字段源；两个内部契约通过 URN/JSON Pointer 引用它。Schema 与 `RiskAuditSemanticValidator` 共同构成机器可执行的完整 audit validity contract。Event envelope 的 `schema_version=2`，payload 内的 `schema_version=1` 表示 RiskAuditOutput DTO 版本，二者不得混淆。该 v2 事件按 `STORAGE-SOT` 作为 RiskDecision 的权威持久化审计事件；因此 typed measured/limit、完整 Decision 和独立 RuleTiming 均可无歧义复盘。权威 v2 与兼容 v1 Outbox record MUST 和 approved OMS transition 在同一事务持久化，二者成功前不得执行。
+
+已发布的 `risk.order_evaluated.v1` schema 保持不变，仅作为兼容投影。Projection MUST 只接受已经通过 `RiskAuditSemanticValidator` 的 v2 audit；失败时不得生成 payload。顶层 identity/decision/rule_set 逐字段取 Decision；`snapshot_versions` 取三个 `snapshot_states.snapshot_version`；每个公开 `rule_results` 按已验证的相同数组位置及 `(evaluation_index, rule_id)` 投影 `rule_id/result/reason_code` 和对应 timing 的 `latency_us`，禁止重新搜索、猜测或容忍歧义。typed `DECIMAL` 投影其 `value` decimal string；`INTEGER` 仅在无前导零的十进制表示满足 v1 decimal pattern 时投影该 string，超出 v1 18 位范围时投影 null；`BOOLEAN`、`STRING`、`STRING_SET` 不能无损表示，必须投影为 null。measured/limit 各自独立按此规则投影，不得发明数值编码。V1 不再是完整权威审计，不承载 input hash、snapshot quality、phase/scope/priority、exception、total latency或 error code；消费者不得猜测这些缺失字段。不得向 v1 payload 添加 schema 未声明字段。
 
 两个 Event envelope 的 `correlation_id=order.intent_id`、`causation_id` 为触发 Risk 的 OrderRegistered message id、`aggregate_id=order_id`、`aggregate_version=expected_order_version`、`partition_key=order_id`。为保留 v1 已发布 identity，v1 `message_id=decision_id`；v2 `message_id=uuid5(UUID("b5a6c3cc-2be0-5e6f-a9ec-2d9a4e769979"), decision_id + ":risk.order_evaluated.v2")`。OMS 只能在 `expected_order_version` 匹配时应用 Decision；冲突返回 `QQ-COMMON-1003`，重新读取后由 Application 明确决定是否以新 input_version 重评。
 

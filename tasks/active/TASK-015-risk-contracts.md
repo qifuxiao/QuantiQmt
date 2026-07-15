@@ -58,6 +58,8 @@ verification:
 - bundled Poetry `run pytest tests/spec tests/contract`: passed，159 tests。
 - self-contained RiskOrderEvaluatedV2 是 RiskAuditOutput/RiskDecision 的唯一机器源；两个内部契约的 Draft 2020-12 URN/JSON Pointer 引用已做 runtime resolution validation。
 - v2 BOOLEAN 与 STRING/STRING_SET typed values 通过 runtime/official validator；旧 decimal-string boolean 编码被拒绝；v1 version-aware golden fixtures 保持通过。
+- Review P1 修复冻结 `RiskAuditSemanticValidator`：标准 Schema 负责结构，validator 强制 result/timing 连续顺序、唯一性、一一 identity/count、latency sum 和唯一 timeout guard；任何失败在 v1 projection、Outbox 或 Execution 前 fail-closed 且不得修补。
+- Review P1 验证：`poetry run python scripts/validate_specs.py` passed；`poetry run pytest tests/spec tests/contract` 192 passed；Review 的 timing rule_id、evaluation_index、completed count 三个 schema-valid 复现均被 semantic validator 拒绝。
 - 未修改 `src/**`、`migrations/**`；TASK-015 保持 active，等待独立 Review。
 
 ## Review focus

@@ -133,10 +133,11 @@ change:
   id: SPEC-0.6-RISK-L4-CONTRACTS
   compatibility: backward_compatible_additive_contracts_events_and_errors
   previous_version: 0.5.0
-  public_message_schema_changes: "additive risk.order_evaluated.v2; published risk.order_evaluated.v1 schema and identity remain unchanged as a lossy compatibility projection"
+  public_message_schema_changes: "additive risk.order_evaluated.v2; its standard schema plus mandatory PORTS-RISK semantic validator define audit validity; published risk.order_evaluated.v1 schema and identity remain unchanged as a lossy compatibility projection"
   storage_schema_changes: none
   error_catalog_change: "catalog v3 adds QQ-RISK-4003 through QQ-RISK-4011; existing meanings unchanged"
   runtime_code_change: none
+  semantic_validation_change: "RiskAuditOutput requires fail-closed cross-field semantic validation before v1 projection, v1/v2 Outbox persistence, or Execution; timeout guard is last and timed but excluded from completed_rule_count"
   internal_contracts_added: [CONTRACT-RISK-INPUT-V1, CONTRACT-RISK-RULE-SET-V1, CONTRACT-RISK-DECISION-V1, CONTRACT-RISK-AUDIT-OUTPUT-V1, PORTS-RISK]
   public_contracts_added: [CONTRACT-RISK-ORDER-EVALUATED-V2]
   task_queue_change: "TASK-015 activated; TASK-005 remains blocked until TASK-015 is independently reviewed and marked completed, after which its frozen contracts are implementation-ready"

@@ -67,6 +67,17 @@ nfr:
     join_key: [evaluation_index, rule_id]
     required_sources: [decision.rule_results, rule_timings]
     includes_rule_result_and_latency: true
+    semantic_validator_required: true
+    cardinality: exactly_one_timing_per_result_including_timeout_guard
+    order: contiguous_evaluation_index_from_zero
+  risk_audit_semantic_invariants:
+    - unique_rule_result_rule_id
+    - result_and_timing_indices_contiguous_from_zero
+    - timing_order_matches_result_order
+    - exact_result_timing_identity_and_cardinality
+    - total_latency_not_less_than_timing_sum
+    - origin_specific_completed_rule_count
+    - timeout_guard_unique_last_timed_and_excluded_from_completed_count
   risk_v2_authoritative_audit_required_fields:
     - schema_version
     - decision

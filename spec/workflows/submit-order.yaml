@@ -68,6 +68,9 @@ workflow:
     commit_uncertain: query_before_retry_same_ids_and_message_ids
   risk_audit:
     output_contract: CONTRACT-RISK-AUDIT-OUTPUT-V1
+    semantic_validator: PORTS-RISK.RiskAuditSemanticValidator
+    validate_before: [v1_projection, approved_transition_and_audit_outbox_commit]
+    validation_failure: "fail closed; do not repair/reorder, do not project or publish v1/v2, and do not enter execution"
     authoritative_event: risk.order_evaluated.v2
     compatibility_event: risk.order_evaluated.v1
     event_projection_mapping: PORTS-RISK

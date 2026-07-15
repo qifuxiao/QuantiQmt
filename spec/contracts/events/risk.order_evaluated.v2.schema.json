@@ -2,6 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "urn:quantiqmt:event:risk.order_evaluated:v2",
   "title": "RiskOrderEvaluatedPayloadV2",
+  "description": "Authoritative RiskAuditOutput structure. Draft 2020-12 validates field structure only. Cross-field ordering, uniqueness, cardinality, RuleResult/RuleTiming identity, completed_rule_count, timeout, and latency-sum invariants are mandatory under the PORTS-RISK RiskAuditSemanticValidator contract. A schema-valid object that fails semantic validation is not a valid RiskAuditOutput and MUST NOT be persisted, projected to v1, published, or used to enter Execution.",
   "type": "object",
   "additionalProperties": false,
   "required": ["schema_version", "decision", "evaluated_at", "total_latency_us", "evaluation_timeout_us", "completed_rule_count", "rule_timings"],
@@ -121,6 +122,7 @@
     "evaluation_timeout_us": {"type": "integer", "minimum": 1, "maximum": 4000},
     "completed_rule_count": {"type": "integer", "minimum": 0, "maximum": 8192},
     "rule_timings": {
+      "description": "Structurally valid timings; PORTS-RISK additionally requires ordered one-to-one identity with decision.rule_results, including the synthetic timeout guard timing.",
       "type": "array",
       "minItems": 1,
       "maxItems": 8192,

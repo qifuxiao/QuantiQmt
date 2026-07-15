@@ -29,6 +29,7 @@ TASK-015 已在 Spec 0.6 冻结 RiskInput、Snapshot DTO、RuleSet、规则排�
 - `CONTRACT-RISK-INPUT-V1`、`CONTRACT-RISK-RULE-SET-V1`、`CONTRACT-RISK-DECISION-V1`、`CONTRACT-RISK-AUDIT-OUTPUT-V1` 的不可变 typed DTO 与 schema validation。
 - `PORTS-RISK` 定义的纯 `RiskEvaluator`、确定性 rule ordering、hard-limit validation、strict-result aggregation 和 reduce-only evidence validation。
 - 外层 `RiskEvaluationRunner` 的 monotonic per-rule/total latency、timeout guard、完整 internal audit output、权威 `risk.order_evaluated.v2` 与 `risk.order_evaluated.v1` 兼容投影；Runner 与纯 evaluator 必须可独立测试。
+- `PORTS-RISK.RiskAuditSemanticValidator`，在 v1 projection、v1/v2 Outbox 与 Execution 前强制校验 result/timing identity、连续顺序、唯一性、count、latency sum 和唯一 timeout guard 语义；失败不得修补或发布并 fail-closed。
 - canonical JSON/SHA-256、deterministic UUID5 decision identity、semantic decision hash。
 
 ## Acceptance criteria
@@ -39,6 +40,7 @@ TASK-015 已在 Spec 0.6 冻结 RiskInput、Snapshot DTO、RuleSet、规则排�
 - [ ] 所有 SYSTEM.HARD 规则不可删除、不可被动态配置放宽、不可被 reduce-only 例外绕过。
 - [ ] reduce-only 仅接受版本匹配、数量不超、绝对仓位下降且不翻仓的显式 evidence；side/CLOSE/AUTO 均不构成证据。
 - [ ] 输出所有逐规则 evaluation_index、phase、scope、metric、typed 测量值、typed 限额、原因、例外标记；Runner 额外输出独立 monotonic RuleTiming、完整 internal audit output、权威 v2 与严格的 v1 lossy compatibility projection。
+- [ ] RiskAuditSemanticValidator 拒绝 missing/duplicate/extra/unsorted/mismatched timing、非连续 index、错误 completed count、latency sum 不一致和非末尾/多重 timeout guard；v1 projection 只接受 validator 已通过的 v2 audit。
 - [ ] V1 仅支持 RiskInput/RuleSet/account/portfolio/market 单一 ISO valuation currency；金额动态 limit currency 必须匹配，跨币种/FX 输入 fail-closed。
 - [ ] evaluator 无网络、数据库、Broker、Redis、环境变量、可变全局状态或任何时钟调用；Runner 只通过注入 Clock Port 计时。
 - [ ] Property tests 覆盖排列稳定性、同 metric 多规则最严格结果、hard cap 不可放宽、每个 fail-closed taxonomy、reduce evidence 边界、Decimal/float 拒绝、timeout late-PASS 不可覆盖。

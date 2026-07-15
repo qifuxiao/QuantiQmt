@@ -267,6 +267,131 @@ def envelope(
     }
 
 
+def validate_risk_audit_semantics(payload: dict[str, object]) -> None:
+    """Executable reference for the normative PORTS-RISK semantic validator."""
+    decision = payload["decision"]
+    assert isinstance(decision, dict)
+    results = decision["rule_results"]
+    timings = payload["rule_timings"]
+    assert isinstance(results, list) and isinstance(timings, list)
+
+    result_ids: set[str] = set()
+    for index, result in enumerate(results):
+        assert isinstance(result, dict)
+        if result["evaluation_index"] != index:
+            raise ValueError("rule result evaluation_index must be contiguous from zero")
+        rule_id = result["rule_id"]
+        assert isinstance(rule_id, str)
+        if rule_id in result_ids:
+            raise ValueError("rule result rule_id must be unique")
+        result_ids.add(rule_id)
+
+    if len(timings) != len(results):
+        raise ValueError("every rule result requires exactly one timing")
+    for index, (result, timing) in enumerate(zip(results, timings, strict=True)):
+        assert isinstance(result, dict) and isinstance(timing, dict)
+        if timing["evaluation_index"] != index:
+            raise ValueError("rule timing evaluation_index must be ordered and contiguous")
+        if (timing["evaluation_index"], timing["rule_id"]) != (
+            result["evaluation_index"],
+            result["rule_id"],
+        ):
+            raise ValueError("rule timing identity must match its rule result")
+
+    timing_sum = sum(int(timing["latency_us"]) for timing in timings)
+    if int(payload["total_latency_us"]) < timing_sum:
+        raise ValueError("total latency must cover the sum of rule timings")
+
+    origin = decision["decision_origin"]
+    timeout_positions = [
+        index
+        for index, result in enumerate(results)
+        if result["phase"] == "TIMEOUT_GUARD"
+        or result["rule_id"] == "RISK.SYSTEM.EVALUATION_TIMEOUT"
+    ]
+    if origin in {"EVALUATOR", "INPUT_GUARD"}:
+        if timeout_positions:
+            raise ValueError("non-timeout origin cannot contain a timeout guard")
+        if int(payload["completed_rule_count"]) != len(results):
+            raise ValueError("completed count must equal all completed results")
+        if origin == "INPUT_GUARD" and decision["decision"] != "REJECT":
+            raise ValueError("input guard must reject")
+        return
+
+    if origin != "TIMEOUT_GUARD":
+        raise ValueError("unknown decision origin")
+    if timeout_positions != [len(results) - 1]:
+        raise ValueError("timeout guard must be unique and last")
+    timeout_result = results[-1]
+    assert isinstance(timeout_result, dict)
+    if (
+        decision["decision"] != "REJECT"
+        or decision["primary_reason_code"] != "RISK_EVALUATION_TIMEOUT"
+        or decision["error_code"] != "QQ-RISK-4005"
+        or timeout_result["phase"] != "TIMEOUT_GUARD"
+        or timeout_result["rule_id"] != "RISK.SYSTEM.EVALUATION_TIMEOUT"
+        or timeout_result["result"] != "REJECT"
+        or timeout_result["reason_code"] != "RISK_EVALUATION_TIMEOUT"
+    ):
+        raise ValueError("timeout guard decision and result semantics must match")
+    if int(payload["completed_rule_count"]) != len(results) - 1:
+        raise ValueError("timeout guard is excluded from completed_rule_count")
+    if int(payload["total_latency_us"]) < int(payload["evaluation_timeout_us"]):
+        raise ValueError("timeout audit total latency must reach its timeout budget")
+
+
+def project_risk_v1(payload: dict[str, object]) -> dict[str, object]:
+    """Reference v1 projection; semantic validation is a mandatory precondition."""
+    validate_risk_audit_semantics(payload)
+    decision = payload["decision"]
+    assert isinstance(decision, dict)
+    results = decision["rule_results"]
+    timings = payload["rule_timings"]
+    assert isinstance(results, list) and isinstance(timings, list)
+
+    def projected_value(value: object) -> str | None:
+        if not isinstance(value, dict):
+            return None
+        if value.get("kind") == "DECIMAL":
+            candidate = value.get("value")
+            return candidate if isinstance(candidate, str) else None
+        if value.get("kind") == "INTEGER":
+            candidate = str(value.get("value"))
+            whole = candidate.removeprefix("-")
+            return candidate if len(whole) <= 18 else None
+        return None
+
+    projected_results = []
+    for result, timing in zip(results, timings, strict=True):
+        assert isinstance(result, dict) and isinstance(timing, dict)
+        projected_results.append(
+            {
+                "rule_id": result["rule_id"],
+                "result": result["result"],
+                "reason_code": result["reason_code"],
+                "measured_value": projected_value(result["measured_value"]),
+                "limit_value": projected_value(result["limit_value"]),
+                "latency_us": timing["latency_us"],
+            }
+        )
+    snapshots = decision["snapshot_states"]
+    assert isinstance(snapshots, dict)
+    return {
+        "decision_id": decision["decision_id"],
+        "order_id": decision["order_id"],
+        "expected_order_version": decision["expected_order_version"],
+        "decision": decision["decision"],
+        "rule_set_version": decision["rule_set_version"],
+        "snapshot_versions": {
+            name: snapshot["snapshot_version"]
+            for name, snapshot in snapshots.items()
+            if isinstance(snapshot, dict)
+        },
+        "rule_results": projected_results,
+        "evaluated_at": payload["evaluated_at"],
+    }
+
+
 @pytest.mark.parametrize("message_type", sorted(PAYLOADS))
 def test_all_approved_payloads_round_trip_without_precision_loss(
     registry: SchemaRegistry, message_type: str
@@ -348,6 +473,51 @@ def test_risk_v1_projection_remains_decimal_or_null_only() -> None:
 
     assert result["measured_value"]["type"] == ["string", "null"]
     assert result["limit_value"]["type"] == ["string", "null"]
+
+
+def test_risk_v1_projection_requires_semantically_valid_v2(
+    registry: SchemaRegistry,
+) -> None:
+    payload = deepcopy(PAYLOADS["risk.order_evaluated.v2"])
+    projected = project_risk_v1(payload)
+    MessageEnvelope.create(envelope("risk.order_evaluated.v1", projected), registry)
+    assert projected["rule_results"][0]["latency_us"] == 1  # type: ignore[index]
+
+    payload["rule_timings"][0]["rule_id"] = "DIFFERENT.RULE"  # type: ignore[index]
+    with pytest.raises(ValueError, match="identity"):
+        project_risk_v1(payload)
+
+
+@pytest.mark.parametrize(
+    "path",
+    sorted(FIXTURE_ROOT.glob("risk.order_evaluated.v2/semantic-invalid.*.json")),
+    ids=lambda path: path.name,
+)
+def test_risk_v2_semantic_invalid_fixtures_are_schema_valid_but_rejected(
+    registry: SchemaRegistry, path: Path
+) -> None:
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    MessageEnvelope.create(envelope("risk.order_evaluated.v2", payload), registry)
+    with pytest.raises(ValueError):
+        validate_risk_audit_semantics(payload)
+
+
+@pytest.mark.parametrize(
+    "path",
+    sorted(FIXTURE_ROOT.glob("risk.order_evaluated.v2/semantic-*.valid.json")),
+    ids=lambda path: path.name,
+)
+def test_risk_v2_semantic_valid_fixtures_pass_both_validators(
+    registry: SchemaRegistry, path: Path
+) -> None:
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    MessageEnvelope.create(envelope("risk.order_evaluated.v2", payload), registry)
+    validate_risk_audit_semantics(payload)
+
+
+def test_fixture_generator_outputs_only_semantically_valid_positive_risk_v2() -> None:
+    for path in FIXTURE_ROOT.glob("risk.order_evaluated.v2/*.valid.json"):
+        validate_risk_audit_semantics(json.loads(path.read_text(encoding="utf-8")))
 
 
 def test_monetary_rule_limits_require_currency_and_leverage_forbids_it() -> None:
