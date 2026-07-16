@@ -1,7 +1,7 @@
 ---
 id: TASK-028
 title: Documentation authority, local environment, and team workflow cleanup
-status: active
+status: completed
 depends_on: [TASK-014]
 spec_refs: [REVIEW-IMPLEMENTATION-READINESS-0.5]
 allowed_paths:
