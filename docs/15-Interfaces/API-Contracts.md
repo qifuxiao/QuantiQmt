@@ -1,9 +1,9 @@
 # Core API and Port Contracts
 
 > Status: Proposed  
-> 本文冻结核心逻辑接口。代码可以增加内部辅助方法，但不能改变这里的职责、错误语义和幂等约束。
+> 本文是核心 Port 的解释性总览。规范性逻辑签名、错误语义、幂等约束和 DTO 边界以 `spec/interfaces/**` 与 `spec/manifest.yaml` 为准；若本文与 `spec/` 冲突，以 `spec/` 为准。
 
-接口示例使用 Python typing 表达逻辑签名，不代表已经开始实现。所有 DTO 必须是不可变、可类型检查对象。
+接口示例使用 Python typing 表达意图，不代表已经开始实现，也不得作为绕过 `spec/` 的第二套契约。所有公共 DTO 必须在对应 spec-change task 中冻结后才能被实现任务使用。
 
 ## 通用结果
 
