@@ -27,3 +27,4 @@ tasks:
   - {id: TASK-025, path: backlog/TASK-025-control-observability.md, status: blocked, depends_on: [TASK-004, TASK-022]}
   - {id: TASK-026, path: backlog/TASK-026-miniqmt-live-adapter.md, status: blocked, depends_on: [TASK-006, TASK-023, TASK-025]}
   - {id: TASK-027, path: backlog/TASK-027-reconciliation-engine.md, status: blocked, depends_on: [TASK-004, TASK-006, TASK-007, TASK-018, TASK-022]}
+  - {id: TASK-028, path: active/TASK-028-documentation-authority-local-workflow.md, status: active, depends_on: [TASK-014]}
