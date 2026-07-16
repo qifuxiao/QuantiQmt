@@ -1,6 +1,6 @@
 # Local Development Environment
 
-> Status: Proposed  
+> Status: Proposed
 > 本文只描述本地开发和验证环境，不定义生产部署拓扑。生产数据库、凭证和灾备要求见 [Production-Operations.md](Production-Operations.md)。
 
 ## 目标

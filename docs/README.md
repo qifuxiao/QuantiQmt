@@ -1,6 +1,6 @@
 # QuantiQmt 架构文档
 
-QuantiQmt 是面向长期生产运行的量化交易系统，不是策略研究框架。本文档集是开发、评审、测试和运维的共同契约；实现与文档冲突时，必须先更新 ADR，再修改实现。
+QuantiQmt 是面向长期生产运行的量化交易系统，不是策略研究框架。本文档集提供架构解释、设计理由和运维背景；开发、评审、测试和运维的实现契约以 `spec/`、当前 active task 和根 `AGENTS.md` 的优先级为准。若 `docs/` 与 `spec/` 冲突，先修正过期文档；只有需要改变 Accepted ADR 或规范性契约时，才通过 ADR 或 spec-change task 变更。
 
 > AI-first 工程入口：规范性技术契约位于 [../spec/README.md](../spec/README.md)，可执行任务位于 [../tasks/README.md](../tasks/README.md)，Agent 工作流位于 [../ai/README.md](../ai/README.md)。本目录保留架构解释与设计理由；发生冲突时以 `spec/` 为准。
 
