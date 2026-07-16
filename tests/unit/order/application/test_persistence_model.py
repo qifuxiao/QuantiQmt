@@ -5,6 +5,11 @@ from datetime import UTC, datetime
 
 import pytest
 
+from quantiqmt.messaging.outbox import (
+    CriticalOutboxLagPolicy,
+    OutboxLagSnapshot,
+    evaluate_outbox_safety,
+)
 from quantiqmt.order.application.persistence import (
     ClaimPolicy,
     JournalAppend,
@@ -143,6 +148,43 @@ def test_claim_policy_bounds_and_deterministic_message_id() -> None:
     second = deterministic_message_id("oms.order_registered.v1", ORDER_ID.value, 1)
     assert first == second
     assert len(first) == 64
+
+
+def test_outbox_safety_evaluator_rejects_new_risk_on_critical_lag_or_dead_letters() -> None:
+    policy = CriticalOutboxLagPolicy(critical_lag_ms=10_000, critical_dead_letter_count=0)
+
+    healthy = evaluate_outbox_safety(
+        OutboxLagSnapshot(
+            oldest_order_message_lag_ms=9_999,
+            order_dead_letter_count=0,
+            pending_order_message_count=1,
+        ),
+        policy,
+    )
+    lagged = evaluate_outbox_safety(
+        OutboxLagSnapshot(
+            oldest_order_message_lag_ms=10_000,
+            order_dead_letter_count=0,
+            pending_order_message_count=1,
+        ),
+        policy,
+    )
+    dead_lettered = evaluate_outbox_safety(
+        OutboxLagSnapshot(
+            oldest_order_message_lag_ms=1,
+            order_dead_letter_count=1,
+            pending_order_message_count=1,
+        ),
+        policy,
+    )
+
+    assert healthy.reason_code == "OK"
+    assert healthy.reject_new_risk is False
+    assert lagged.reject_new_risk is True
+    assert lagged.emit_health_alert is True
+    assert lagged.reason_code == "ORDER_OUTBOX_LAG_CRITICAL"
+    assert dead_lettered.reject_new_risk is True
+    assert dead_lettered.reason_code == "ORDER_OUTBOX_DEAD_LETTER_CRITICAL"
 
 
 def test_snapshot_checksum_covers_all_fields_except_checksum() -> None:

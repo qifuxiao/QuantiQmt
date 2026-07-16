@@ -226,6 +226,17 @@ class InMemoryOrderPersistence:
         persisted = self._persisted_from_journal_records(order_id.value, records)
         if persisted is None:
             raise JournalCommitFailed("order projection is missing")
+        snapshot_lookup = self.latest_for_recovery(
+            order_id, deadline_monotonic_ns=deadline_monotonic_ns
+        )
+        if snapshot_lookup.status == "VALID":
+            return RecoveryLoad(persisted, source="SNAPSHOT_PLUS_JOURNAL")
+        if snapshot_lookup.status == "INVALID_DISCARDED":
+            return RecoveryLoad(
+                persisted,
+                source="FULL_JOURNAL",
+                snapshot_diagnostic=snapshot_lookup.diagnostic_code,
+            )
         return RecoveryLoad(persisted, source="FULL_JOURNAL")
 
     def list_recovery_order_ids(
@@ -301,15 +312,30 @@ class InMemoryOrderPersistence:
             ),
             None,
         )
-        if (
-            snapshot_checksum(selected) != selected.snapshot_checksum
-            or selected.journal_head_checksum != head
-        ):
+        if snapshot_checksum(selected) != selected.snapshot_checksum:
             return SnapshotLookup(
                 None,
                 "INVALID_DISCARDED",
                 diagnostic_code="QQ-STORAGE-7003",
-                diagnostic_detail="snapshot checksum or journal head checksum mismatch",
+                diagnostic_detail="snapshot checksum mismatch",
+                invalid_snapshot_id=selected.snapshot_id,
+                invalid_aggregate_version=selected.aggregate_version,
+            )
+        if selected.journal_head_checksum != head:
+            return SnapshotLookup(
+                None,
+                "INVALID_DISCARDED",
+                diagnostic_code="QQ-STORAGE-7003",
+                diagnostic_detail="snapshot journal head checksum mismatch",
+                invalid_snapshot_id=selected.snapshot_id,
+                invalid_aggregate_version=selected.aggregate_version,
+            )
+        if _snapshot_state_version(selected) != selected.aggregate_version:
+            return SnapshotLookup(
+                None,
+                "INVALID_DISCARDED",
+                diagnostic_code="QQ-STORAGE-7003",
+                diagnostic_detail="snapshot state aggregate_version mismatch",
                 invalid_snapshot_id=selected.snapshot_id,
                 invalid_aggregate_version=selected.aggregate_version,
             )
@@ -554,6 +580,13 @@ def _retry_delay_ms(record: OutboxRecord) -> int:
     exponent = max(record.attempt_count - 1, 0)
     delay = Decimal(initial) * (multiplier**exponent) * (Decimal("1") + jitter)
     return int(min(delay, Decimal(maximum)).to_integral_value(rounding=ROUND_CEILING))
+
+
+def _snapshot_state_version(snapshot: OrderSnapshot) -> int | None:
+    value = snapshot.state_payload.get("aggregate_version")
+    if isinstance(value, bool) or not isinstance(value, int):
+        return None
+    return value
 
 
 def _claimed_message(record: OutboxRecord) -> ClaimedMessage:

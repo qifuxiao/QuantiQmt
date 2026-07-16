@@ -312,6 +312,15 @@ class PostgresOrderPersistence:
             persisted = await self._persisted_from_journal_records(connection, records)
             if persisted is None:
                 raise JournalCommitFailed("order projection is missing")
+            snapshot_lookup = await self._latest_for_recovery_on_connection(connection, order_id)
+            if snapshot_lookup.status == "VALID":
+                return RecoveryLoad(persisted, source="SNAPSHOT_PLUS_JOURNAL")
+            if snapshot_lookup.status == "INVALID_DISCARDED":
+                return RecoveryLoad(
+                    persisted,
+                    source="FULL_JOURNAL",
+                    snapshot_diagnostic=snapshot_lookup.diagnostic_code,
+                )
             return RecoveryLoad(persisted, source="FULL_JOURNAL")
         finally:
             await connection.close()
@@ -431,38 +440,62 @@ class PostgresOrderPersistence:
     async def _latest_for_recovery(self, order_id: Identifier) -> SnapshotLookup:
         connection = await self._connect()
         try:
-            row = await connection.fetchrow(
-                """
-                SELECT snapshot_id::text AS snapshot_id, order_id::text AS order_id,
-                       aggregate_version, schema_version, state_payload,
-                       journal_head_checksum, snapshot_checksum, created_at
-                FROM order_snapshots
-                WHERE order_id = $1::uuid
-                ORDER BY aggregate_version DESC
-                LIMIT 1
-                """,
-                order_id.value,
-            )
-            if row is None:
-                return SnapshotLookup(None, "ABSENT")
-            snapshot = _snapshot_from_row(row)
-            head = await self._journal_checksum_at_version(
-                connection, order_id.value, snapshot.aggregate_version
-            )
-            if snapshot_checksum(snapshot) != snapshot.snapshot_checksum or (
-                head != snapshot.journal_head_checksum
-            ):
-                return SnapshotLookup(
-                    None,
-                    "INVALID_DISCARDED",
-                    diagnostic_code="QQ-STORAGE-7003",
-                    diagnostic_detail="snapshot checksum or journal head checksum mismatch",
-                    invalid_snapshot_id=snapshot.snapshot_id,
-                    invalid_aggregate_version=snapshot.aggregate_version,
-                )
-            return SnapshotLookup(snapshot, "VALID")
+            return await self._latest_for_recovery_on_connection(connection, order_id)
         finally:
             await connection.close()
+
+    async def _latest_for_recovery_on_connection(
+        self, connection: Any, order_id: Identifier
+    ) -> SnapshotLookup:
+        row = await connection.fetchrow(
+            """
+            SELECT snapshot_id::text AS snapshot_id, order_id::text AS order_id,
+                   aggregate_version, schema_version, state_payload,
+                   journal_head_checksum, snapshot_checksum, created_at
+            FROM order_snapshots
+            WHERE order_id = $1::uuid
+            ORDER BY aggregate_version DESC
+            LIMIT 1
+            """,
+            order_id.value,
+        )
+        if row is None:
+            return SnapshotLookup(None, "ABSENT")
+        try:
+            snapshot = _snapshot_from_row(row)
+        except (TypeError, ValueError) as exc:
+            return _invalid_snapshot_lookup(row, f"snapshot row is invalid: {exc}")
+        head = await self._journal_checksum_at_version(
+            connection, order_id.value, snapshot.aggregate_version
+        )
+        if snapshot_checksum(snapshot) != snapshot.snapshot_checksum:
+            return SnapshotLookup(
+                None,
+                "INVALID_DISCARDED",
+                diagnostic_code="QQ-STORAGE-7003",
+                diagnostic_detail="snapshot checksum mismatch",
+                invalid_snapshot_id=snapshot.snapshot_id,
+                invalid_aggregate_version=snapshot.aggregate_version,
+            )
+        if head != snapshot.journal_head_checksum:
+            return SnapshotLookup(
+                None,
+                "INVALID_DISCARDED",
+                diagnostic_code="QQ-STORAGE-7003",
+                diagnostic_detail="snapshot journal head checksum mismatch",
+                invalid_snapshot_id=snapshot.snapshot_id,
+                invalid_aggregate_version=snapshot.aggregate_version,
+            )
+        if _snapshot_state_version(snapshot) != snapshot.aggregate_version:
+            return SnapshotLookup(
+                None,
+                "INVALID_DISCARDED",
+                diagnostic_code="QQ-STORAGE-7003",
+                diagnostic_detail="snapshot state aggregate_version mismatch",
+                invalid_snapshot_id=snapshot.snapshot_id,
+                invalid_aggregate_version=snapshot.aggregate_version,
+            )
+        return SnapshotLookup(snapshot, "VALID")
 
     async def _claim(self, worker_id: str, policy: ClaimPolicy) -> tuple[ClaimedMessage, ...]:
         if not worker_id.strip():
@@ -976,6 +1009,34 @@ def _snapshot_from_row(row: Any) -> OrderSnapshot:
         str(row["snapshot_checksum"]),
         _utc(row["created_at"]),
     )
+
+
+def _invalid_snapshot_lookup(row: Any, detail: str) -> SnapshotLookup:
+    snapshot_id: Identifier | None = None
+    aggregate_version: int | None = None
+    try:
+        snapshot_id = Identifier(str(row["snapshot_id"]))
+    except (TypeError, ValueError):
+        snapshot_id = None
+    try:
+        aggregate_version = int(row["aggregate_version"])
+    except (TypeError, ValueError):
+        aggregate_version = None
+    return SnapshotLookup(
+        None,
+        "INVALID_DISCARDED",
+        diagnostic_code="QQ-STORAGE-7003",
+        diagnostic_detail=detail,
+        invalid_snapshot_id=snapshot_id,
+        invalid_aggregate_version=aggregate_version,
+    )
+
+
+def _snapshot_state_version(snapshot: OrderSnapshot) -> int | None:
+    value = snapshot.state_payload.get("aggregate_version")
+    if isinstance(value, bool) or not isinstance(value, int):
+        return None
+    return value
 
 
 def _claimed_from_row(row: Any) -> ClaimedMessage:
