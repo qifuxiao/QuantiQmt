@@ -294,10 +294,56 @@ def test_snapshot_lookup_accepts_valid_older_snapshot_with_later_journal(
     )
 
     lookup = store.latest_for_recovery(ORDER_ID, deadline_monotonic_ns=DEADLINE)
+    loaded = store.load_for_recovery(ORDER_ID, deadline_monotonic_ns=DEADLINE)
 
     assert lookup.status == "VALID"
     assert lookup.snapshot is not None
     assert lookup.snapshot.aggregate_version == 1
+    assert loaded.source == "SNAPSHOT_PLUS_JOURNAL"
+    assert loaded.persisted_order.order.version == 2
+
+
+def test_invalid_snapshot_is_discarded_and_recovery_falls_back_to_full_journal(
+    registry: SchemaRegistry,
+) -> None:
+    store = InMemoryOrderPersistence(now=NOW)
+    registered = store.register(registered_commit(registry), deadline_monotonic_ns=DEADLINE)
+    corrupted_payload = {
+        **order_state_payload(registered.persisted_order),
+        "aggregate_version": 2,
+    }
+    draft = OrderSnapshot(
+        Identifier("550e8400-e29b-41d4-a716-446655440020"),
+        ORDER_ID,
+        1,
+        1,
+        corrupted_payload,
+        store.journal_records[-1].entry_checksum,
+        "0" * 64,
+        NOW,
+    )
+    store.write(
+        OrderSnapshot(
+            draft.snapshot_id,
+            draft.order_id,
+            draft.aggregate_version,
+            draft.schema_version,
+            draft.state_payload,
+            draft.journal_head_checksum,
+            snapshot_checksum(draft),
+            draft.created_at,
+        ),
+        deadline_monotonic_ns=DEADLINE,
+    )
+
+    lookup = store.latest_for_recovery(ORDER_ID, deadline_monotonic_ns=DEADLINE)
+    loaded = store.load_for_recovery(ORDER_ID, deadline_monotonic_ns=DEADLINE)
+
+    assert lookup.status == "INVALID_DISCARDED"
+    assert lookup.diagnostic_code == "QQ-STORAGE-7003"
+    assert loaded.source == "FULL_JOURNAL"
+    assert loaded.snapshot_diagnostic == "QQ-STORAGE-7003"
+    assert loaded.persisted_order.order.version == 1
 
 
 def test_outbox_claim_publish_reclaim_and_expired_token_fencing(registry: SchemaRegistry) -> None:
@@ -316,10 +362,52 @@ def test_outbox_claim_publish_reclaim_and_expired_token_fencing(registry: Schema
         ).code
         == "QQ-STORAGE-7004"
     )
+    assert (
+        store.renew(
+            first[0].message_id,
+            first[0].claim_token,
+            policy,
+            deadline_monotonic_ns=DEADLINE,
+        ).code
+        == "QQ-STORAGE-7004"
+    )
+    assert (
+        store.release_failed(
+            first[0].message_id,
+            first[0].claim_token,
+            PublishFailure("PUBLISH_FAILED", "old worker", retryable=True),
+            deadline_monotonic_ns=DEADLINE,
+        ).code
+        == "QQ-STORAGE-7004"
+    )
     second = store.claim("worker-b", policy, deadline_monotonic_ns=DEADLINE)
     assert second[0].message_id == first[0].message_id
     assert second[0].claim_token != first[0].claim_token
     assert second[0].attempt_count == 2
+    assert (
+        store.mark_published(
+            first[0].message_id, first[0].claim_token, deadline_monotonic_ns=DEADLINE
+        ).code
+        == "QQ-STORAGE-7004"
+    )
+    assert (
+        store.renew(
+            first[0].message_id,
+            first[0].claim_token,
+            policy,
+            deadline_monotonic_ns=DEADLINE,
+        ).code
+        == "QQ-STORAGE-7004"
+    )
+    assert (
+        store.release_failed(
+            first[0].message_id,
+            first[0].claim_token,
+            PublishFailure("PUBLISH_FAILED", "reclaimed by other worker", retryable=True),
+            deadline_monotonic_ns=DEADLINE,
+        ).code
+        == "QQ-STORAGE-7004"
+    )
     assert (
         store.mark_published(
             second[0].message_id, second[0].claim_token, deadline_monotonic_ns=DEADLINE
