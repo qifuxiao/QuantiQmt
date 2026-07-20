@@ -1,7 +1,7 @@
 ---
 id: TASK-028
 title: Documentation authority, local environment, and team workflow cleanup
-status: completed
+status: active
 depends_on: [TASK-014]
 spec_refs: [REVIEW-IMPLEMENTATION-READINESS-0.5]
 allowed_paths:
@@ -17,6 +17,9 @@ allowed_paths:
   - tasks/active/README.md
   - tasks/active/TASK-028-documentation-authority-local-workflow.md
   - tasks/index.yaml
+  - docs/standards/01-Coding-Convention/01-Engineering-Convention-Part01.md
+  - docs/standards/01-Coding-Convention/01-Engineering-Convention-Part02.md
+  - docs/standards/01-Coding-Convention/01-Engineering-Convention-Part03.md
 forbidden_paths:
   - src/**
   - tests/**
@@ -62,6 +65,9 @@ verification:
 - `docs/README.md` 与 `ai/README.md` 已链接新增文档。
 - `poetry run python scripts/validate_specs.py`: passed。
 - `poetry run pytest tests/spec tests/contract`: 192 passed。
+- Post-merge 独立 Review 结论为 `REQUEST_CHANGES`；P2 Finding 指出三个 Engineering Convention 文件仍将实现者指向 docs L4 文档作为事件、Payload、DTO、核心接口、Workflow 与状态机的契约来源。
+- 人类项目成员明确授权将 TASK-028 从 completed 恢复为 active，并精确扩大 allowed_paths 至三个 Engineering Convention 文件，仅用于修复文档权威来源表述。
+- 修复完成并取得独立 Review APPROVE 前，TASK-028 不得再次移动到 completed。
 
 ## Required evidence
 

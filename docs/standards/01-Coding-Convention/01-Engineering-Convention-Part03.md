@@ -1,4 +1,4 @@
-> 本文规定通用工程风格。事件名、Payload、核心接口、流程和状态机以 `docs/README.md` 所列 L4 Catalog/Specification 为准；本文历史示例不构成接口契约。
+> 本文规定通用工程风格。安全不变量和最新 Accepted ADR 保持最高优先级；事件、Payload、DTO、核心接口、Workflow 与状态机的规范性实现契约，以 `spec/manifest.yaml` 索引的 `spec/**` 为准。`docs/README.md` 仅提供解释性导航，不构成实现契约；docs 与 spec 冲突时按规范优先级裁决。本文历史示例不构成接口契约。
 
 <!--
  * @Author: qifuxiao
