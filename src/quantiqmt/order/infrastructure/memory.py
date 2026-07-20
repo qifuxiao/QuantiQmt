@@ -231,6 +231,9 @@ class InMemoryOrderPersistence:
         records = self._journal.get(order_id.value, [])
         if not records:
             raise OrderJournalCorrupted("journal is missing")
+        verified_records = self._verify_journal_records(
+            records, expected_start_version=1, previous_entry_checksum=None
+        )
         snapshot_lookup = self.latest_for_recovery(
             order_id, deadline_monotonic_ns=deadline_monotonic_ns
         )
@@ -238,22 +241,13 @@ class InMemoryOrderPersistence:
             assert snapshot_lookup.snapshot is not None
             later_records = [
                 record
-                for record in records
+                for record in verified_records
                 if record.append.aggregate_version > snapshot_lookup.snapshot.aggregate_version
             ]
-            if later_records:
-                self._verify_journal_records(
-                    later_records,
-                    expected_start_version=snapshot_lookup.snapshot.aggregate_version + 1,
-                    previous_entry_checksum=snapshot_lookup.snapshot.journal_head_checksum,
-                )
             persisted = _persisted_from_snapshot_and_later_journal_records(
                 snapshot_lookup.snapshot, later_records
             )
             return RecoveryLoad(persisted, source="SNAPSHOT_PLUS_JOURNAL")
-        verified_records = self._verify_journal_records(
-            records, expected_start_version=1, previous_entry_checksum=None
-        )
         full_persisted = self._persisted_from_journal_records(order_id.value, verified_records)
         if full_persisted is None:
             raise JournalCommitFailed("order projection is missing")

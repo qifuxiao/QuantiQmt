@@ -325,27 +325,21 @@ class PostgresOrderPersistence:
             records = await self._fetch_journal_rows(connection, order_id.value)
             if not records:
                 raise OrderJournalCorrupted("journal is missing")
+            verified_records = self._verify_journal_rows(
+                records, expected_start_version=1, previous_entry_checksum=None
+            )
             snapshot_lookup = await self._latest_for_recovery_on_connection(connection, order_id)
             if snapshot_lookup.status == "VALID":
                 assert snapshot_lookup.snapshot is not None
                 later_records = [
                     record
-                    for record in records
+                    for record in verified_records
                     if int(record["aggregate_version"]) > snapshot_lookup.snapshot.aggregate_version
                 ]
-                if later_records:
-                    self._verify_journal_rows(
-                        later_records,
-                        expected_start_version=snapshot_lookup.snapshot.aggregate_version + 1,
-                        previous_entry_checksum=snapshot_lookup.snapshot.journal_head_checksum,
-                    )
                 persisted = _persisted_from_snapshot_and_later_journal_records(
                     snapshot_lookup.snapshot, later_records
                 )
                 return RecoveryLoad(persisted, source="SNAPSHOT_PLUS_JOURNAL")
-            verified_records = self._verify_journal_rows(
-                records, expected_start_version=1, previous_entry_checksum=None
-            )
             full_persisted = await self._persisted_from_journal_records(
                 connection, verified_records
             )

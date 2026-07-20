@@ -380,7 +380,7 @@ def test_postgres_snapshot_lookup_accepts_valid_older_snapshot_with_later_journa
     assert loaded.persisted_order.order.version == 2
 
 
-def test_postgres_snapshot_plus_later_journal_does_not_replay_presnapshot_payload(
+def test_postgres_valid_snapshot_does_not_bypass_presnapshot_journal_checksum(
     postgres_store: PostgresOrderPersistence, registry: SchemaRegistry
 ) -> None:
     registered = postgres_store.register(
@@ -424,12 +424,11 @@ def test_postgres_snapshot_plus_later_journal_does_not_replay_presnapshot_payloa
             ORDER_ID.value,
         )
     )
+    asyncio.run(_delete_order_projection_bypassing_fk(ORDER_ID.value))
 
-    loaded = postgres_store.load_for_recovery(ORDER_ID, deadline_monotonic_ns=DEADLINE)
-
-    assert loaded.source == "SNAPSHOT_PLUS_JOURNAL"
-    assert loaded.persisted_order.order.version == 2
-    assert loaded.persisted_order.order.state is OrderState.RISK_PENDING
+    with pytest.raises(OrderJournalCorrupted, match="QQ-RECOVERY-8002"):
+        postgres_store.load_for_recovery(ORDER_ID, deadline_monotonic_ns=DEADLINE)
+    assert asyncio.run(_table_counts()) == (0, 2, 2)
 
 
 @pytest.mark.parametrize("mode", ["checksum", "head", "schema", "state_version"])
