@@ -1,15 +1,18 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 
 import pytest
 
 from quantiqmt.contracts import SchemaRegistry
+from quantiqmt.messaging.outbox import CriticalOutboxLagPolicy
 from quantiqmt.order.application.persistence import (
     ClaimPolicy,
     IdempotencyConflict,
     JournalAppend,
     OrderCommit,
+    OrderJournalCorrupted,
     OrderRegistration,
     OrderSnapshot,
     PersistedOrder,
@@ -258,6 +261,21 @@ def test_recovery_rebuilds_projection_from_journal_post_state(
     assert store.get(ORDER_ID, deadline_monotonic_ns=DEADLINE) is not None
 
 
+def test_empty_journal_fails_recovery_closed_with_recovery_error(
+    registry: SchemaRegistry,
+) -> None:
+    store = InMemoryOrderPersistence(now=NOW)
+    store.register(registered_commit(registry), deadline_monotonic_ns=DEADLINE)
+    store._journal[ORDER_ID.value] = []
+
+    with pytest.raises(OrderJournalCorrupted, match="QQ-RECOVERY-8002"):
+        store.load_for_recovery(ORDER_ID, deadline_monotonic_ns=DEADLINE)
+    with pytest.raises(OrderJournalCorrupted, match="QQ-RECOVERY-8002"):
+        store.rebuild_projection_from_journal(
+            ORDER_ID, expected_journal_head_checksum=None, deadline_monotonic_ns=DEADLINE
+        )
+
+
 def test_snapshot_lookup_accepts_valid_older_snapshot_with_later_journal(
     registry: SchemaRegistry,
 ) -> None:
@@ -294,10 +312,103 @@ def test_snapshot_lookup_accepts_valid_older_snapshot_with_later_journal(
     )
 
     lookup = store.latest_for_recovery(ORDER_ID, deadline_monotonic_ns=DEADLINE)
+    loaded = store.load_for_recovery(ORDER_ID, deadline_monotonic_ns=DEADLINE)
 
     assert lookup.status == "VALID"
     assert lookup.snapshot is not None
     assert lookup.snapshot.aggregate_version == 1
+    assert loaded.source == "SNAPSHOT_PLUS_JOURNAL"
+    assert loaded.persisted_order.order.version == 2
+
+
+def test_valid_snapshot_does_not_bypass_presnapshot_journal_checksum(
+    registry: SchemaRegistry,
+) -> None:
+    store = InMemoryOrderPersistence(now=NOW)
+    registered = store.register(registered_commit(registry), deadline_monotonic_ns=DEADLINE)
+    draft = OrderSnapshot(
+        Identifier("550e8400-e29b-41d4-a716-446655440020"),
+        ORDER_ID,
+        1,
+        1,
+        order_state_payload(registered.persisted_order),
+        store.journal_records[-1].entry_checksum,
+        "0" * 64,
+        NOW,
+    )
+    store.write(
+        OrderSnapshot(
+            draft.snapshot_id,
+            draft.order_id,
+            draft.aggregate_version,
+            draft.schema_version,
+            draft.state_payload,
+            draft.journal_head_checksum,
+            snapshot_checksum(draft),
+            draft.created_at,
+        ),
+        deadline_monotonic_ns=DEADLINE,
+    )
+    store.save(
+        transition_commit(registry, registered.persisted_order),
+        expected_version=1,
+        deadline_monotonic_ns=DEADLINE,
+    )
+    first_record = store._journal[ORDER_ID.value][0]
+    corrupted_payload = dict(first_record.append.payload)
+    post_state = dict(corrupted_payload["post_state"])
+    post_state["state"] = "CORRUPTED"
+    corrupted_payload["post_state"] = post_state
+    store._journal[ORDER_ID.value][0] = replace(
+        first_record,
+        append=replace(first_record.append, payload=corrupted_payload),
+    )
+
+    with pytest.raises(OrderJournalCorrupted, match="QQ-RECOVERY-8002"):
+        store.load_for_recovery(ORDER_ID, deadline_monotonic_ns=DEADLINE)
+
+
+def test_invalid_snapshot_is_discarded_and_recovery_falls_back_to_full_journal(
+    registry: SchemaRegistry,
+) -> None:
+    store = InMemoryOrderPersistence(now=NOW)
+    registered = store.register(registered_commit(registry), deadline_monotonic_ns=DEADLINE)
+    corrupted_payload = {
+        **order_state_payload(registered.persisted_order),
+        "aggregate_version": 2,
+    }
+    draft = OrderSnapshot(
+        Identifier("550e8400-e29b-41d4-a716-446655440020"),
+        ORDER_ID,
+        1,
+        1,
+        corrupted_payload,
+        store.journal_records[-1].entry_checksum,
+        "0" * 64,
+        NOW,
+    )
+    store.write(
+        OrderSnapshot(
+            draft.snapshot_id,
+            draft.order_id,
+            draft.aggregate_version,
+            draft.schema_version,
+            draft.state_payload,
+            draft.journal_head_checksum,
+            snapshot_checksum(draft),
+            draft.created_at,
+        ),
+        deadline_monotonic_ns=DEADLINE,
+    )
+
+    lookup = store.latest_for_recovery(ORDER_ID, deadline_monotonic_ns=DEADLINE)
+    loaded = store.load_for_recovery(ORDER_ID, deadline_monotonic_ns=DEADLINE)
+
+    assert lookup.status == "INVALID_DISCARDED"
+    assert lookup.diagnostic_code == "QQ-STORAGE-7003"
+    assert loaded.source == "FULL_JOURNAL"
+    assert loaded.snapshot_diagnostic == "QQ-STORAGE-7003"
+    assert loaded.persisted_order.order.version == 1
 
 
 def test_outbox_claim_publish_reclaim_and_expired_token_fencing(registry: SchemaRegistry) -> None:
@@ -316,10 +427,52 @@ def test_outbox_claim_publish_reclaim_and_expired_token_fencing(registry: Schema
         ).code
         == "QQ-STORAGE-7004"
     )
+    assert (
+        store.renew(
+            first[0].message_id,
+            first[0].claim_token,
+            policy,
+            deadline_monotonic_ns=DEADLINE,
+        ).code
+        == "QQ-STORAGE-7004"
+    )
+    assert (
+        store.release_failed(
+            first[0].message_id,
+            first[0].claim_token,
+            PublishFailure("PUBLISH_FAILED", "old worker", retryable=True),
+            deadline_monotonic_ns=DEADLINE,
+        ).code
+        == "QQ-STORAGE-7004"
+    )
     second = store.claim("worker-b", policy, deadline_monotonic_ns=DEADLINE)
     assert second[0].message_id == first[0].message_id
     assert second[0].claim_token != first[0].claim_token
     assert second[0].attempt_count == 2
+    assert (
+        store.mark_published(
+            first[0].message_id, first[0].claim_token, deadline_monotonic_ns=DEADLINE
+        ).code
+        == "QQ-STORAGE-7004"
+    )
+    assert (
+        store.renew(
+            first[0].message_id,
+            first[0].claim_token,
+            policy,
+            deadline_monotonic_ns=DEADLINE,
+        ).code
+        == "QQ-STORAGE-7004"
+    )
+    assert (
+        store.release_failed(
+            first[0].message_id,
+            first[0].claim_token,
+            PublishFailure("PUBLISH_FAILED", "reclaimed by other worker", retryable=True),
+            deadline_monotonic_ns=DEADLINE,
+        ).code
+        == "QQ-STORAGE-7004"
+    )
     assert (
         store.mark_published(
             second[0].message_id, second[0].claim_token, deadline_monotonic_ns=DEADLINE
@@ -343,6 +496,15 @@ def test_release_failed_dead_letters_non_retryable_failures(registry: SchemaRegi
     )
     assert result.applied is True
     assert store.outbox_records[0].status is OutboxStatus.DEAD_LETTER
+    action = store.evaluate_outbox_safety(
+        CriticalOutboxLagPolicy(critical_lag_ms=10_000, critical_dead_letter_count=0),
+        deadline_monotonic_ns=DEADLINE,
+    )
+    assert action.critical is True
+    assert action.reject_new_risk is True
+    assert action.keep_recovery_barrier_closed is True
+    assert action.emit_health_alert is True
+    assert action.reason_code == "ORDER_OUTBOX_DEAD_LETTER_CRITICAL"
 
 
 def test_retryable_failure_reaches_max_attempts_before_next_claim(

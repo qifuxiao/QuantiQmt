@@ -16,6 +16,12 @@ from time import monotonic_ns
 from types import MappingProxyType
 from typing import Any, Literal, cast
 
+from quantiqmt.messaging.outbox import (
+    CriticalOutboxLagPolicy,
+    OutboxLagSnapshot,
+    OutboxSafetyAction,
+    evaluate_outbox_safety,
+)
 from quantiqmt.order.application.persistence.errors import (
     IdempotencyConflict,
     JournalCommitFailed,
@@ -222,11 +228,36 @@ class InMemoryOrderPersistence:
         self, order_id: Identifier, *, deadline_monotonic_ns: int
     ) -> RecoveryLoad:
         _require_deadline(deadline_monotonic_ns)
-        records = self._verify_journal_chain(order_id.value)
-        persisted = self._persisted_from_journal_records(order_id.value, records)
-        if persisted is None:
+        records = self._journal.get(order_id.value, [])
+        if not records:
+            raise OrderJournalCorrupted("journal is missing")
+        verified_records = self._verify_journal_records(
+            records, expected_start_version=1, previous_entry_checksum=None
+        )
+        snapshot_lookup = self.latest_for_recovery(
+            order_id, deadline_monotonic_ns=deadline_monotonic_ns
+        )
+        if snapshot_lookup.status == "VALID":
+            assert snapshot_lookup.snapshot is not None
+            later_records = [
+                record
+                for record in verified_records
+                if record.append.aggregate_version > snapshot_lookup.snapshot.aggregate_version
+            ]
+            persisted = _persisted_from_snapshot_and_later_journal_records(
+                snapshot_lookup.snapshot, later_records
+            )
+            return RecoveryLoad(persisted, source="SNAPSHOT_PLUS_JOURNAL")
+        full_persisted = self._persisted_from_journal_records(order_id.value, verified_records)
+        if full_persisted is None:
             raise JournalCommitFailed("order projection is missing")
-        return RecoveryLoad(persisted, source="FULL_JOURNAL")
+        if snapshot_lookup.status == "INVALID_DISCARDED":
+            return RecoveryLoad(
+                full_persisted,
+                source="FULL_JOURNAL",
+                snapshot_diagnostic=snapshot_lookup.diagnostic_code,
+            )
+        return RecoveryLoad(full_persisted, source="FULL_JOURNAL")
 
     def list_recovery_order_ids(
         self,
@@ -265,8 +296,6 @@ class InMemoryOrderPersistence:
     ) -> RecoveryLoad:
         _require_deadline(deadline_monotonic_ns)
         records = self._verify_journal_chain(order_id.value)
-        if not records:
-            raise JournalCommitFailed("journal is missing")
         head = records[-1].entry_checksum
         if expected_journal_head_checksum is not None and expected_journal_head_checksum != head:
             raise OrderVersionConflict("journal head changed during projection rebuild")
@@ -301,15 +330,30 @@ class InMemoryOrderPersistence:
             ),
             None,
         )
-        if (
-            snapshot_checksum(selected) != selected.snapshot_checksum
-            or selected.journal_head_checksum != head
-        ):
+        if snapshot_checksum(selected) != selected.snapshot_checksum:
             return SnapshotLookup(
                 None,
                 "INVALID_DISCARDED",
                 diagnostic_code="QQ-STORAGE-7003",
-                diagnostic_detail="snapshot checksum or journal head checksum mismatch",
+                diagnostic_detail="snapshot checksum mismatch",
+                invalid_snapshot_id=selected.snapshot_id,
+                invalid_aggregate_version=selected.aggregate_version,
+            )
+        if selected.journal_head_checksum != head:
+            return SnapshotLookup(
+                None,
+                "INVALID_DISCARDED",
+                diagnostic_code="QQ-STORAGE-7003",
+                diagnostic_detail="snapshot journal head checksum mismatch",
+                invalid_snapshot_id=selected.snapshot_id,
+                invalid_aggregate_version=selected.aggregate_version,
+            )
+        if _snapshot_state_version(selected) != selected.aggregate_version:
+            return SnapshotLookup(
+                None,
+                "INVALID_DISCARDED",
+                diagnostic_code="QQ-STORAGE-7003",
+                diagnostic_detail="snapshot state aggregate_version mismatch",
                 invalid_snapshot_id=selected.snapshot_id,
                 invalid_aggregate_version=selected.aggregate_version,
             )
@@ -455,6 +499,37 @@ class InMemoryOrderPersistence:
         )
         return OutboxMutationResult(True, "OK")
 
+    def evaluate_outbox_safety(
+        self, policy: CriticalOutboxLagPolicy, *, deadline_monotonic_ns: int
+    ) -> OutboxSafetyAction:
+        _require_deadline(deadline_monotonic_ns)
+        order_records = [
+            record for record in self._outbox.values() if record.message_type.startswith("oms.")
+        ]
+        pending_records = [
+            record
+            for record in order_records
+            if record.status in {OutboxStatus.PENDING, OutboxStatus.CLAIMED}
+        ]
+        oldest_lag_ms = max(
+            (
+                int((self._now - record.available_at).total_seconds() * 1000)
+                for record in pending_records
+                if record.available_at <= self._now
+            ),
+            default=0,
+        )
+        return evaluate_outbox_safety(
+            OutboxLagSnapshot(
+                oldest_order_message_lag_ms=oldest_lag_ms,
+                order_dead_letter_count=sum(
+                    record.status is OutboxStatus.DEAD_LETTER for record in order_records
+                ),
+                pending_order_message_count=len(pending_records),
+            ),
+            policy,
+        )
+
     def _prepare_journal(
         self, order_id: str, append: JournalAppend, registration_fingerprint: str
     ) -> list[JournalRecord]:
@@ -501,8 +576,21 @@ class InMemoryOrderPersistence:
 
     def _verify_journal_chain(self, order_id: str) -> list[JournalRecord]:
         records = self._journal.get(order_id, [])
-        previous: str | None = None
-        for expected, record in enumerate(records, start=1):
+        return self._verify_journal_records(
+            records, expected_start_version=1, previous_entry_checksum=None
+        )
+
+    def _verify_journal_records(
+        self,
+        records: list[JournalRecord],
+        *,
+        expected_start_version: int,
+        previous_entry_checksum: str | None,
+    ) -> list[JournalRecord]:
+        if not records:
+            raise OrderJournalCorrupted("journal is missing")
+        previous = previous_entry_checksum
+        for expected, record in enumerate(records, start=expected_start_version):
             if record.append.aggregate_version != expected:
                 raise OrderJournalCorrupted("journal version gap detected")
             if record.previous_entry_checksum != previous:
@@ -556,6 +644,13 @@ def _retry_delay_ms(record: OutboxRecord) -> int:
     return int(min(delay, Decimal(maximum)).to_integral_value(rounding=ROUND_CEILING))
 
 
+def _snapshot_state_version(snapshot: OrderSnapshot) -> int | None:
+    value = snapshot.state_payload.get("aggregate_version")
+    if isinstance(value, bool) or not isinstance(value, int):
+        return None
+    return value
+
+
 def _claimed_message(record: OutboxRecord) -> ClaimedMessage:
     assert record.claim_token is not None
     assert record.lease_until is not None
@@ -570,6 +665,24 @@ def _claimed_message(record: OutboxRecord) -> ClaimedMessage:
         lease_until=record.lease_until,
         attempt_count=record.attempt_count,
     )
+
+
+def _persisted_from_snapshot_and_later_journal_records(
+    snapshot: OrderSnapshot, later_records: list[JournalRecord]
+) -> PersistedOrder:
+    state_payload: Mapping[str, Any] = cast(Mapping[str, Any], snapshot.state_payload)
+    fingerprint = str(state_payload.get("registration_fingerprint", ""))
+    if not fingerprint:
+        raise JournalCommitFailed("snapshot state is missing registration_fingerprint")
+    for record in later_records:
+        post_state = record.append.payload.get("post_state")
+        if not isinstance(post_state, Mapping):
+            raise JournalCommitFailed("journal entry is missing committed post_state")
+        state_payload = cast(Mapping[str, Any], post_state)
+        fingerprint = str(state_payload.get("registration_fingerprint", ""))
+        if not fingerprint:
+            raise JournalCommitFailed("journal post_state is missing registration_fingerprint")
+    return _persisted_from_state_payload(state_payload, fingerprint)
 
 
 def _persisted_from_state_payload(
