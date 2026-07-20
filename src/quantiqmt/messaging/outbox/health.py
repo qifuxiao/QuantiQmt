@@ -15,8 +15,8 @@ class CriticalOutboxLagPolicy:
     def __post_init__(self) -> None:
         if not 1 <= self.critical_lag_ms <= 300_000:
             raise ValueError("critical_lag_ms must be between 1 and 300000")
-        if not 0 <= self.critical_dead_letter_count <= 100_000:
-            raise ValueError("critical_dead_letter_count must be between 0 and 100000")
+        if self.critical_dead_letter_count != 0:
+            raise ValueError("critical_dead_letter_count must be 0")
 
 
 @dataclass(frozen=True, slots=True)
@@ -42,6 +42,7 @@ class OutboxSafetyAction:
 
     critical: bool
     reject_new_risk: bool
+    keep_recovery_barrier_closed: bool
     emit_health_alert: bool
     reason_code: str
 
@@ -52,11 +53,12 @@ def evaluate_outbox_safety(
     """Return the fail-closed action for critical order publication lag."""
 
     lag_critical = snapshot.oldest_order_message_lag_ms >= policy.critical_lag_ms
-    dead_letter_critical = snapshot.order_dead_letter_count > policy.critical_dead_letter_count
+    dead_letter_critical = snapshot.order_dead_letter_count > 0
     if dead_letter_critical:
         return OutboxSafetyAction(
             critical=True,
             reject_new_risk=True,
+            keep_recovery_barrier_closed=True,
             emit_health_alert=True,
             reason_code="ORDER_OUTBOX_DEAD_LETTER_CRITICAL",
         )
@@ -64,12 +66,14 @@ def evaluate_outbox_safety(
         return OutboxSafetyAction(
             critical=True,
             reject_new_risk=True,
+            keep_recovery_barrier_closed=True,
             emit_health_alert=True,
             reason_code="ORDER_OUTBOX_LAG_CRITICAL",
         )
     return OutboxSafetyAction(
         critical=False,
         reject_new_risk=False,
+        keep_recovery_barrier_closed=False,
         emit_health_alert=False,
         reason_code="OK",
     )

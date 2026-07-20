@@ -5,11 +5,13 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 from quantiqmt.contracts import SchemaRegistry
+from quantiqmt.messaging.outbox import CriticalOutboxLagPolicy
 from quantiqmt.order.application.persistence import (
     ClaimPolicy,
     IdempotencyConflict,
     JournalAppend,
     OrderCommit,
+    OrderJournalCorrupted,
     OrderRegistration,
     OrderSnapshot,
     PersistedOrder,
@@ -258,6 +260,21 @@ def test_recovery_rebuilds_projection_from_journal_post_state(
     assert store.get(ORDER_ID, deadline_monotonic_ns=DEADLINE) is not None
 
 
+def test_empty_journal_fails_recovery_closed_with_recovery_error(
+    registry: SchemaRegistry,
+) -> None:
+    store = InMemoryOrderPersistence(now=NOW)
+    store.register(registered_commit(registry), deadline_monotonic_ns=DEADLINE)
+    store._journal[ORDER_ID.value] = []
+
+    with pytest.raises(OrderJournalCorrupted, match="QQ-RECOVERY-8002"):
+        store.load_for_recovery(ORDER_ID, deadline_monotonic_ns=DEADLINE)
+    with pytest.raises(OrderJournalCorrupted, match="QQ-RECOVERY-8002"):
+        store.rebuild_projection_from_journal(
+            ORDER_ID, expected_journal_head_checksum=None, deadline_monotonic_ns=DEADLINE
+        )
+
+
 def test_snapshot_lookup_accepts_valid_older_snapshot_with_later_journal(
     registry: SchemaRegistry,
 ) -> None:
@@ -431,6 +448,15 @@ def test_release_failed_dead_letters_non_retryable_failures(registry: SchemaRegi
     )
     assert result.applied is True
     assert store.outbox_records[0].status is OutboxStatus.DEAD_LETTER
+    action = store.evaluate_outbox_safety(
+        CriticalOutboxLagPolicy(critical_lag_ms=10_000, critical_dead_letter_count=0),
+        deadline_monotonic_ns=DEADLINE,
+    )
+    assert action.critical is True
+    assert action.reject_new_risk is True
+    assert action.keep_recovery_barrier_closed is True
+    assert action.emit_health_alert is True
+    assert action.reason_code == "ORDER_OUTBOX_DEAD_LETTER_CRITICAL"
 
 
 def test_retryable_failure_reaches_max_attempts_before_next_claim(

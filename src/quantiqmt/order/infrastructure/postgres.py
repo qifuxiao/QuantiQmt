@@ -11,6 +11,12 @@ from time import monotonic_ns
 from types import MappingProxyType
 from typing import Any, Literal, cast
 
+from quantiqmt.messaging.outbox import (
+    CriticalOutboxLagPolicy,
+    OutboxLagSnapshot,
+    OutboxSafetyAction,
+    evaluate_outbox_safety,
+)
 from quantiqmt.order.application.persistence.errors import (
     IdempotencyConflict,
     JournalCommitFailed,
@@ -170,6 +176,12 @@ class PostgresOrderPersistence:
         _require_deadline(deadline_monotonic_ns)
         return self._run(self._renew(message_id, claim_token, policy), deadline_monotonic_ns)
 
+    def evaluate_outbox_safety(
+        self, policy: CriticalOutboxLagPolicy, *, deadline_monotonic_ns: int
+    ) -> OutboxSafetyAction:
+        _require_deadline(deadline_monotonic_ns)
+        return self._run(self._evaluate_outbox_safety(policy), deadline_monotonic_ns)
+
     def _run[T](self, awaitable: Coroutine[Any, Any, T], deadline_monotonic_ns: int) -> T:
         timeout_seconds = _deadline_timeout_seconds(deadline_monotonic_ns)
         try:
@@ -236,8 +248,10 @@ class PostgresOrderPersistence:
                 await self._insert_outbox(connection, commit)
                 return RegisterOutcome(commit.persisted_order, created=True)
         except Exception as exc:
-            if _is_unique_violation(exc):
+            if _is_identifier_unique_violation(exc):
                 return await self._resolve_register_unique_race(commit)
+            if _is_unique_violation(exc):
+                raise JournalCommitFailed("duplicate journal or outbox row") from exc
             raise
         finally:
             await connection.close()
@@ -308,20 +322,42 @@ class PostgresOrderPersistence:
     async def _load_for_recovery(self, order_id: Identifier) -> RecoveryLoad:
         connection = await self._connect()
         try:
-            records = await self._verify_journal_chain(connection, order_id.value)
-            persisted = await self._persisted_from_journal_records(connection, records)
-            if persisted is None:
-                raise JournalCommitFailed("order projection is missing")
+            records = await self._fetch_journal_rows(connection, order_id.value)
+            if not records:
+                raise OrderJournalCorrupted("journal is missing")
             snapshot_lookup = await self._latest_for_recovery_on_connection(connection, order_id)
             if snapshot_lookup.status == "VALID":
+                assert snapshot_lookup.snapshot is not None
+                later_records = [
+                    record
+                    for record in records
+                    if int(record["aggregate_version"]) > snapshot_lookup.snapshot.aggregate_version
+                ]
+                if later_records:
+                    self._verify_journal_rows(
+                        later_records,
+                        expected_start_version=snapshot_lookup.snapshot.aggregate_version + 1,
+                        previous_entry_checksum=snapshot_lookup.snapshot.journal_head_checksum,
+                    )
+                persisted = _persisted_from_snapshot_and_later_journal_records(
+                    snapshot_lookup.snapshot, later_records
+                )
                 return RecoveryLoad(persisted, source="SNAPSHOT_PLUS_JOURNAL")
+            verified_records = self._verify_journal_rows(
+                records, expected_start_version=1, previous_entry_checksum=None
+            )
+            full_persisted = await self._persisted_from_journal_records(
+                connection, verified_records
+            )
+            if full_persisted is None:
+                raise JournalCommitFailed("order projection is missing")
             if snapshot_lookup.status == "INVALID_DISCARDED":
                 return RecoveryLoad(
-                    persisted,
+                    full_persisted,
                     source="FULL_JOURNAL",
                     snapshot_diagnostic=snapshot_lookup.diagnostic_code,
                 )
-            return RecoveryLoad(persisted, source="FULL_JOURNAL")
+            return RecoveryLoad(full_persisted, source="FULL_JOURNAL")
         finally:
             await connection.close()
 
@@ -396,8 +432,6 @@ class PostgresOrderPersistence:
         connection = await self._connect()
         try:
             records = await self._verify_journal_chain(connection, order_id.value)
-            if not records:
-                raise JournalCommitFailed("journal is missing")
             head = str(records[-1]["entry_checksum"])
             if (
                 expected_journal_head_checksum is not None
@@ -410,6 +444,44 @@ class PostgresOrderPersistence:
             async with connection.transaction():
                 await self._update_order_projection(connection, persisted)
             return RecoveryLoad(persisted, source="FULL_JOURNAL")
+        finally:
+            await connection.close()
+
+    async def _evaluate_outbox_safety(self, policy: CriticalOutboxLagPolicy) -> OutboxSafetyAction:
+        connection = await self._connect()
+        try:
+            row = await connection.fetchrow(
+                """
+                SELECT
+                    COALESCE(
+                        MAX(
+                            CASE
+                                WHEN status IN ('PENDING', 'CLAIMED')
+                                 AND available_at <= transaction_timestamp()
+                                THEN EXTRACT(EPOCH FROM transaction_timestamp() - available_at)
+                                     * 1000
+                                ELSE 0
+                            END
+                        ),
+                        0
+                    )::bigint AS oldest_lag_ms,
+                    COUNT(*) FILTER (WHERE status = 'DEAD_LETTER')::bigint
+                        AS dead_letter_count,
+                    COUNT(*) FILTER (WHERE status IN ('PENDING', 'CLAIMED'))::bigint
+                        AS pending_count
+                FROM outbox_messages
+                WHERE message_type LIKE 'oms.%'
+                """
+            )
+            assert row is not None
+            return evaluate_outbox_safety(
+                OutboxLagSnapshot(
+                    oldest_order_message_lag_ms=int(row["oldest_lag_ms"]),
+                    order_dead_letter_count=int(row["dead_letter_count"]),
+                    pending_order_message_count=int(row["pending_count"]),
+                ),
+                policy,
+            )
         finally:
             await connection.close()
 
@@ -898,6 +970,12 @@ class PostgresOrderPersistence:
             )
 
     async def _verify_journal_chain(self, connection: Any, order_id: str) -> list[Any]:
+        rows = await self._fetch_journal_rows(connection, order_id)
+        return self._verify_journal_rows(
+            rows, expected_start_version=1, previous_entry_checksum=None
+        )
+
+    async def _fetch_journal_rows(self, connection: Any, order_id: str) -> list[Any]:
         rows = await connection.fetch(
             """
             SELECT journal_id::text AS journal_id, order_id::text AS order_id,
@@ -909,8 +987,19 @@ class PostgresOrderPersistence:
             """,
             order_id,
         )
-        previous: str | None = None
-        for expected, row in enumerate(rows, start=1):
+        return list(rows)
+
+    def _verify_journal_rows(
+        self,
+        rows: list[Any],
+        *,
+        expected_start_version: int,
+        previous_entry_checksum: str | None,
+    ) -> list[Any]:
+        if not rows:
+            raise OrderJournalCorrupted("journal is missing")
+        previous = previous_entry_checksum
+        for expected, row in enumerate(rows, start=expected_start_version):
             append = JournalAppend(
                 Identifier(str(row["journal_id"])),
                 Identifier(str(row["order_id"])),
@@ -928,12 +1017,31 @@ class PostgresOrderPersistence:
             if journal_checksum(append, previous) != str(row["entry_checksum"]):
                 raise OrderJournalCorrupted("journal checksum mismatch")
             previous = str(row["entry_checksum"])
-        return list(rows)
+        return rows
 
 
 def _persisted_from_row(row: Any) -> PersistedOrder:
     payload = cast(Mapping[str, Any], row["state_payload"])
     return _persisted_from_state_payload(payload, str(row["registration_fingerprint"]))
+
+
+def _persisted_from_snapshot_and_later_journal_records(
+    snapshot: OrderSnapshot, later_records: list[Any]
+) -> PersistedOrder:
+    state_payload: Mapping[str, Any] = cast(Mapping[str, Any], snapshot.state_payload)
+    fingerprint = str(state_payload.get("registration_fingerprint", ""))
+    if not fingerprint:
+        raise JournalCommitFailed("snapshot state is missing registration_fingerprint")
+    for record in later_records:
+        payload = cast(Mapping[str, Any], record["payload"])
+        post_state = payload.get("post_state")
+        if not isinstance(post_state, Mapping):
+            raise JournalCommitFailed("journal entry is missing committed post_state")
+        state_payload = cast(Mapping[str, Any], post_state)
+        fingerprint = str(state_payload.get("registration_fingerprint", ""))
+        if not fingerprint:
+            raise JournalCommitFailed("journal post_state is missing registration_fingerprint")
+    return _persisted_from_state_payload(state_payload, fingerprint)
 
 
 def _persisted_from_state_payload(
@@ -1144,6 +1252,15 @@ def _deadline_timeout_seconds(deadline_monotonic_ns: int) -> float:
 
 def _is_unique_violation(exc: Exception) -> bool:
     return exc.__class__.__name__ == "UniqueViolationError"
+
+
+def _is_identifier_unique_violation(exc: Exception) -> bool:
+    constraint = getattr(exc, "constraint_name", None)
+    return constraint in {
+        "orders_pkey",
+        "orders_intent_id_key",
+        "orders_client_order_id_key",
+    }
 
 
 def _asyncpg() -> Any:

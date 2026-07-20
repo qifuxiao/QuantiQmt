@@ -18,6 +18,7 @@ from tests.contract.persistence.test_order_persistence_contract import (
 )
 
 from quantiqmt.contracts import SchemaRegistry
+from quantiqmt.messaging.outbox import CriticalOutboxLagPolicy
 from quantiqmt.order.application.persistence import (
     ClaimPolicy,
     IdempotencyConflict,
@@ -186,6 +187,45 @@ def test_postgres_concurrent_register_unique_competition_fails_closed(
     assert asyncio.run(_table_counts()) == (1, 1, 1)
 
 
+def test_postgres_concurrent_register_client_order_id_competition_fails_closed(
+    postgres_store: PostgresOrderPersistence, registry: SchemaRegistry
+) -> None:
+    first = _registered_commit_variant(
+        registry,
+        order_id=Identifier("550e8400-e29b-41d4-a716-446655440201"),
+        intent_id=Identifier("550e8400-e29b-41d4-a716-446655440202"),
+        journal_id=Identifier("550e8400-e29b-41d4-a716-446655440203"),
+        client_order_id="client-concurrent-competition",
+    )
+    second = _registered_commit_variant(
+        registry,
+        order_id=Identifier("550e8400-e29b-41d4-a716-446655440204"),
+        intent_id=Identifier("550e8400-e29b-41d4-a716-446655440205"),
+        journal_id=Identifier("550e8400-e29b-41d4-a716-446655440206"),
+        client_order_id="client-concurrent-competition",
+    )
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        futures = [
+            executor.submit(
+                PostgresOrderPersistence(os.environ["QUANTIQMT_POSTGRES_DSN"]).register,
+                commit,
+                deadline_monotonic_ns=DEADLINE,
+            )
+            for commit in (first, second)
+        ]
+        results: list[object] = []
+        for future in as_completed(futures):
+            try:
+                results.append(future.result())
+            except UniqueIdentifierCollision as exc:
+                results.append(exc)
+
+    assert sum(isinstance(result, UniqueIdentifierCollision) for result in results) == 1
+    assert sum(getattr(result, "created", False) is True for result in results) == 1
+    assert asyncio.run(_table_counts()) == (1, 1, 1)
+
+
 def test_postgres_concurrent_save_cas_allows_single_winner(
     postgres_store: PostgresOrderPersistence, registry: SchemaRegistry
 ) -> None:
@@ -225,7 +265,7 @@ def test_postgres_register_rolls_back_order_and_journal_when_outbox_insert_fails
         (valid.outbox_messages[0], valid.outbox_messages[0]),
     )
 
-    with pytest.raises(UniqueIdentifierCollision, match="QQ-STORAGE-7006"):
+    with pytest.raises(JournalCommitFailed, match="QQ-STORAGE-7002"):
         postgres_store.register(duplicate_outbox, deadline_monotonic_ns=DEADLINE)
 
     assert asyncio.run(_table_counts()) == (0, 0, 0)
@@ -338,6 +378,58 @@ def test_postgres_snapshot_lookup_accepts_valid_older_snapshot_with_later_journa
     assert lookup.snapshot.aggregate_version == 1
     assert loaded.source == "SNAPSHOT_PLUS_JOURNAL"
     assert loaded.persisted_order.order.version == 2
+
+
+def test_postgres_snapshot_plus_later_journal_does_not_replay_presnapshot_payload(
+    postgres_store: PostgresOrderPersistence, registry: SchemaRegistry
+) -> None:
+    registered = postgres_store.register(
+        registered_commit(registry), deadline_monotonic_ns=DEADLINE
+    )
+    draft = OrderSnapshot(
+        Identifier("550e8400-e29b-41d4-a716-446655440031"),
+        ORDER_ID,
+        1,
+        1,
+        order_state_payload(registered.persisted_order),
+        asyncio.run(_journal_head_checksum(ORDER_ID.value)),
+        "0" * 64,
+        registered.persisted_order.registration.registered_at,
+    )
+    postgres_store.write(
+        OrderSnapshot(
+            draft.snapshot_id,
+            draft.order_id,
+            draft.aggregate_version,
+            draft.schema_version,
+            draft.state_payload,
+            draft.journal_head_checksum,
+            snapshot_checksum(draft),
+            draft.created_at,
+        ),
+        deadline_monotonic_ns=DEADLINE,
+    )
+    postgres_store.save(
+        transition_commit(registry, registered.persisted_order),
+        expected_version=1,
+        deadline_monotonic_ns=DEADLINE,
+    )
+    asyncio.run(
+        _mutate_journal_bypassing_append_only(
+            """
+            UPDATE order_journal
+            SET payload = jsonb_set(payload, '{post_state,state}', '"CORRUPTED"'::jsonb)
+            WHERE order_id = $1::uuid AND aggregate_version = 1
+            """,
+            ORDER_ID.value,
+        )
+    )
+
+    loaded = postgres_store.load_for_recovery(ORDER_ID, deadline_monotonic_ns=DEADLINE)
+
+    assert loaded.source == "SNAPSHOT_PLUS_JOURNAL"
+    assert loaded.persisted_order.order.version == 2
+    assert loaded.persisted_order.order.state is OrderState.RISK_PENDING
 
 
 @pytest.mark.parametrize("mode", ["checksum", "head", "schema", "state_version"])
@@ -459,6 +551,33 @@ def test_postgres_journal_version_gap_fails_recovery_closed(
         postgres_store.load_for_recovery(ORDER_ID, deadline_monotonic_ns=DEADLINE)
 
 
+def test_postgres_empty_journal_fails_recovery_and_rebuild_closed(
+    postgres_store: PostgresOrderPersistence, registry: SchemaRegistry
+) -> None:
+    postgres_store.register(registered_commit(registry), deadline_monotonic_ns=DEADLINE)
+
+    asyncio.run(
+        _mutate_journal_bypassing_append_only(
+            """
+            DELETE FROM order_journal
+            WHERE order_id = $1::uuid
+            """,
+            ORDER_ID.value,
+        )
+    )
+    asyncio.run(_delete_order_projection_bypassing_fk(ORDER_ID.value))
+
+    with pytest.raises(OrderJournalCorrupted, match="QQ-RECOVERY-8002"):
+        postgres_store.load_for_recovery(ORDER_ID, deadline_monotonic_ns=DEADLINE)
+    with pytest.raises(OrderJournalCorrupted, match="QQ-RECOVERY-8002"):
+        postgres_store.rebuild_projection_from_journal(
+            ORDER_ID,
+            expected_journal_head_checksum=None,
+            deadline_monotonic_ns=DEADLINE,
+        )
+    assert asyncio.run(_table_counts()) == (0, 0, 1)
+
+
 def test_postgres_outbox_claim_lease_fencing_and_dead_letter(
     postgres_store: PostgresOrderPersistence, registry: SchemaRegistry
 ) -> None:
@@ -529,6 +648,15 @@ def test_postgres_outbox_claim_lease_fencing_and_dead_letter(
         PublishFailure("PUBLISH_FAILED", "backbone unavailable", retryable=False),
         deadline_monotonic_ns=DEADLINE,
     ).applied
+    action = postgres_store.evaluate_outbox_safety(
+        CriticalOutboxLagPolicy(critical_lag_ms=10_000, critical_dead_letter_count=0),
+        deadline_monotonic_ns=DEADLINE,
+    )
+    assert action.critical is True
+    assert action.reject_new_risk is True
+    assert action.keep_recovery_barrier_closed is True
+    assert action.emit_health_alert is True
+    assert action.reason_code == "ORDER_OUTBOX_DEAD_LETTER_CRITICAL"
 
 
 def test_postgres_retryable_failure_reaches_max_attempts_before_next_claim(

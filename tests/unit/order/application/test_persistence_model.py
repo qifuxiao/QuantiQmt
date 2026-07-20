@@ -152,6 +152,8 @@ def test_claim_policy_bounds_and_deterministic_message_id() -> None:
 
 def test_outbox_safety_evaluator_rejects_new_risk_on_critical_lag_or_dead_letters() -> None:
     policy = CriticalOutboxLagPolicy(critical_lag_ms=10_000, critical_dead_letter_count=0)
+    with pytest.raises(ValueError, match="critical_dead_letter_count must be 0"):
+        CriticalOutboxLagPolicy(critical_lag_ms=10_000, critical_dead_letter_count=1)
 
     healthy = evaluate_outbox_safety(
         OutboxLagSnapshot(
@@ -181,9 +183,12 @@ def test_outbox_safety_evaluator_rejects_new_risk_on_critical_lag_or_dead_letter
     assert healthy.reason_code == "OK"
     assert healthy.reject_new_risk is False
     assert lagged.reject_new_risk is True
+    assert lagged.keep_recovery_barrier_closed is True
     assert lagged.emit_health_alert is True
     assert lagged.reason_code == "ORDER_OUTBOX_LAG_CRITICAL"
     assert dead_lettered.reject_new_risk is True
+    assert dead_lettered.keep_recovery_barrier_closed is True
+    assert dead_lettered.emit_health_alert is True
     assert dead_lettered.reason_code == "ORDER_OUTBOX_DEAD_LETTER_CRITICAL"
 
 
