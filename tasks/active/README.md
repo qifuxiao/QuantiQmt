@@ -1,5 +1,5 @@
 # Active Tasks
 
-当前 active task：无。
+当前 active task：`TASK-005`。
 
-TASK-004、TASK-014、TASK-015 与 TASK-028 已完成并进入 `tasks/completed/`。TASK-005 已解除 blocked，当前为 backlog/ready；TASK-005 尚未激活，不得开始实现。
+TASK-005 已由人类授权激活。实现必须严格遵守任务中的 `allowed_paths`、`forbidden_paths`、`spec_refs` 和验证命令；完成后不得由实现 Agent 自行移动到 `completed/`。
