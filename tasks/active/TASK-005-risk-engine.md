@@ -1,7 +1,7 @@
 ---
 id: TASK-005
 title: Implement deterministic risk evaluator
-status: ready
+status: active
 depends_on: [TASK-003, TASK-015]
 spec_refs: [INV-RISK, INV-CONSISTENCY, WF-SUBMIT-ORDER, CONTRACT-RISK-INPUT-V1, CONTRACT-RISK-RULE-SET-V1, CONTRACT-RISK-DECISION-V1, CONTRACT-RISK-AUDIT-OUTPUT-V1, CONTRACT-RISK-ORDER-EVALUATED-V1, CONTRACT-RISK-ORDER-EVALUATED-V2, CONTRACT-ERROR-CATALOG, PORTS-RISK, NFR-PERFORMANCE, NFR-OBSERVABILITY]
 allowed_paths: [src/quantiqmt/risk/**, tests/unit/risk/**, tests/property/risk/**]
@@ -16,7 +16,7 @@ verification:
 
 ## Activation gate
 
-TASK-015 已在 Spec 0.6 冻结 RiskInput、Snapshot DTO、RuleSet、规则排序、硬限额、fail-closed taxonomy、减仓例外、RiskDecision 和审计输出契约，并已通过独立 Review、合并 PR #24、由人类授权标记 completed。因此本任务解除 blocked 并进入 ready。ready 不等于 active；TASK-005 必须经过单独的人类分配/激活后才能实现，当前不得开始业务实现。激活后无需再发明 Risk DTO、规则 DSL、错误码或计时语义。
+TASK-015 已在 Spec 0.6 冻结 RiskInput、Snapshot DTO、RuleSet、规则排序、硬限额、fail-closed taxonomy、减仓例外、RiskDecision 和审计输出契约，并已通过独立 Review、合并 PR #24、由人类授权标记 completed。TASK-005 已由人类明确分配并激活，可以严格依照既有契约实施；不得重新发明 Risk DTO、规则 DSL、错误码或计时语义。
 
 ## Non-goals
 
