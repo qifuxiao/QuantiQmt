@@ -881,11 +881,6 @@ def _validate_rule_set(context: _EvaluationContext) -> None:
                 "QQ-RISK-4007", "RISK_RULE_SET_INVALID", "forbidden reduce exemption"
             )
     for rule in rules:
-        scope = _str(rule.get("scope"), "scope")
-        scope_id = rule.get("scope_id")
-        expected_scope_id = context.scope_id_for(scope)
-        if scope_id != expected_scope_id:
-            raise RiskContractError("QQ-RISK-4007", "RISK_RULE_SET_INVALID", "bad scope identity")
         metric = _str(rule.get("metric"), "metric")
         expected_operator = METRIC_OPERATOR.get(metric)
         if expected_operator is None or rule.get("operator") != expected_operator:
@@ -930,15 +925,15 @@ def _validate_snapshot_quality_payloads(context: _EvaluationContext) -> None:
             raise RiskContractError(
                 "QQ-RISK-4008", "RISK_INPUT_INVALID", f"{name} missing_fields required"
             )
+    _validate_required_fields(context)
 
 
 def _validate_snapshot_versions(context: _EvaluationContext) -> None:
-    order_version = _int(context.order.get("aggregate_version"), "aggregate_version")
     for name, snapshot in (("account", context.account), ("portfolio", context.portfolio)):
-        aggregate_version = _mapping(snapshot.get("metadata"), f"{name}.metadata").get(
-            "aggregate_version"
-        )
-        if not isinstance(aggregate_version, int) or aggregate_version < order_version:
+        metadata = _mapping(snapshot.get("metadata"), f"{name}.metadata")
+        quality = _str(metadata.get("quality"), "quality")
+        aggregate_version = metadata.get("aggregate_version")
+        if quality in {"FRESH", "STALE", "PARTIAL"} and not isinstance(aggregate_version, int):
             raise RiskContractError(
                 "QQ-RISK-4008", "RISK_INPUT_INVALID", f"{name} aggregate version mismatch"
             )
@@ -947,6 +942,87 @@ def _validate_snapshot_versions(context: _EvaluationContext) -> None:
     )
     if market_version is not None:
         raise RiskContractError("QQ-RISK-4008", "RISK_INPUT_INVALID", "market aggregate version")
+
+
+def _validate_required_fields(context: _EvaluationContext) -> None:
+    required = _required_field_paths(context)
+    null_fields = {path for path, value in required.items() if value is None}
+    if not null_fields:
+        return
+    for name, snapshot in (
+        ("account", context.account),
+        ("portfolio", context.portfolio),
+        ("market", context.market),
+    ):
+        metadata = _mapping(snapshot.get("metadata"), f"{name}.metadata")
+        quality = _str(metadata.get("quality"), "quality")
+        missing = {
+            cast(str, item) for item in _sequence(metadata.get("missing_fields"), "missing_fields")
+        }
+        relevant_nulls = {path for path in null_fields if path.startswith(f"{name}.")}
+        if quality in {"FRESH", "STALE"} and relevant_nulls:
+            raise RiskContractError(
+                "QQ-RISK-4008", "RISK_INPUT_INVALID", f"{name} required field is null"
+            )
+        if quality == "PARTIAL" and missing != relevant_nulls:
+            raise RiskContractError(
+                "QQ-RISK-4008", "RISK_INPUT_INVALID", f"{name} missing_fields mismatch"
+            )
+
+
+def _required_field_paths(context: _EvaluationContext) -> Mapping[str, object]:
+    fields: dict[str, object] = {}
+
+    def add_metric(scope: str, metric: str) -> None:
+        if metric in {"TRADING_ENABLED", "INSTRUMENT_ALLOWED", "ORDER_QUANTITY"}:
+            return
+        if metric in {"ORDER_NOTIONAL", "PRICE_DEVIATION_BPS"}:
+            fields["market.risk_price"] = context.market.get("risk_price")
+            fields["market.reference_price"] = context.market.get("reference_price")
+            fields["market.price_deviation_bps"] = context.market.get("price_deviation_bps")
+            return
+        if metric == "AVAILABLE_CASH":
+            fields["account.projected_available_cash"] = context.account.get(
+                "projected_available_cash"
+            )
+            return
+        if metric == "DAILY_LOSS":
+            fields["account.daily_loss"] = context.account.get("daily_loss")
+            return
+        row = context.metrics_for(scope)
+        scope_key = scope.lower()
+        if metric == "POSITION_QUANTITY":
+            fields[f"portfolio.scope_metrics.{scope_key}.projected_position_quantity"] = row.get(
+                "projected_position_quantity"
+            )
+        elif metric == "PROJECTED_GROSS_EXPOSURE":
+            fields[f"portfolio.scope_metrics.{scope_key}.projected_gross_exposure"] = row.get(
+                "projected_gross_exposure"
+            )
+        elif metric == "PROJECTED_NET_EXPOSURE_ABS":
+            fields[f"portfolio.scope_metrics.{scope_key}.projected_net_exposure"] = row.get(
+                "projected_net_exposure"
+            )
+        elif metric == "PROJECTED_LEVERAGE":
+            fields[f"portfolio.scope_metrics.{scope_key}.projected_leverage"] = row.get(
+                "projected_leverage"
+            )
+        elif metric == "ORDER_COUNT_WINDOW":
+            fields[f"portfolio.scope_metrics.{scope_key}.order_count_window"] = row.get(
+                "order_count_window"
+            )
+        elif metric == "CANCEL_RATIO_BPS":
+            fields[f"portfolio.scope_metrics.{scope_key}.cancel_ratio_bps"] = row.get(
+                "cancel_ratio_bps"
+            )
+
+    for _, _, metric, _, _ in HARD_RULES:
+        add_metric("SYSTEM", metric)
+    for rule in context.sorted_rules():
+        scope = _str(rule.get("scope"), "scope")
+        if rule.get("scope_id") == context.scope_id_for(scope):
+            add_metric(scope, _str(rule.get("metric"), "metric"))
+    return fields
 
 
 def _validate_scope_metrics(context: _EvaluationContext) -> None:

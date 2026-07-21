@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
+from threading import Event
 
 from hypothesis import given
 from hypothesis import strategies as st
 from tests.unit.risk.test_risk_engine import (
+    FakeClock,
+    GateEvaluator,
     rule_set_dto,
     scoped_rule,
     valid_input,
@@ -13,7 +17,12 @@ from tests.unit.risk.test_risk_engine import (
     with_input_hash,
 )
 
-from quantiqmt.risk import DeterministicRiskEvaluator, RiskContractError, RiskInputV1
+from quantiqmt.risk import (
+    DeterministicRiskEvaluator,
+    RiskContractError,
+    RiskEvaluationRunner,
+    RiskInputV1,
+)
 
 
 @given(st.permutations(["RULE.A", "RULE.B", "RULE.C"]))
@@ -119,3 +128,140 @@ def test_float_rejected(value: float) -> None:
         assert exc.code == "QQ-RISK-4008"
     else:  # pragma: no cover - Hypothesis should never reach this branch
         raise AssertionError("float accepted")
+
+
+@given(st.sampled_from(["STALE", "PARTIAL", "TIMEOUT", "UNAVAILABLE", "VERSION_MISMATCH"]))
+def test_generated_snapshot_consistency_taxonomy(quality: str) -> None:
+    rule_set = valid_rule_set()
+    payload = valid_input(rule_set)
+    if quality == "VERSION_MISMATCH":
+        payload["portfolio"]["metadata"]["trading_day"] = "2026-07-03"
+        expected = "QQ-RISK-4004"
+    else:
+        payload["account"]["metadata"]["quality"] = quality
+        expected = {
+            "STALE": "QQ-RISK-4002",
+            "PARTIAL": "QQ-RISK-4003",
+            "TIMEOUT": "QQ-RISK-4010",
+            "UNAVAILABLE": "QQ-RISK-4006",
+        }[quality]
+        if quality == "PARTIAL":
+            payload["account"]["daily_loss"] = None
+            payload["account"]["metadata"]["missing_fields"] = ["account.daily_loss"]
+        if quality in {"TIMEOUT", "UNAVAILABLE"}:
+            payload["account"]["metadata"]["aggregate_version"] = None
+    decision = DeterministicRiskEvaluator().evaluate(
+        RiskInputV1.create(with_input_hash(payload, rule_set)), rule_set_dto(rule_set)
+    )
+    assert decision.error_code == expected
+
+
+@given(
+    st.sampled_from(
+        [
+            ("ACCOUNT", "acct-other"),
+            ("PORTFOLIO", "pf-other"),
+            ("STRATEGY", "strat-other"),
+            ("INSTRUMENT", "000001.XSHE"),
+        ]
+    )
+)
+def test_generated_scope_identity_mismatch_is_not_applicable(scope_case: tuple[str, str]) -> None:
+    scope, scope_id = scope_case
+    rule_set = valid_rule_set()
+    rule_set["rules"] = [
+        scoped_rule("RULE.SHARED", scope, scope_id, 1, "ORDER_QUANTITY", 1),
+        scoped_rule("RULE.CURRENT", "ACCOUNT", "acct-1", 2, "ORDER_QUANTITY", 500),
+    ]
+    rule_set = with_hashes(rule_set)
+    decision = DeterministicRiskEvaluator().evaluate(
+        RiskInputV1.create(with_input_hash(valid_input(rule_set), rule_set)),
+        rule_set_dto(rule_set),
+    )
+    assert (
+        next(result for result in decision.rule_results if result.rule_id == "RULE.SHARED").result
+        == "NOT_APPLICABLE"
+    )
+    assert decision.error_code is None
+
+
+@given(
+    st.sampled_from(
+        [
+            ("policy_disabled", False, [], "ALLOW_IF_VERIFIED", "REJECT"),
+            ("unlisted", True, [], "ALLOW_IF_VERIFIED", "REJECT"),
+            ("enabled_listed", True, ["RULE.POSITION"], "ALLOW_IF_VERIFIED", "PASS"),
+        ]
+    )
+)
+def test_generated_reduce_policy_matrix(case: tuple[str, bool, list[str], str, str]) -> None:
+    _name, enabled, exempt, declaration, expected = case
+    rule_set = valid_rule_set()
+    rule_set["reduce_only_policy"] = {"enabled": enabled, "exempt_rule_ids": exempt}
+    rule_set["rules"] = [
+        scoped_rule(
+            "RULE.POSITION",
+            "INSTRUMENT",
+            "600000.XSHG",
+            1,
+            "POSITION_QUANTITY",
+            50,
+            reduction_exception=declaration,
+        )
+    ]
+    rule_set = with_hashes(rule_set)
+    payload = valid_input(rule_set)
+    payload["order"]["risk_effect"] = "REDUCE"
+    payload["order"]["side"] = "SELL"
+    payload["order"]["quantity"] = 100
+    payload["order"]["reduction_evidence"] = {
+        "classification": "VERIFIED_REDUCE_ONLY",
+        "position_snapshot_version": "p1",
+        "position_quantity_before": 200,
+        "reserved_reduce_quantity": 0,
+        "max_reducible_quantity": 200,
+        "projected_position_quantity": 100,
+        "would_flip_position": False,
+    }
+    for row in payload["portfolio"]["scope_metrics"]:
+        if row["scope"] == "INSTRUMENT":
+            row["position_quantity"] = 200
+            row["projected_position_quantity"] = 100
+    decision = DeterministicRiskEvaluator().evaluate(
+        RiskInputV1.create(with_input_hash(payload, rule_set)), rule_set_dto(rule_set)
+    )
+    assert (
+        next(result for result in decision.rule_results if result.rule_id == "RULE.POSITION").result
+        == expected
+    )
+
+
+@given(st.integers(min_value=0, max_value=20))
+def test_generated_input_version_filter_remains_bounded(index: int) -> None:
+    rule_set = valid_rule_set()
+    runner = RiskEvaluationRunner(DeterministicRiskEvaluator(), FakeClock([0] * 500))
+    for offset in range(index + 1):
+        payload = valid_input(rule_set)
+        payload["order"]["order_id"] = f"550e8400-e29b-41d4-a716-44665545{offset:04d}"
+        runner.run(RiskInputV1.create(with_input_hash(payload, rule_set)), rule_set_dto(rule_set))
+    assert runner._seen_filter.storage_bit_length <= runner._seen_filter.bounded_bit_count
+
+
+@given(st.booleans())
+def test_generated_timeout_saturation_does_not_invalidate_admitted_result(_: bool) -> None:
+    rule_set = valid_rule_set()
+    release = Event()
+    entered = Event()
+    runner = RiskEvaluationRunner(GateEvaluator(entered, release), FakeClock([0] * 100))
+    first = RiskInputV1.create(with_input_hash(valid_input(rule_set), rule_set))
+    second_payload = valid_input(rule_set)
+    second_payload["order"]["order_id"] = "550e8400-e29b-41d4-a716-446655450999"
+    second = RiskInputV1.create(with_input_hash(second_payload, rule_set))
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        future = executor.submit(runner.run, first, rule_set_dto(rule_set))
+        assert entered.wait(timeout=1)
+        saturated = runner.run(second, rule_set_dto(rule_set))
+        release.set()
+        audit = future.result(timeout=1)
+    assert saturated.decision.decision_origin == "TIMEOUT_GUARD"
+    assert audit.decision.decision_origin == "EVALUATOR"

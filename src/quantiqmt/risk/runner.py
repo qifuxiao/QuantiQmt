@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import concurrent.futures
+import hashlib
 import threading
 from collections.abc import Mapping
 from typing import Literal, Protocol
@@ -62,17 +63,23 @@ class RiskEvaluationRunner:
         self._executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
         self._attempt = 0
         self._admission = threading.BoundedSemaphore(value=1)
-        self._seen_input_versions: set[str] = set()
+        self._seen_filter = _InputVersionFilter()
         self._metrics = metrics_observer or NullRiskMetricsObserver()
 
     def run(self, risk_input: RiskInputV1, rule_set: RiskRuleSetV1) -> RiskAuditOutputV1:
-        input_version = risk_input.to_primitive()["input_version"]
-        if not isinstance(input_version, str) or input_version in self._seen_input_versions:
+        if not self._admission.acquire(blocking=False):
             return self._validate_and_record(
                 self._saturation_audit(risk_input, rule_set),
                 reason="RISK_EVALUATION_TIMEOUT",
             )
-        self._seen_input_versions.add(input_version)
+        input_version = risk_input.to_primitive()["input_version"]
+        if not isinstance(input_version, str) or self._seen_filter.contains(input_version):
+            self._admission.release()
+            return self._validate_and_record(
+                self._saturation_audit(risk_input, rule_set),
+                reason="RISK_EVALUATION_TIMEOUT",
+            )
+        self._seen_filter.add(input_version)
         self._attempt += 1
         attempt = self._attempt
         timeout_us = _timeout_us(rule_set)
@@ -85,32 +92,27 @@ class RiskEvaluationRunner:
             before_ns = self._clock.monotonic_ns()
             remaining_ns = deadline_ns - before_ns
             if remaining_ns <= 0:
+                self._admission.release()
                 return self._validate_and_record(
                     self._timeout_audit(
                         risk_input, rule_set, results, timings, start_ns, timeout_us, attempt
                     ),
-                    reason="RISK_EVALUATION_TIMEOUT",
-                )
-            if not self._admission.acquire(blocking=False):
-                return self._validate_and_record(
-                    self._saturation_audit(risk_input, rule_set),
                     reason="RISK_EVALUATION_TIMEOUT",
                 )
             future = self._executor.submit(next, iterator, None)
             try:
                 result = future.result(timeout=remaining_ns / 1_000_000_000)
             except concurrent.futures.TimeoutError:
-                future.add_done_callback(lambda _future: self._admission.release())
+                future.add_done_callback(lambda _future: _release_admission(self._admission))
                 return self._validate_and_record(
                     self._timeout_audit(
                         risk_input, rule_set, results, timings, start_ns, timeout_us, attempt
                     ),
                     reason="RISK_EVALUATION_TIMEOUT",
                 )
-            else:
-                self._admission.release()
             after_ns = self._clock.monotonic_ns()
             if attempt != self._attempt:
+                self._admission.release()
                 return self._validate_and_record(
                     self._timeout_audit(
                         risk_input, rule_set, results, timings, start_ns, timeout_us, attempt
@@ -128,6 +130,7 @@ class RiskEvaluationRunner:
                 )
             )
             if after_ns >= deadline_ns:
+                self._admission.release()
                 return self._validate_and_record(
                     self._timeout_audit(
                         risk_input, rule_set, results, timings, start_ns, timeout_us, attempt
@@ -136,6 +139,7 @@ class RiskEvaluationRunner:
                 )
         end_ns = self._clock.monotonic_ns()
         decision = self._evaluator.decide(risk_input, rule_set, tuple(results))
+        self._admission.release()
         return self._validate_and_record(
             RiskAuditOutputV1(
                 decision=decision,
@@ -221,3 +225,43 @@ def _timeout_us(rule_set: RiskRuleSetV1) -> int:
     if not isinstance(value, int):
         raise ValueError("evaluation_timeout_us must be int")
     return value
+
+
+def _release_admission(admission: threading.BoundedSemaphore) -> None:
+    admission.release()
+
+
+class _InputVersionFilter:
+    """Fixed-size no-delete membership filter.
+
+    False positives fail closed, but inserted input_version values are never forgotten by
+    eviction, so same-input retries are not reopened by bounded-state maintenance.
+    """
+
+    _BITS = 16_384
+    _MASKS = (0, 8, 16, 24)
+
+    def __init__(self) -> None:
+        self._bits = 0
+
+    def add(self, input_version: str) -> None:
+        for index in self._indexes(input_version):
+            self._bits |= 1 << index
+
+    def contains(self, input_version: str) -> bool:
+        return all(self._bits & (1 << index) for index in self._indexes(input_version))
+
+    @property
+    def bounded_bit_count(self) -> int:
+        return self._BITS
+
+    @property
+    def storage_bit_length(self) -> int:
+        return self._bits.bit_length()
+
+    def _indexes(self, input_version: str) -> tuple[int, ...]:
+        digest = hashlib.sha256(input_version.encode("ascii")).digest()
+        return tuple(
+            int.from_bytes(digest[offset : offset + 2], "big") % self._BITS
+            for offset in self._MASKS
+        )
