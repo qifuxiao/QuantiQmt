@@ -9,8 +9,11 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import ROUND_CEILING, Decimal, InvalidOperation
+from pathlib import Path
 from types import MappingProxyType
 from typing import Literal, cast
+
+from jsonschema import Draft202012Validator  # type: ignore[import-untyped]
 
 JsonValue = None | bool | int | str | tuple["JsonValue", ...] | Mapping[str, "JsonValue"]
 MutableJsonValue = (
@@ -61,36 +64,104 @@ class RiskContractError(ValueError):
         self.detail = detail
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, init=False)
 class RiskInputV1:
     values: Mapping[str, JsonValue]
+
+    def __init__(self, *_args: object, **_kwargs: object) -> None:
+        raise TypeError("RiskInputV1 must be constructed with RiskInputV1.create()")
 
     @classmethod
     def create(cls, values: Mapping[str, object]) -> RiskInputV1:
         frozen = _as_frozen_mapping(freeze_json(values))
         primitive = _as_mutable_mapping(thaw_json(frozen))
+        _validate_schema(
+            "risk-input.v1.schema.json", primitive, "QQ-RISK-4008", "RISK_INPUT_INVALID"
+        )
         actual_hash = hash_without(primitive, "input_version")
         declared = primitive.get("input_version")
         if declared != actual_hash:
             raise RiskContractError("QQ-RISK-4008", "RISK_INPUT_INVALID", "input_version mismatch")
-        return cls(frozen)
+        return cls._from_frozen(frozen)
 
     @classmethod
     def unchecked(cls, values: Mapping[str, object]) -> RiskInputV1:
-        return cls(_as_frozen_mapping(freeze_json(values)))
+        del values
+        raise TypeError("RiskInputV1.unchecked() is forbidden")
+
+    @classmethod
+    def _from_frozen(cls, values: Mapping[str, JsonValue]) -> RiskInputV1:
+        instance = object.__new__(cls)
+        object.__setattr__(instance, "values", values)
+        return instance
 
     def to_primitive(self) -> dict[str, MutableJsonValue]:
         return cast(dict[str, MutableJsonValue], thaw_json(self.values))
 
 
-@dataclass(frozen=True, slots=True)
-class RiskRuleSetV1:
-    values: Mapping[str, JsonValue]
+@dataclass(frozen=True, slots=True, init=False)
+class AcceptedHardPolicy:
+    version: str
+    valuation_currency: str
+    system_hard_limits: Mapping[str, JsonValue]
+    policy_hash: str
+
+    def __init__(self, *_args: object, **_kwargs: object) -> None:
+        raise TypeError("AcceptedHardPolicy must be constructed with AcceptedHardPolicy.create()")
 
     @classmethod
-    def create(cls, values: Mapping[str, object]) -> RiskRuleSetV1:
+    def create(
+        cls,
+        *,
+        version: str,
+        valuation_currency: str,
+        system_hard_limits: Mapping[str, object],
+        policy_hash: str | None = None,
+    ) -> AcceptedHardPolicy:
+        payload = {
+            "hard_limit_policy_version": version,
+            "valuation_currency": valuation_currency,
+            "system_hard_limits": _as_mutable_mapping(thaw_json(freeze_json(system_hard_limits))),
+        }
+        actual_hash = hard_limit_policy_hash(payload)
+        if policy_hash is not None and policy_hash != actual_hash:
+            raise RiskContractError(
+                "QQ-RISK-4007", "RISK_RULE_SET_INVALID", "accepted hard policy hash mismatch"
+            )
+        instance = object.__new__(cls)
+        object.__setattr__(instance, "version", version)
+        object.__setattr__(instance, "valuation_currency", valuation_currency)
+        object.__setattr__(
+            instance, "system_hard_limits", _as_frozen_mapping(freeze_json(system_hard_limits))
+        )
+        object.__setattr__(instance, "policy_hash", actual_hash)
+        return instance
+
+    def to_policy_payload(self) -> dict[str, MutableJsonValue]:
+        return {
+            "hard_limit_policy_version": self.version,
+            "valuation_currency": self.valuation_currency,
+            "system_hard_limits": thaw_json(self.system_hard_limits),
+        }
+
+
+@dataclass(frozen=True, slots=True, init=False)
+class RiskRuleSetV1:
+    values: Mapping[str, JsonValue]
+    accepted_hard_policy: AcceptedHardPolicy
+
+    def __init__(self, *_args: object, **_kwargs: object) -> None:
+        raise TypeError("RiskRuleSetV1 must be constructed with RiskRuleSetV1.create()")
+
+    @classmethod
+    def create(
+        cls, values: Mapping[str, object], *, accepted_hard_policy: AcceptedHardPolicy
+    ) -> RiskRuleSetV1:
         frozen = _as_frozen_mapping(freeze_json(values))
         primitive = _as_mutable_mapping(thaw_json(frozen))
+        _validate_schema(
+            "rule-set.v1.schema.json", primitive, "QQ-RISK-4007", "RISK_RULE_SET_INVALID"
+        )
         actual_hash = hash_without(primitive, "content_hash")
         declared = primitive.get("content_hash")
         if declared != actual_hash:
@@ -102,11 +173,38 @@ class RiskRuleSetV1:
             raise RiskContractError(
                 "QQ-RISK-4007", "RISK_RULE_SET_INVALID", "hard_limit_policy_hash mismatch"
             )
-        return cls(frozen)
+        if primitive.get("hard_limit_policy_version") != accepted_hard_policy.version:
+            raise RiskContractError(
+                "QQ-RISK-4007", "RISK_RULE_SET_INVALID", "unaccepted hard policy version"
+            )
+        if primitive.get("valuation_currency") != accepted_hard_policy.valuation_currency:
+            raise RiskContractError(
+                "QQ-RISK-4007", "RISK_RULE_SET_INVALID", "unaccepted hard policy currency"
+            )
+        if policy_hash != accepted_hard_policy.policy_hash:
+            raise RiskContractError(
+                "QQ-RISK-4007", "RISK_RULE_SET_INVALID", "unaccepted hard policy content"
+            )
+        accepted_limits = accepted_hard_policy.to_policy_payload()["system_hard_limits"]
+        if primitive.get("system_hard_limits") != accepted_limits:
+            raise RiskContractError(
+                "QQ-RISK-4007", "RISK_RULE_SET_INVALID", "unaccepted hard policy limits"
+            )
+        return cls._from_frozen(frozen, accepted_hard_policy)
 
     @classmethod
     def unchecked(cls, values: Mapping[str, object]) -> RiskRuleSetV1:
-        return cls(_as_frozen_mapping(freeze_json(values)))
+        del values
+        raise TypeError("RiskRuleSetV1.unchecked() is forbidden")
+
+    @classmethod
+    def _from_frozen(
+        cls, values: Mapping[str, JsonValue], accepted_hard_policy: AcceptedHardPolicy
+    ) -> RiskRuleSetV1:
+        instance = object.__new__(cls)
+        object.__setattr__(instance, "values", values)
+        object.__setattr__(instance, "accepted_hard_policy", accepted_hard_policy)
+        return instance
 
     def to_primitive(self) -> dict[str, MutableJsonValue]:
         return cast(dict[str, MutableJsonValue], thaw_json(self.values))
@@ -239,6 +337,15 @@ def hash_without(values: Mapping[str, object], excluded_key: str) -> str:
     )
 
 
+def hash_snapshot_without_metadata_checksum(snapshot: Mapping[str, object]) -> str:
+    mutable = _as_mutable_mapping(thaw_json(freeze_json(snapshot)))
+    metadata = mutable.get("metadata")
+    if not isinstance(metadata, dict):
+        raise RiskContractError("QQ-RISK-4008", "RISK_INPUT_INVALID", "metadata must be object")
+    metadata.pop("checksum", None)
+    return sha256_lower_hex(canonical_json_bytes(mutable))
+
+
 def hard_limit_policy_hash(rule_set: Mapping[str, object]) -> str:
     return sha256_lower_hex(
         canonical_json_bytes(
@@ -249,6 +356,19 @@ def hard_limit_policy_hash(rule_set: Mapping[str, object]) -> str:
             }
         )
     )
+
+
+def _validate_schema(
+    schema_file: str, payload: Mapping[str, object], code: str, reason_code: str
+) -> None:
+    schema_path = Path(__file__).resolve().parents[3] / "spec" / "contracts" / "risk" / schema_file
+    schema = json.loads(schema_path.read_text(encoding="utf-8"))
+    validator = Draft202012Validator(schema)
+    error = next(validator.iter_errors(payload), None)
+    if error is not None:
+        path = ".".join(str(part) for part in error.absolute_path)
+        detail = f"{path}: {error.message}" if path else error.message
+        raise RiskContractError(code, reason_code, detail)
 
 
 def decision_id(input_version: str, content_hash: str) -> str:

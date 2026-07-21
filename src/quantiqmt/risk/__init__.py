@@ -8,6 +8,7 @@ from quantiqmt.risk.audit import (
 )
 from quantiqmt.risk.evaluator import DeterministicRiskEvaluator
 from quantiqmt.risk.model import (
+    AcceptedHardPolicy,
     RiskAuditOutputV1,
     RiskContractError,
     RiskDecisionV1,
@@ -17,12 +18,14 @@ from quantiqmt.risk.model import (
     RuleTiming,
     decision_id,
     hard_limit_policy_hash,
+    hash_snapshot_without_metadata_checksum,
     hash_without,
     semantic_decision_hash,
 )
-from quantiqmt.risk.runner import Clock, RiskEvaluationRunner
+from quantiqmt.risk.runner import Clock, RiskEvaluationRunner, RiskMetricsObserver
 
 __all__ = [
+    "AcceptedHardPolicy",
     "Clock",
     "DeterministicRiskEvaluator",
     "RiskAuditOutputV1",
@@ -31,6 +34,7 @@ __all__ = [
     "RiskDecisionV1",
     "RiskEvaluationRunner",
     "RiskInputV1",
+    "RiskMetricsObserver",
     "RiskRuleSetV1",
     "RuleResult",
     "RuleTiming",
@@ -38,6 +42,7 @@ __all__ = [
     "build_risk_v2_envelope",
     "decision_id",
     "hard_limit_policy_hash",
+    "hash_snapshot_without_metadata_checksum",
     "hash_without",
     "project_risk_v1_envelope",
     "semantic_decision_hash",

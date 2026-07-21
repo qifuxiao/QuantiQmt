@@ -10,6 +10,7 @@ from quantiqmt.risk.model import (
     MutableJsonValue,
     RiskAuditOutputV1,
     RiskContractError,
+    RiskInputV1,
     v2_message_id,
 )
 
@@ -141,11 +142,16 @@ def build_risk_v1_payload(audit: RiskAuditOutputV1) -> dict[str, MutableJsonValu
 
 
 def build_risk_v2_envelope(
-    audit: RiskAuditOutputV1, *, registry: SchemaRegistry, causation_id: str | None
+    audit: RiskAuditOutputV1,
+    risk_input: RiskInputV1,
+    *,
+    registry: SchemaRegistry,
+    causation_id: str | None,
 ) -> MessageEnvelope:
     RiskAuditSemanticValidator().validate(audit)
     payload = audit.to_primitive()
     decision = _mapping(payload["decision"], "decision")
+    order = _mapping(risk_input.to_primitive()["order"], "order")
     envelope = _envelope(
         message_type="risk.order_evaluated.v2",
         message_id=v2_message_id(_str(decision["decision_id"], "decision_id")),
@@ -153,7 +159,7 @@ def build_risk_v2_envelope(
         order_id=_str(decision["order_id"], "order_id"),
         expected_order_version=_int(decision["expected_order_version"], "expected_order_version"),
         occurred_at=_str(payload["evaluated_at"], "evaluated_at"),
-        correlation_id=_str(decision["order_id"], "order_id"),
+        correlation_id=_str(order["intent_id"], "intent_id"),
         causation_id=causation_id,
         payload=payload,
     )
@@ -161,9 +167,14 @@ def build_risk_v2_envelope(
 
 
 def project_risk_v1_envelope(
-    audit: RiskAuditOutputV1, *, registry: SchemaRegistry, causation_id: str | None
+    audit: RiskAuditOutputV1,
+    risk_input: RiskInputV1,
+    *,
+    registry: SchemaRegistry,
+    causation_id: str | None,
 ) -> MessageEnvelope:
     payload = build_risk_v1_payload(audit)
+    order = _mapping(risk_input.to_primitive()["order"], "order")
     envelope = _envelope(
         message_type="risk.order_evaluated.v1",
         message_id=cast(str, payload["decision_id"]),
@@ -171,7 +182,7 @@ def project_risk_v1_envelope(
         order_id=cast(str, payload["order_id"]),
         expected_order_version=cast(int, payload["expected_order_version"]),
         occurred_at=cast(str, payload["evaluated_at"]),
-        correlation_id=cast(str, payload["order_id"]),
+        correlation_id=_str(order["intent_id"], "intent_id"),
         causation_id=causation_id,
         payload=payload,
     )

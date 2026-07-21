@@ -5,6 +5,7 @@ from copy import deepcopy
 from hypothesis import given
 from hypothesis import strategies as st
 from tests.unit.risk.test_risk_engine import (
+    rule_set_dto,
     scoped_rule,
     valid_input,
     valid_rule_set,
@@ -12,7 +13,7 @@ from tests.unit.risk.test_risk_engine import (
     with_input_hash,
 )
 
-from quantiqmt.risk import DeterministicRiskEvaluator, RiskContractError, RiskInputV1, RiskRuleSetV1
+from quantiqmt.risk import DeterministicRiskEvaluator, RiskContractError, RiskInputV1
 
 
 @given(st.permutations(["RULE.A", "RULE.B", "RULE.C"]))
@@ -27,10 +28,10 @@ def test_rule_permutation_does_not_change_semantic_decision(rule_ids: tuple[str,
     reverse = with_hashes(reverse)
 
     first = DeterministicRiskEvaluator().evaluate(
-        RiskInputV1.create(with_input_hash(valid_input(), ordered)), RiskRuleSetV1.create(ordered)
+        RiskInputV1.create(with_input_hash(valid_input(), ordered)), rule_set_dto(ordered)
     )
     second = DeterministicRiskEvaluator().evaluate(
-        RiskInputV1.create(with_input_hash(valid_input(), reverse)), RiskRuleSetV1.create(reverse)
+        RiskInputV1.create(with_input_hash(valid_input(), reverse)), rule_set_dto(reverse)
     )
 
     assert [r.rule_id for r in first.rule_results] == [r.rule_id for r in second.rule_results]
@@ -45,7 +46,7 @@ def test_same_metric_multiple_rules_strictest_rejects(strict_limit: int, loose_l
     ]
     rule_set = with_hashes(rule_set)
     decision = DeterministicRiskEvaluator().evaluate(
-        RiskInputV1.create(with_input_hash(valid_input(), rule_set)), RiskRuleSetV1.create(rule_set)
+        RiskInputV1.create(with_input_hash(valid_input(), rule_set)), rule_set_dto(rule_set)
     )
 
     assert decision.decision == "REJECT"
@@ -64,7 +65,7 @@ def test_hard_cap_cannot_be_relaxed(quantity: int) -> None:
     payload = with_input_hash(payload, rule_set)
 
     decision = DeterministicRiskEvaluator().evaluate(
-        RiskInputV1.create(payload), RiskRuleSetV1.create(rule_set)
+        RiskInputV1.create(payload), rule_set_dto(rule_set)
     )
 
     assert decision.error_code == "QQ-RISK-4001"
@@ -79,7 +80,7 @@ def test_each_snapshot_fail_closed_quality_rejects(quality: str) -> None:
         payload["account"]["metadata"]["missing_fields"] = ["equity"]
     payload = with_input_hash(payload, rule_set)
     decision = DeterministicRiskEvaluator().evaluate(
-        RiskInputV1.unchecked(payload), RiskRuleSetV1.create(rule_set)
+        RiskInputV1.create(payload), rule_set_dto(rule_set)
     )
     assert decision.decision == "REJECT"
     assert decision.error_code in {"QQ-RISK-4002", "QQ-RISK-4003", "QQ-RISK-4006", "QQ-RISK-4010"}
@@ -103,7 +104,7 @@ def test_reduce_evidence_boundary(quantity: int) -> None:
     }
     payload = with_input_hash(payload, rule_set)
     decision = DeterministicRiskEvaluator().evaluate(
-        RiskInputV1.create(payload), RiskRuleSetV1.create(rule_set)
+        RiskInputV1.create(payload), rule_set_dto(rule_set)
     )
     assert decision.error_code == "QQ-RISK-4009"
 

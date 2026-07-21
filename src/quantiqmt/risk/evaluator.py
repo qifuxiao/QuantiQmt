@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Iterator, Mapping
 from dataclasses import replace
 from decimal import ROUND_CEILING, Decimal
+from types import MappingProxyType
 from typing import Literal, cast
 
 from quantiqmt.risk.model import (
@@ -22,6 +23,7 @@ from quantiqmt.risk.model import (
     decimal_value,
     decision_id,
     hard_limit_policy_hash,
+    hash_snapshot_without_metadata_checksum,
     hash_without,
     parse_utc,
     semantic_decision_hash,
@@ -31,20 +33,24 @@ from quantiqmt.risk.model import (
     typed_string,
 )
 
-PHASE_ORDER: Mapping[str, int] = {
-    "INPUT_VALIDITY": 0,
-    "SNAPSHOT_VALIDITY": 1,
-    "SYSTEM_HARD_LIMIT": 2,
-    "SCOPED_RULE": 3,
-    "TIMEOUT_GUARD": 4,
-}
-SCOPE_ORDER: Mapping[str, int] = {
-    "SYSTEM": 0,
-    "ACCOUNT": 1,
-    "PORTFOLIO": 2,
-    "STRATEGY": 3,
-    "INSTRUMENT": 4,
-}
+PHASE_ORDER: Mapping[str, int] = MappingProxyType(
+    {
+        "INPUT_VALIDITY": 0,
+        "SNAPSHOT_VALIDITY": 1,
+        "SYSTEM_HARD_LIMIT": 2,
+        "SCOPED_RULE": 3,
+        "TIMEOUT_GUARD": 4,
+    }
+)
+SCOPE_ORDER: Mapping[str, int] = MappingProxyType(
+    {
+        "SYSTEM": 0,
+        "ACCOUNT": 1,
+        "PORTFOLIO": 2,
+        "STRATEGY": 3,
+        "INSTRUMENT": 4,
+    }
+)
 
 INPUT_GUARDS: tuple[tuple[int, str], ...] = (
     (10, "RISK.INPUT.CANONICAL"),
@@ -101,21 +107,23 @@ HARD_RULES: tuple[tuple[int, str, str, str, str], ...] = (
         "max_cancel_ratio_bps",
     ),
 )
-METRIC_OPERATOR: Mapping[str, str] = {
-    "TRADING_ENABLED": "BOOLEAN_TRUE",
-    "INSTRUMENT_ALLOWED": "IN_SET",
-    "ORDER_QUANTITY": "MAX",
-    "ORDER_NOTIONAL": "MAX",
-    "PRICE_DEVIATION_BPS": "MAX",
-    "AVAILABLE_CASH": "MIN",
-    "POSITION_QUANTITY": "MAX",
-    "PROJECTED_GROSS_EXPOSURE": "MAX",
-    "PROJECTED_NET_EXPOSURE_ABS": "MAX",
-    "PROJECTED_LEVERAGE": "MAX",
-    "DAILY_LOSS": "MAX",
-    "ORDER_COUNT_WINDOW": "MAX",
-    "CANCEL_RATIO_BPS": "MAX",
-}
+METRIC_OPERATOR: Mapping[str, str] = MappingProxyType(
+    {
+        "TRADING_ENABLED": "BOOLEAN_TRUE",
+        "INSTRUMENT_ALLOWED": "IN_SET",
+        "ORDER_QUANTITY": "MAX",
+        "ORDER_NOTIONAL": "MAX",
+        "PRICE_DEVIATION_BPS": "MAX",
+        "AVAILABLE_CASH": "MIN",
+        "POSITION_QUANTITY": "MAX",
+        "PROJECTED_GROSS_EXPOSURE": "MAX",
+        "PROJECTED_NET_EXPOSURE_ABS": "MAX",
+        "PROJECTED_LEVERAGE": "MAX",
+        "DAILY_LOSS": "MAX",
+        "ORDER_COUNT_WINDOW": "MAX",
+        "CANCEL_RATIO_BPS": "MAX",
+    }
+)
 MONETARY_METRICS = frozenset(
     {
         "ORDER_NOTIONAL",
@@ -142,7 +150,11 @@ class DeterministicRiskEvaluator:
     def iter_rule_results(
         self, risk_input: RiskInputV1, rule_set: RiskRuleSetV1
     ) -> Iterator[RuleResult]:
-        context = _EvaluationContext(risk_input.to_primitive(), rule_set.to_primitive())
+        context = _EvaluationContext(
+            risk_input.to_primitive(),
+            rule_set.to_primitive(),
+            rule_set.accepted_hard_policy.to_policy_payload(),
+        )
         results = _synthetic_results(context)
         for index, result in enumerate(results):
             yield replace(result, evaluation_index=index)
@@ -171,9 +183,15 @@ class DeterministicRiskEvaluator:
 
 
 class _EvaluationContext:
-    def __init__(self, risk_input: Mapping[str, object], rule_set: Mapping[str, object]) -> None:
+    def __init__(
+        self,
+        risk_input: Mapping[str, object],
+        rule_set: Mapping[str, object],
+        accepted_hard_policy: Mapping[str, object],
+    ) -> None:
         self.input = risk_input
         self.rule_set = rule_set
+        self.accepted_hard_policy = accepted_hard_policy
         self.order = _mapping(risk_input.get("order"), "order")
         self.account = _mapping(risk_input.get("account"), "account")
         self.portfolio = _mapping(risk_input.get("portfolio"), "portfolio")
@@ -269,6 +287,11 @@ def _input_guard_reason(context: _EvaluationContext, rule_id: str) -> str | None
         if rule_id == "RISK.INPUT.CANONICAL":
             if hash_without(context.input, "input_version") != context.input.get("input_version"):
                 return "RISK_INPUT_INVALID"
+            _validate_order_checksum(context)
+            _validate_snapshot_checksums(context)
+            _validate_snapshot_quality_payloads(context)
+            _validate_snapshot_versions(context)
+            _validate_scope_metrics(context)
             _validate_currencies(context)
             _validate_order_price(context)
         elif rule_id == "RISK.INPUT.IDENTITY":
@@ -422,7 +445,7 @@ def _evaluate_metric(
         and reduction_exception
         and context.effect == "REDUCE"
         and _verified_reduce(context)
-        and metric not in {"TRADING_ENABLED", "INSTRUMENT_ALLOWED"}
+        and _reduce_exception_allowed(context, rule_id, metric)
     ):
         return _result(
             -1,
@@ -451,6 +474,16 @@ def _evaluate_metric(
         measured,
         limit,
     )
+
+
+def _reduce_exception_allowed(context: _EvaluationContext, rule_id: str, metric: str) -> bool:
+    if metric in {"TRADING_ENABLED", "INSTRUMENT_ALLOWED"}:
+        return False
+    policy = _mapping(context.rule_set["reduce_only_policy"], "reduce_only_policy")
+    if policy.get("enabled") is not True:
+        return False
+    exempt_rule_ids = set(_sequence(policy.get("exempt_rule_ids"), "exempt_rule_ids"))
+    return rule_id in exempt_rule_ids
 
 
 def _decision(
@@ -737,6 +770,11 @@ def _validate_currencies(context: _EvaluationContext) -> None:
 
 
 def _validate_order_price(context: _EvaluationContext) -> None:
+    market_quality = _str(
+        _mapping(context.market.get("metadata"), "market.metadata").get("quality"), "quality"
+    )
+    if market_quality != "FRESH":
+        return
     order_type = context.order.get("order_type")
     if order_type == "LIMIT":
         if context.market.get("risk_price_source") != "LIMIT_PRICE":
@@ -748,6 +786,17 @@ def _validate_order_price(context: _EvaluationContext) -> None:
     elif context.market.get("risk_price_source") != "MARKET_WORST_CASE":
         raise RiskContractError(
             "QQ-RISK-4008", "RISK_INPUT_INVALID", "bad market risk price source"
+        )
+    risk_price = decimal_value(context.market.get("risk_price"), field="risk_price")
+    reference_price = decimal_value(context.market.get("reference_price"), field="reference_price")
+    if reference_price <= Decimal("0"):
+        raise RiskContractError("QQ-RISK-4008", "RISK_INPUT_INVALID", "bad reference price")
+    recomputed = (
+        (abs(risk_price - reference_price) / reference_price) * Decimal(10000)
+    ).to_integral_value(rounding=ROUND_CEILING)
+    if context.market.get("price_deviation_bps") != int(recomputed):
+        raise RiskContractError(
+            "QQ-RISK-4008", "RISK_INPUT_INVALID", "price deviation bps mismatch"
         )
 
 
@@ -794,11 +843,31 @@ def _validate_rule_set(context: _EvaluationContext) -> None:
         raise RiskContractError(
             "QQ-RISK-4007", "RISK_RULE_SET_INVALID", "hard policy hash mismatch"
         )
+    if context.rule_set.get("hard_limit_policy_version") != context.accepted_hard_policy.get(
+        "hard_limit_policy_version"
+    ):
+        raise RiskContractError(
+            "QQ-RISK-4007", "RISK_RULE_SET_INVALID", "unaccepted hard policy version"
+        )
+    if context.rule_set.get("valuation_currency") != context.accepted_hard_policy.get(
+        "valuation_currency"
+    ):
+        raise RiskContractError(
+            "QQ-RISK-4007", "RISK_RULE_SET_INVALID", "unaccepted hard policy currency"
+        )
+    if context.rule_set.get("system_hard_limits") != context.accepted_hard_policy.get(
+        "system_hard_limits"
+    ):
+        raise RiskContractError(
+            "QQ-RISK-4007", "RISK_RULE_SET_INVALID", "unaccepted hard policy content"
+        )
     rules = context.sorted_rules()
     rule_ids = [_str(rule.get("rule_id"), "rule_id") for rule in rules]
     if len(rule_ids) != len(set(rule_ids)):
         raise RiskContractError("QQ-RISK-4007", "RISK_RULE_SET_INVALID", "duplicate rule_id")
     policy = _mapping(context.rule_set["reduce_only_policy"], "reduce_only_policy")
+    if not isinstance(policy.get("enabled"), bool):
+        raise RiskContractError("QQ-RISK-4007", "RISK_RULE_SET_INVALID", "bad reduce policy")
     exempt = set(_sequence(policy.get("exempt_rule_ids"), "exempt_rule_ids"))
     rules_by_id = {_str(rule.get("rule_id"), "rule_id"): rule for rule in rules}
     for rule_id in exempt:
@@ -812,11 +881,100 @@ def _validate_rule_set(context: _EvaluationContext) -> None:
                 "QQ-RISK-4007", "RISK_RULE_SET_INVALID", "forbidden reduce exemption"
             )
     for rule in rules:
+        scope = _str(rule.get("scope"), "scope")
+        scope_id = rule.get("scope_id")
+        expected_scope_id = context.scope_id_for(scope)
+        if scope_id != expected_scope_id:
+            raise RiskContractError("QQ-RISK-4007", "RISK_RULE_SET_INVALID", "bad scope identity")
         metric = _str(rule.get("metric"), "metric")
-        if rule.get("operator") != METRIC_OPERATOR[metric]:
+        expected_operator = METRIC_OPERATOR.get(metric)
+        if expected_operator is None or rule.get("operator") != expected_operator:
             raise RiskContractError("QQ-RISK-4007", "RISK_RULE_SET_INVALID", "bad metric operator")
         _validate_limit_currency(context, metric, _mapping(rule.get("limit"), "limit"))
+        _validate_limit_kind(metric, _mapping(rule.get("limit"), "limit"))
         _validate_hard_cap(context, metric, _mapping(rule.get("limit"), "limit"))
+
+
+def _validate_order_checksum(context: _EvaluationContext) -> None:
+    if context.order.get("checksum") != hash_without(context.order, "checksum"):
+        raise RiskContractError("QQ-RISK-4008", "RISK_INPUT_INVALID", "order checksum mismatch")
+
+
+def _validate_snapshot_checksums(context: _EvaluationContext) -> None:
+    for name, snapshot in (
+        ("account", context.account),
+        ("portfolio", context.portfolio),
+        ("market", context.market),
+    ):
+        metadata = _mapping(snapshot.get("metadata"), f"{name}.metadata")
+        if metadata.get("checksum") != hash_snapshot_without_metadata_checksum(snapshot):
+            raise RiskContractError(
+                "QQ-RISK-4008", "RISK_INPUT_INVALID", f"{name} checksum mismatch"
+            )
+
+
+def _validate_snapshot_quality_payloads(context: _EvaluationContext) -> None:
+    for name, snapshot in (
+        ("account", context.account),
+        ("portfolio", context.portfolio),
+        ("market", context.market),
+    ):
+        metadata = _mapping(snapshot.get("metadata"), f"{name}.metadata")
+        quality = _str(metadata.get("quality"), "quality")
+        missing = _sequence(metadata.get("missing_fields"), "missing_fields")
+        if quality in {"FRESH", "STALE"} and missing:
+            raise RiskContractError(
+                "QQ-RISK-4008", "RISK_INPUT_INVALID", f"{name} missing_fields mismatch"
+            )
+        if quality == "PARTIAL" and not missing:
+            raise RiskContractError(
+                "QQ-RISK-4008", "RISK_INPUT_INVALID", f"{name} missing_fields required"
+            )
+
+
+def _validate_snapshot_versions(context: _EvaluationContext) -> None:
+    order_version = _int(context.order.get("aggregate_version"), "aggregate_version")
+    for name, snapshot in (("account", context.account), ("portfolio", context.portfolio)):
+        aggregate_version = _mapping(snapshot.get("metadata"), f"{name}.metadata").get(
+            "aggregate_version"
+        )
+        if not isinstance(aggregate_version, int) or aggregate_version < order_version:
+            raise RiskContractError(
+                "QQ-RISK-4008", "RISK_INPUT_INVALID", f"{name} aggregate version mismatch"
+            )
+    market_version = _mapping(context.market.get("metadata"), "market.metadata").get(
+        "aggregate_version"
+    )
+    if market_version is not None:
+        raise RiskContractError("QQ-RISK-4008", "RISK_INPUT_INVALID", "market aggregate version")
+
+
+def _validate_scope_metrics(context: _EvaluationContext) -> None:
+    expected = {
+        ("ACCOUNT", context.order.get("account_id")),
+        ("PORTFOLIO", context.order.get("portfolio_id")),
+        ("STRATEGY", context.order.get("strategy_id")),
+        ("INSTRUMENT", context.order.get("instrument_id")),
+    }
+    rows = _sequence(context.portfolio.get("scope_metrics"), "scope_metrics")
+    actual: set[tuple[object, object]] = set()
+    for row in rows:
+        metric = _mapping(row, "scope_metric")
+        actual.add((metric.get("scope"), metric.get("scope_id")))
+    if actual != expected or len(rows) != 4:
+        raise RiskContractError("QQ-RISK-4008", "RISK_INPUT_INVALID", "scope metrics mismatch")
+
+
+def _validate_limit_kind(metric: str, limit: Mapping[str, object]) -> None:
+    kind = limit.get("kind")
+    if metric in MONETARY_METRICS | {"PROJECTED_LEVERAGE"} and kind != "DECIMAL":
+        raise RiskContractError("QQ-RISK-4007", "RISK_RULE_SET_INVALID", "bad limit kind")
+    if metric in INTEGER_METRICS and kind != "INTEGER":
+        raise RiskContractError("QQ-RISK-4007", "RISK_RULE_SET_INVALID", "bad limit kind")
+    if metric == "TRADING_ENABLED" and kind != "BOOLEAN":
+        raise RiskContractError("QQ-RISK-4007", "RISK_RULE_SET_INVALID", "bad limit kind")
+    if metric == "INSTRUMENT_ALLOWED" and kind != "STRING_SET":
+        raise RiskContractError("QQ-RISK-4007", "RISK_RULE_SET_INVALID", "bad limit kind")
 
 
 def _validate_limit_currency(
