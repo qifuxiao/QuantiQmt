@@ -1,7 +1,7 @@
 ---
 id: TASK-028
 title: Documentation authority, local environment, and team workflow cleanup
-status: completed
+status: active
 depends_on: [TASK-014]
 spec_refs: [REVIEW-IMPLEMENTATION-READINESS-0.5]
 allowed_paths:
@@ -17,6 +17,9 @@ allowed_paths:
   - tasks/active/README.md
   - tasks/active/TASK-028-documentation-authority-local-workflow.md
   - tasks/index.yaml
+  - docs/standards/01-Coding-Convention/01-Engineering-Convention-Part01.md
+  - docs/standards/01-Coding-Convention/01-Engineering-Convention-Part02.md
+  - docs/standards/01-Coding-Convention/01-Engineering-Convention-Part03.md
 forbidden_paths:
   - src/**
   - tests/**
@@ -62,6 +65,14 @@ verification:
 - `docs/README.md` 与 `ai/README.md` 已链接新增文档。
 - `poetry run python scripts/validate_specs.py`: passed。
 - `poetry run pytest tests/spec tests/contract`: 192 passed。
+
+### Authority follow-up evidence
+
+- Independent post-merge review identified a P2 finding: the three Engineering Convention banners incorrectly treated `docs/README.md` L4 Catalog/Specification as authoritative for implementation contracts.
+- Human project members explicitly authorized restoring TASK-028 from completed to active and adding exactly the three Engineering Convention files above to `allowed_paths`; TASK-005 remains active and isolated.
+- Old PR #30, its branch, commit, and review are intentionally skipped and are not evidence for this follow-up.
+- This change is rebuilt as a clean follow-up from the latest `origin/main`.
+- TASK-028 must remain active until an independent reviewer approves this new head; it is not completed by this change.
 
 ## Required evidence
 
