@@ -10,6 +10,7 @@ from quantiqmt.risk.model import (
     MutableJsonValue,
     RiskAuditOutputV1,
     RiskContractError,
+    RiskInputV1,
     v2_message_id,
 )
 
@@ -141,11 +142,18 @@ def build_risk_v1_payload(audit: RiskAuditOutputV1) -> dict[str, MutableJsonValu
 
 
 def build_risk_v2_envelope(
-    audit: RiskAuditOutputV1, *, registry: SchemaRegistry, causation_id: str | None
+    audit: RiskAuditOutputV1,
+    risk_input: RiskInputV1,
+    *,
+    registry: SchemaRegistry,
+    causation_id: str | None,
 ) -> MessageEnvelope:
     RiskAuditSemanticValidator().validate(audit)
     payload = audit.to_primitive()
     decision = _mapping(payload["decision"], "decision")
+    input_payload = risk_input.to_primitive()
+    _validate_input_audit_binding(input_payload, decision)
+    order = _mapping(input_payload["order"], "order")
     envelope = _envelope(
         message_type="risk.order_evaluated.v2",
         message_id=v2_message_id(_str(decision["decision_id"], "decision_id")),
@@ -153,7 +161,7 @@ def build_risk_v2_envelope(
         order_id=_str(decision["order_id"], "order_id"),
         expected_order_version=_int(decision["expected_order_version"], "expected_order_version"),
         occurred_at=_str(payload["evaluated_at"], "evaluated_at"),
-        correlation_id=_str(decision["order_id"], "order_id"),
+        correlation_id=_str(order["intent_id"], "intent_id"),
         causation_id=causation_id,
         payload=payload,
     )
@@ -161,9 +169,18 @@ def build_risk_v2_envelope(
 
 
 def project_risk_v1_envelope(
-    audit: RiskAuditOutputV1, *, registry: SchemaRegistry, causation_id: str | None
+    audit: RiskAuditOutputV1,
+    risk_input: RiskInputV1,
+    *,
+    registry: SchemaRegistry,
+    causation_id: str | None,
 ) -> MessageEnvelope:
     payload = build_risk_v1_payload(audit)
+    audit_payload = audit.to_primitive()
+    decision = _mapping(audit_payload["decision"], "decision")
+    input_payload = risk_input.to_primitive()
+    _validate_input_audit_binding(input_payload, decision)
+    order = _mapping(input_payload["order"], "order")
     envelope = _envelope(
         message_type="risk.order_evaluated.v1",
         message_id=cast(str, payload["decision_id"]),
@@ -171,7 +188,7 @@ def project_risk_v1_envelope(
         order_id=cast(str, payload["order_id"]),
         expected_order_version=cast(int, payload["expected_order_version"]),
         occurred_at=cast(str, payload["evaluated_at"]),
-        correlation_id=cast(str, payload["order_id"]),
+        correlation_id=_str(order["intent_id"], "intent_id"),
         causation_id=causation_id,
         payload=payload,
     )
@@ -205,6 +222,28 @@ def _envelope(
         "idempotency_key": f"{order_id}:{expected_order_version}:{message_type}",
         "payload": payload,
     }
+
+
+def _validate_input_audit_binding(
+    risk_input: Mapping[str, object], decision: Mapping[str, object]
+) -> None:
+    order = _mapping(risk_input["order"], "order")
+    expected = {
+        "input_version": risk_input["input_version"],
+        "order_id": order["order_id"],
+        "expected_order_version": order["aggregate_version"],
+        "rule_set_version": risk_input["rule_set_version"],
+        "rule_set_hash": risk_input["rule_set_hash"],
+    }
+    actual = {
+        "input_version": decision["input_version"],
+        "order_id": decision["order_id"],
+        "expected_order_version": decision["expected_order_version"],
+        "rule_set_version": decision["rule_set_version"],
+        "rule_set_hash": decision["rule_set_hash"],
+    }
+    if actual != expected:
+        raise RiskContractError("QQ-RISK-4008", "RISK_INPUT_INVALID", "audit/input mismatch")
 
 
 def _project_value(value: object) -> str | None:

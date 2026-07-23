@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import uuid
 from collections.abc import Mapping
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from decimal import ROUND_CEILING, Decimal, InvalidOperation
 from types import MappingProxyType
 from typing import Literal, cast
@@ -61,36 +62,104 @@ class RiskContractError(ValueError):
         self.detail = detail
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, init=False)
 class RiskInputV1:
     values: Mapping[str, JsonValue]
+
+    def __init__(self, *_args: object, **_kwargs: object) -> None:
+        raise TypeError("RiskInputV1 must be constructed with RiskInputV1.create()")
 
     @classmethod
     def create(cls, values: Mapping[str, object]) -> RiskInputV1:
         frozen = _as_frozen_mapping(freeze_json(values))
         primitive = _as_mutable_mapping(thaw_json(frozen))
+        _validate_schema(
+            "risk-input.v1.schema.json", primitive, "QQ-RISK-4008", "RISK_INPUT_INVALID"
+        )
         actual_hash = hash_without(primitive, "input_version")
         declared = primitive.get("input_version")
         if declared != actual_hash:
             raise RiskContractError("QQ-RISK-4008", "RISK_INPUT_INVALID", "input_version mismatch")
-        return cls(frozen)
+        return cls._from_frozen(frozen)
 
     @classmethod
     def unchecked(cls, values: Mapping[str, object]) -> RiskInputV1:
-        return cls(_as_frozen_mapping(freeze_json(values)))
+        del values
+        raise TypeError("RiskInputV1.unchecked() is forbidden")
+
+    @classmethod
+    def _from_frozen(cls, values: Mapping[str, JsonValue]) -> RiskInputV1:
+        instance = object.__new__(cls)
+        object.__setattr__(instance, "values", values)
+        return instance
 
     def to_primitive(self) -> dict[str, MutableJsonValue]:
         return cast(dict[str, MutableJsonValue], thaw_json(self.values))
 
 
-@dataclass(frozen=True, slots=True)
-class RiskRuleSetV1:
-    values: Mapping[str, JsonValue]
+@dataclass(frozen=True, slots=True, init=False)
+class AcceptedHardPolicy:
+    version: str
+    valuation_currency: str
+    system_hard_limits: Mapping[str, JsonValue]
+    policy_hash: str
+
+    def __init__(self, *_args: object, **_kwargs: object) -> None:
+        raise TypeError("AcceptedHardPolicy must be constructed with AcceptedHardPolicy.create()")
 
     @classmethod
-    def create(cls, values: Mapping[str, object]) -> RiskRuleSetV1:
+    def create(
+        cls,
+        *,
+        version: str,
+        valuation_currency: str,
+        system_hard_limits: Mapping[str, object],
+        policy_hash: str | None = None,
+    ) -> AcceptedHardPolicy:
+        payload = {
+            "hard_limit_policy_version": version,
+            "valuation_currency": valuation_currency,
+            "system_hard_limits": _as_mutable_mapping(thaw_json(freeze_json(system_hard_limits))),
+        }
+        actual_hash = hard_limit_policy_hash(payload)
+        if policy_hash is not None and policy_hash != actual_hash:
+            raise RiskContractError(
+                "QQ-RISK-4007", "RISK_RULE_SET_INVALID", "accepted hard policy hash mismatch"
+            )
+        instance = object.__new__(cls)
+        object.__setattr__(instance, "version", version)
+        object.__setattr__(instance, "valuation_currency", valuation_currency)
+        object.__setattr__(
+            instance, "system_hard_limits", _as_frozen_mapping(freeze_json(system_hard_limits))
+        )
+        object.__setattr__(instance, "policy_hash", actual_hash)
+        return instance
+
+    def to_policy_payload(self) -> dict[str, MutableJsonValue]:
+        return {
+            "hard_limit_policy_version": self.version,
+            "valuation_currency": self.valuation_currency,
+            "system_hard_limits": thaw_json(self.system_hard_limits),
+        }
+
+
+@dataclass(frozen=True, slots=True, init=False)
+class RiskRuleSetV1:
+    values: Mapping[str, JsonValue]
+    accepted_hard_policy: AcceptedHardPolicy
+
+    def __init__(self, *_args: object, **_kwargs: object) -> None:
+        raise TypeError("RiskRuleSetV1 must be constructed with RiskRuleSetV1.create()")
+
+    @classmethod
+    def create(
+        cls, values: Mapping[str, object], *, accepted_hard_policy: AcceptedHardPolicy
+    ) -> RiskRuleSetV1:
         frozen = _as_frozen_mapping(freeze_json(values))
         primitive = _as_mutable_mapping(thaw_json(frozen))
+        _validate_schema(
+            "rule-set.v1.schema.json", primitive, "QQ-RISK-4007", "RISK_RULE_SET_INVALID"
+        )
         actual_hash = hash_without(primitive, "content_hash")
         declared = primitive.get("content_hash")
         if declared != actual_hash:
@@ -102,17 +171,44 @@ class RiskRuleSetV1:
             raise RiskContractError(
                 "QQ-RISK-4007", "RISK_RULE_SET_INVALID", "hard_limit_policy_hash mismatch"
             )
-        return cls(frozen)
+        if primitive.get("hard_limit_policy_version") != accepted_hard_policy.version:
+            raise RiskContractError(
+                "QQ-RISK-4007", "RISK_RULE_SET_INVALID", "unaccepted hard policy version"
+            )
+        if primitive.get("valuation_currency") != accepted_hard_policy.valuation_currency:
+            raise RiskContractError(
+                "QQ-RISK-4007", "RISK_RULE_SET_INVALID", "unaccepted hard policy currency"
+            )
+        if policy_hash != accepted_hard_policy.policy_hash:
+            raise RiskContractError(
+                "QQ-RISK-4007", "RISK_RULE_SET_INVALID", "unaccepted hard policy content"
+            )
+        accepted_limits = accepted_hard_policy.to_policy_payload()["system_hard_limits"]
+        if primitive.get("system_hard_limits") != accepted_limits:
+            raise RiskContractError(
+                "QQ-RISK-4007", "RISK_RULE_SET_INVALID", "unaccepted hard policy limits"
+            )
+        return cls._from_frozen(frozen, accepted_hard_policy)
 
     @classmethod
     def unchecked(cls, values: Mapping[str, object]) -> RiskRuleSetV1:
-        return cls(_as_frozen_mapping(freeze_json(values)))
+        del values
+        raise TypeError("RiskRuleSetV1.unchecked() is forbidden")
+
+    @classmethod
+    def _from_frozen(
+        cls, values: Mapping[str, JsonValue], accepted_hard_policy: AcceptedHardPolicy
+    ) -> RiskRuleSetV1:
+        instance = object.__new__(cls)
+        object.__setattr__(instance, "values", values)
+        object.__setattr__(instance, "accepted_hard_policy", accepted_hard_policy)
+        return instance
 
     def to_primitive(self) -> dict[str, MutableJsonValue]:
         return cast(dict[str, MutableJsonValue], thaw_json(self.values))
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, init=False)
 class RuleResult:
     evaluation_index: int
     rule_id: str
@@ -126,6 +222,155 @@ class RuleResult:
     measured_value: Mapping[str, JsonValue] | None
     limit_value: Mapping[str, JsonValue] | None
     exception_applied: bool = False
+
+    def __init__(self, *_args: object, **_kwargs: object) -> None:
+        raise TypeError("RuleResult must be constructed by the validated factory")
+
+    @classmethod
+    def _validated(
+        cls,
+        evaluation_index: int,
+        rule_id: str,
+        phase: RulePhase,
+        scope: RuleScope,
+        scope_id: str | None,
+        priority: int,
+        metric: str | None,
+        result: RuleOutcome,
+        reason_code: str,
+        measured_value: Mapping[str, JsonValue] | None,
+        limit_value: Mapping[str, JsonValue] | None,
+        exception_applied: bool = False,
+        *,
+        _synthetic: bool = False,
+    ) -> RuleResult:
+        # Synthetic candidates use -1 until the deterministic sort assigns an index.
+        if not isinstance(evaluation_index, int) or (evaluation_index < 0 and not _synthetic):
+            raise RiskContractError(
+                "QQ-RISK-4008", "RISK_INPUT_INVALID", "invalid evaluation index"
+            )
+        if not isinstance(rule_id, str) or not 1 <= len(rule_id) <= 128:
+            raise RiskContractError("QQ-RISK-4008", "RISK_INPUT_INVALID", "invalid rule id")
+        if phase not in {
+            "INPUT_VALIDITY",
+            "SNAPSHOT_VALIDITY",
+            "SYSTEM_HARD_LIMIT",
+            "SCOPED_RULE",
+            "TIMEOUT_GUARD",
+        }:
+            raise RiskContractError("QQ-RISK-4008", "RISK_INPUT_INVALID", "invalid rule phase")
+        if scope not in {"SYSTEM", "ACCOUNT", "PORTFOLIO", "STRATEGY", "INSTRUMENT"}:
+            raise RiskContractError("QQ-RISK-4008", "RISK_INPUT_INVALID", "invalid rule scope")
+        if scope == "SYSTEM" and scope_id is not None:
+            raise RiskContractError(
+                "QQ-RISK-4008", "RISK_INPUT_INVALID", "system scope id must be null"
+            )
+        if scope != "SYSTEM" and (not isinstance(scope_id, str) or not scope_id):
+            raise RiskContractError(
+                "QQ-RISK-4008", "RISK_INPUT_INVALID", "scoped rule id is required"
+            )
+        if not isinstance(priority, int) or not 0 <= priority <= 1_000_000:
+            raise RiskContractError("QQ-RISK-4008", "RISK_INPUT_INVALID", "invalid rule priority")
+        metrics = {
+            "TRADING_ENABLED",
+            "INSTRUMENT_ALLOWED",
+            "ORDER_QUANTITY",
+            "ORDER_NOTIONAL",
+            "PRICE_DEVIATION_BPS",
+            "AVAILABLE_CASH",
+            "POSITION_QUANTITY",
+            "PROJECTED_GROSS_EXPOSURE",
+            "PROJECTED_NET_EXPOSURE_ABS",
+            "PROJECTED_LEVERAGE",
+            "DAILY_LOSS",
+            "ORDER_COUNT_WINDOW",
+            "CANCEL_RATIO_BPS",
+        }
+        if metric is not None and (
+            not isinstance(metric, str) or not 1 <= len(metric) <= 64 or metric not in metrics
+        ):
+            raise RiskContractError("QQ-RISK-4008", "RISK_INPUT_INVALID", "invalid metric")
+        if result not in {"PASS", "REJECT", "NOT_APPLICABLE"}:
+            raise RiskContractError("QQ-RISK-4008", "RISK_INPUT_INVALID", "invalid rule result")
+        reasons = {
+            "RISK_ALL_APPLICABLE_RULES_PASSED",
+            "RISK_RULE_PASSED",
+            "RISK_RULE_NOT_APPLICABLE",
+            "RISK_RULE_BREACH",
+            "RISK_HARD_LIMIT_BREACH",
+            "RISK_TRADING_DISABLED",
+            "RISK_INSTRUMENT_NOT_ALLOWED",
+            "RISK_SNAPSHOT_STALE",
+            "RISK_SNAPSHOT_PARTIAL",
+            "RISK_SNAPSHOT_TIMEOUT",
+            "RISK_SNAPSHOT_UNAVAILABLE",
+            "RISK_SNAPSHOT_VERSION_MISMATCH",
+            "RISK_RULE_SET_VERSION_MISMATCH",
+            "RISK_INPUT_INVALID",
+            "RISK_RULE_SET_INVALID",
+            "RISK_REDUCTION_EVIDENCE_INVALID",
+            "RISK_REDUCE_ONLY_EXCEPTION_APPLIED",
+            "RISK_EVALUATION_TIMEOUT",
+        }
+        if reason_code not in reasons:
+            raise RiskContractError("QQ-RISK-4008", "RISK_INPUT_INVALID", "invalid reason code")
+        if not isinstance(exception_applied, bool):
+            raise RiskContractError("QQ-RISK-4008", "RISK_INPUT_INVALID", "invalid exception flag")
+        if result == "PASS" and reason_code not in {
+            "RISK_RULE_PASSED",
+            "RISK_ALL_APPLICABLE_RULES_PASSED",
+            "RISK_REDUCE_ONLY_EXCEPTION_APPLIED",
+        }:
+            raise RiskContractError("QQ-RISK-4008", "RISK_INPUT_INVALID", "pass reason mismatch")
+        if result == "NOT_APPLICABLE" and reason_code != "RISK_RULE_NOT_APPLICABLE":
+            raise RiskContractError(
+                "QQ-RISK-4008", "RISK_INPUT_INVALID", "not-applicable reason mismatch"
+            )
+        if result == "REJECT" and reason_code in {
+            "RISK_RULE_PASSED",
+            "RISK_ALL_APPLICABLE_RULES_PASSED",
+            "RISK_RULE_NOT_APPLICABLE",
+        }:
+            raise RiskContractError("QQ-RISK-4008", "RISK_INPUT_INVALID", "reject reason mismatch")
+        if exception_applied and (
+            result != "PASS" or reason_code != "RISK_REDUCE_ONLY_EXCEPTION_APPLIED"
+        ):
+            raise RiskContractError(
+                "QQ-RISK-4008", "RISK_INPUT_INVALID", "exception semantics mismatch"
+            )
+        _validate_typed_output(measured_value, "measured_value")
+        _validate_typed_output(limit_value, "limit_value")
+        instance = object.__new__(cls)
+        for name, value in {
+            "evaluation_index": evaluation_index,
+            "rule_id": rule_id,
+            "phase": phase,
+            "scope": scope,
+            "scope_id": scope_id,
+            "priority": priority,
+            "metric": metric,
+            "result": result,
+            "reason_code": reason_code,
+            "measured_value": None
+            if measured_value is None
+            else _as_frozen_mapping(freeze_json(measured_value)),
+            "limit_value": None
+            if limit_value is None
+            else _as_frozen_mapping(freeze_json(limit_value)),
+            "exception_applied": exception_applied,
+        }.items():
+            object.__setattr__(instance, name, value)
+        return instance
+
+    def __post_init__(self) -> None:
+        if self.measured_value is not None:
+            object.__setattr__(
+                self, "measured_value", _as_frozen_mapping(freeze_json(self.measured_value))
+            )
+        if self.limit_value is not None:
+            object.__setattr__(
+                self, "limit_value", _as_frozen_mapping(freeze_json(self.limit_value))
+            )
 
     def to_primitive(self) -> dict[str, MutableJsonValue]:
         return {
@@ -146,11 +391,28 @@ class RuleResult:
         }
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, init=False)
 class RuleTiming:
     evaluation_index: int
     rule_id: str
     latency_us: int
+
+    def __init__(self, *_args: object, **_kwargs: object) -> None:
+        raise TypeError("RuleTiming must be constructed by the validated factory")
+
+    @classmethod
+    def _validated(cls, evaluation_index: int, rule_id: str, latency_us: int) -> RuleTiming:
+        if not isinstance(evaluation_index, int) or evaluation_index < 0:
+            raise RiskContractError("QQ-RISK-4008", "RISK_INPUT_INVALID", "invalid timing index")
+        if not isinstance(rule_id, str) or not 1 <= len(rule_id) <= 128:
+            raise RiskContractError("QQ-RISK-4008", "RISK_INPUT_INVALID", "invalid timing rule id")
+        if not isinstance(latency_us, int) or latency_us < 0:
+            raise RiskContractError("QQ-RISK-4008", "RISK_INPUT_INVALID", "invalid rule latency")
+        instance = object.__new__(cls)
+        object.__setattr__(instance, "evaluation_index", evaluation_index)
+        object.__setattr__(instance, "rule_id", rule_id)
+        object.__setattr__(instance, "latency_us", latency_us)
+        return instance
 
     def to_primitive(self) -> dict[str, int | str]:
         return {
@@ -160,7 +422,7 @@ class RuleTiming:
         }
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, init=False)
 class RiskDecisionV1:
     decision_id: str
     decision_origin: DecisionOrigin
@@ -175,6 +437,196 @@ class RiskDecisionV1:
     rule_set_hash: str
     snapshot_states: Mapping[str, JsonValue]
     rule_results: tuple[RuleResult, ...]
+
+    def __init__(self, *_args: object, **_kwargs: object) -> None:
+        raise TypeError("RiskDecisionV1 must be constructed by the validated factory")
+
+    @classmethod
+    def _validated(
+        cls,
+        *,
+        decision_id: str,
+        decision_origin: DecisionOrigin,
+        input_version: str,
+        semantic_decision_hash: str,
+        order_id: str,
+        expected_order_version: int,
+        decision: RiskDecisionOutcome,
+        primary_reason_code: str,
+        error_code: str | None,
+        rule_set_version: str,
+        rule_set_hash: str,
+        snapshot_states: Mapping[str, JsonValue],
+        rule_results: tuple[RuleResult, ...],
+    ) -> RiskDecisionV1:
+        if decision_origin not in {"EVALUATOR", "INPUT_GUARD", "TIMEOUT_GUARD"}:
+            raise RiskContractError("QQ-RISK-4008", "RISK_INPUT_INVALID", "invalid decision origin")
+        if decision not in {"PASS", "REJECT"} or not all(
+            isinstance(value, str) and value
+            for value in (
+                decision_id,
+                input_version,
+                semantic_decision_hash,
+                order_id,
+                primary_reason_code,
+                rule_set_version,
+                rule_set_hash,
+            )
+        ):
+            raise RiskContractError(
+                "QQ-RISK-4008", "RISK_INPUT_INVALID", "invalid decision identity"
+            )
+        if not isinstance(expected_order_version, int) or expected_order_version < 1:
+            raise RiskContractError("QQ-RISK-4008", "RISK_INPUT_INVALID", "invalid order version")
+        if not re.fullmatch(
+            r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", decision_id
+        ):
+            raise RiskContractError("QQ-RISK-4008", "RISK_INPUT_INVALID", "invalid decision id")
+        if not re.fullmatch(r"[0-9a-f]{64}", input_version) or not re.fullmatch(
+            r"[0-9a-f]{64}", rule_set_hash
+        ):
+            raise RiskContractError("QQ-RISK-4008", "RISK_INPUT_INVALID", "invalid version hash")
+        if not re.fullmatch(r"[0-9a-f]{64}", semantic_decision_hash):
+            raise RiskContractError("QQ-RISK-4008", "RISK_INPUT_INVALID", "invalid semantic hash")
+        if not re.fullmatch(
+            r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", order_id
+        ):
+            raise RiskContractError("QQ-RISK-4008", "RISK_INPUT_INVALID", "invalid order id")
+        if not isinstance(rule_set_version, str) or not 1 <= len(rule_set_version) <= 64:
+            raise RiskContractError(
+                "QQ-RISK-4008", "RISK_INPUT_INVALID", "invalid rule set version"
+            )
+        if error_code is not None and not isinstance(error_code, str):
+            raise RiskContractError("QQ-RISK-4008", "RISK_INPUT_INVALID", "invalid error code")
+        if (
+            not isinstance(rule_results, tuple)
+            or not 1 <= len(rule_results) <= 8192
+            or not all(isinstance(item, RuleResult) for item in rule_results)
+        ):
+            raise RiskContractError("QQ-RISK-4008", "RISK_INPUT_INVALID", "invalid rule results")
+        if not rule_results or [item.evaluation_index for item in rule_results] != list(
+            range(len(rule_results))
+        ):
+            raise RiskContractError(
+                "QQ-RISK-4008", "RISK_INPUT_INVALID", "non-contiguous rule results"
+            )
+        if len({item.rule_id for item in rule_results}) != len(rule_results):
+            raise RiskContractError("QQ-RISK-4008", "RISK_INPUT_INVALID", "duplicate rule result")
+        states = _as_mutable_mapping(thaw_json(freeze_json(snapshot_states)))
+        if set(states) != {"account", "portfolio", "market"}:
+            raise RiskContractError("QQ-RISK-4008", "RISK_INPUT_INVALID", "invalid snapshot states")
+        for name, state_obj in states.items():
+            if not isinstance(state_obj, dict) or set(state_obj) != {
+                "snapshot_version",
+                "quality",
+                "age_ms",
+                "max_age_ms",
+            }:
+                raise RiskContractError(
+                    "QQ-RISK-4008", "RISK_INPUT_INVALID", f"invalid {name} snapshot state"
+                )
+            if (
+                not isinstance(state_obj["snapshot_version"], str)
+                or not state_obj["snapshot_version"]
+            ):
+                raise RiskContractError(
+                    "QQ-RISK-4008", "RISK_INPUT_INVALID", f"invalid {name} version"
+                )
+            if state_obj["quality"] not in {
+                "FRESH",
+                "STALE",
+                "PARTIAL",
+                "TIMEOUT",
+                "UNAVAILABLE",
+                "VERSION_MISMATCH",
+            }:
+                raise RiskContractError(
+                    "QQ-RISK-4008", "RISK_INPUT_INVALID", f"invalid {name} quality"
+                )
+            if state_obj["age_ms"] is not None and (
+                not isinstance(state_obj["age_ms"], int) or state_obj["age_ms"] < 0
+            ):
+                raise RiskContractError("QQ-RISK-4008", "RISK_INPUT_INVALID", f"invalid {name} age")
+            if not isinstance(state_obj["max_age_ms"], int) or state_obj["max_age_ms"] < 0:
+                raise RiskContractError(
+                    "QQ-RISK-4008", "RISK_INPUT_INVALID", f"invalid {name} max age"
+                )
+        primary_reasons = {
+            "RISK_ALL_APPLICABLE_RULES_PASSED",
+            "RISK_RULE_PASSED",
+            "RISK_RULE_NOT_APPLICABLE",
+            "RISK_RULE_BREACH",
+            "RISK_HARD_LIMIT_BREACH",
+            "RISK_TRADING_DISABLED",
+            "RISK_INSTRUMENT_NOT_ALLOWED",
+            "RISK_SNAPSHOT_STALE",
+            "RISK_SNAPSHOT_PARTIAL",
+            "RISK_SNAPSHOT_TIMEOUT",
+            "RISK_SNAPSHOT_UNAVAILABLE",
+            "RISK_SNAPSHOT_VERSION_MISMATCH",
+            "RISK_RULE_SET_VERSION_MISMATCH",
+            "RISK_INPUT_INVALID",
+            "RISK_RULE_SET_INVALID",
+            "RISK_REDUCTION_EVIDENCE_INVALID",
+            "RISK_REDUCE_ONLY_EXCEPTION_APPLIED",
+            "RISK_EVALUATION_TIMEOUT",
+        }
+        if primary_reason_code not in primary_reasons:
+            raise RiskContractError("QQ-RISK-4008", "RISK_INPUT_INVALID", "invalid primary reason")
+        if error_code is not None and not re.fullmatch(r"QQ-RISK-40(?:0[1-9]|1[01])", error_code):
+            raise RiskContractError("QQ-RISK-4008", "RISK_INPUT_INVALID", "invalid risk error code")
+        if decision == "PASS" and (
+            primary_reason_code != "RISK_ALL_APPLICABLE_RULES_PASSED"
+            or error_code is not None
+            or decision_origin != "EVALUATOR"
+        ):
+            raise RiskContractError("QQ-RISK-4008", "RISK_INPUT_INVALID", "pass decision semantics")
+        if decision == "REJECT" and error_code is None:
+            raise RiskContractError(
+                "QQ-RISK-4008", "RISK_INPUT_INVALID", "reject decision requires error"
+            )
+        primitive = {
+            "schema_version": 1,
+            "decision_id": decision_id,
+            "decision_origin": decision_origin,
+            "input_version": input_version,
+            "semantic_decision_hash": semantic_decision_hash,
+            "order_id": order_id,
+            "expected_order_version": expected_order_version,
+            "decision": decision,
+            "primary_reason_code": primary_reason_code,
+            "error_code": error_code,
+            "rule_set_version": rule_set_version,
+            "rule_set_hash": rule_set_hash,
+            "snapshot_states": states,
+            "rule_results": [item.to_primitive() for item in rule_results],
+        }
+        if semantic_decision_hash != _compute_semantic_decision_hash(primitive):
+            raise RiskContractError("QQ-RISK-4008", "RISK_INPUT_INVALID", "semantic hash mismatch")
+        instance = object.__new__(cls)
+        for name, value in {
+            "decision_id": decision_id,
+            "decision_origin": decision_origin,
+            "input_version": input_version,
+            "semantic_decision_hash": semantic_decision_hash,
+            "order_id": order_id,
+            "expected_order_version": expected_order_version,
+            "decision": decision,
+            "primary_reason_code": primary_reason_code,
+            "error_code": error_code,
+            "rule_set_version": rule_set_version,
+            "rule_set_hash": rule_set_hash,
+            "snapshot_states": _as_frozen_mapping(freeze_json(states)),
+            "rule_results": tuple(rule_results),
+        }.items():
+            object.__setattr__(instance, name, value)
+        return instance
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self, "snapshot_states", _as_frozen_mapping(freeze_json(self.snapshot_states))
+        )
+        object.__setattr__(self, "rule_results", tuple(self.rule_results))
 
     def to_primitive(self) -> dict[str, MutableJsonValue]:
         return {
@@ -195,7 +647,7 @@ class RiskDecisionV1:
         }
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, init=False)
 class RiskAuditOutputV1:
     decision: RiskDecisionV1
     evaluated_at: str
@@ -203,6 +655,55 @@ class RiskAuditOutputV1:
     evaluation_timeout_us: int
     completed_rule_count: int
     rule_timings: tuple[RuleTiming, ...]
+
+    def __init__(self, *_args: object, **_kwargs: object) -> None:
+        raise TypeError("RiskAuditOutputV1 must be constructed by the validated factory")
+
+    @classmethod
+    def _validated(
+        cls,
+        *,
+        decision: RiskDecisionV1,
+        evaluated_at: str,
+        total_latency_us: int,
+        evaluation_timeout_us: int,
+        completed_rule_count: int,
+        rule_timings: tuple[RuleTiming, ...],
+    ) -> RiskAuditOutputV1:
+        if not isinstance(decision, RiskDecisionV1) or not isinstance(evaluated_at, str):
+            raise RiskContractError("QQ-RISK-4008", "RISK_INPUT_INVALID", "invalid audit identity")
+        _date_time_z(evaluated_at, "$.evaluated_at")
+        if not isinstance(total_latency_us, int) or total_latency_us < 0:
+            raise RiskContractError("QQ-RISK-4008", "RISK_INPUT_INVALID", "invalid audit timing")
+        if not isinstance(evaluation_timeout_us, int) or not 1 <= evaluation_timeout_us <= 4000:
+            raise RiskContractError(
+                "QQ-RISK-4008", "RISK_INPUT_INVALID", "invalid evaluation timeout"
+            )
+        if not isinstance(completed_rule_count, int) or not 0 <= completed_rule_count <= 8192:
+            raise RiskContractError("QQ-RISK-4008", "RISK_INPUT_INVALID", "invalid completed count")
+        if (
+            not isinstance(rule_timings, tuple)
+            or not 1 <= len(rule_timings) <= 8192
+            or not all(isinstance(item, RuleTiming) for item in rule_timings)
+        ):
+            raise RiskContractError("QQ-RISK-4008", "RISK_INPUT_INVALID", "invalid rule timings")
+        instance = object.__new__(cls)
+        for name, value in {
+            "decision": decision,
+            "evaluated_at": evaluated_at,
+            "total_latency_us": total_latency_us,
+            "evaluation_timeout_us": evaluation_timeout_us,
+            "completed_rule_count": completed_rule_count,
+            "rule_timings": tuple(rule_timings),
+        }.items():
+            object.__setattr__(instance, name, value)
+        from quantiqmt.risk.audit import RiskAuditSemanticValidator
+
+        RiskAuditSemanticValidator().validate(instance)
+        return instance
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "rule_timings", tuple(self.rule_timings))
 
     def to_primitive(self) -> dict[str, MutableJsonValue]:
         return {
@@ -239,6 +740,15 @@ def hash_without(values: Mapping[str, object], excluded_key: str) -> str:
     )
 
 
+def hash_snapshot_without_metadata_checksum(snapshot: Mapping[str, object]) -> str:
+    mutable = _as_mutable_mapping(thaw_json(freeze_json(snapshot)))
+    metadata = mutable.get("metadata")
+    if not isinstance(metadata, dict):
+        raise RiskContractError("QQ-RISK-4008", "RISK_INPUT_INVALID", "metadata must be object")
+    metadata.pop("checksum", None)
+    return sha256_lower_hex(canonical_json_bytes(mutable))
+
+
 def hard_limit_policy_hash(rule_set: Mapping[str, object]) -> str:
     return sha256_lower_hex(
         canonical_json_bytes(
@@ -251,6 +761,20 @@ def hard_limit_policy_hash(rule_set: Mapping[str, object]) -> str:
     )
 
 
+def _validate_schema(
+    schema_file: str, payload: Mapping[str, object], code: str, reason_code: str
+) -> None:
+    try:
+        if schema_file == "risk-input.v1.schema.json":
+            _validate_risk_input_schema(payload)
+        elif schema_file == "rule-set.v1.schema.json":
+            _validate_rule_set_schema(payload)
+        else:  # pragma: no cover - fixed internal call sites
+            raise ValueError(f"unknown risk schema {schema_file}")
+    except _SchemaError as exc:
+        raise RiskContractError(code, reason_code, exc.detail) from exc
+
+
 def decision_id(input_version: str, content_hash: str) -> str:
     return str(uuid.uuid5(RISK_NAMESPACE, f"{input_version}:{content_hash}"))
 
@@ -260,6 +784,10 @@ def v2_message_id(decision_identifier: str) -> str:
 
 
 def semantic_decision_hash(decision: Mapping[str, object]) -> str:
+    return _compute_semantic_decision_hash(decision)
+
+
+def _compute_semantic_decision_hash(decision: Mapping[str, object]) -> str:
     return sha256_lower_hex(
         canonical_json_bytes(
             {
@@ -281,6 +809,68 @@ def decimal_value(value: object, *, field: str) -> Decimal:
             "QQ-RISK-4008", "RISK_INPUT_INVALID", f"{field} invalid decimal"
         ) from exc
     return parsed
+
+
+def _validate_typed_output(value: Mapping[str, JsonValue] | None, field: str) -> None:
+    if value is None:
+        return
+    raw = cast(Mapping[str, object], value)
+    kind = raw.get("kind")
+    if kind == "DECIMAL":
+        if set(raw) != {"kind", "value", "currency"}:
+            raise RiskContractError("QQ-RISK-4008", "RISK_INPUT_INVALID", f"{field} decimal shape")
+        text = raw.get("value")
+        currency = raw.get("currency")
+        if not isinstance(text, str) or not re.fullmatch(
+            r"^-?(0|[1-9][0-9]{0,17})(\.[0-9]{1,8})?$", text
+        ):
+            raise RiskContractError(
+                "QQ-RISK-4008", "RISK_INPUT_INVALID", f"{field} decimal pattern"
+            )
+        try:
+            Decimal(text)
+        except InvalidOperation as exc:
+            raise RiskContractError(
+                "QQ-RISK-4008", "RISK_INPUT_INVALID", f"{field} decimal"
+            ) from exc
+        if currency is not None and (
+            not isinstance(currency, str) or not re.fullmatch(r"^[A-Z]{3}$", currency)
+        ):
+            raise RiskContractError("QQ-RISK-4008", "RISK_INPUT_INVALID", f"{field} currency")
+        return
+    if kind == "INTEGER":
+        if (
+            set(raw) != {"kind", "value"}
+            or isinstance(raw.get("value"), bool)
+            or not isinstance(raw.get("value"), int)
+        ):
+            raise RiskContractError("QQ-RISK-4008", "RISK_INPUT_INVALID", f"{field} integer")
+        return
+    if kind == "BOOLEAN":
+        if set(raw) != {"kind", "value"} or not isinstance(raw.get("value"), bool):
+            raise RiskContractError("QQ-RISK-4008", "RISK_INPUT_INVALID", f"{field} boolean")
+        return
+    if kind == "STRING":
+        text = raw.get("value")
+        if set(raw) != {"kind", "value"} or not isinstance(text, str) or not 1 <= len(text) <= 128:
+            raise RiskContractError("QQ-RISK-4008", "RISK_INPUT_INVALID", f"{field} string")
+        return
+    if kind == "STRING_SET":
+        values = raw.get("values")
+        if (
+            set(raw) != {"kind", "values"}
+            or not isinstance(values, tuple)
+            or not 1 <= len(values) <= 10000
+        ):
+            raise RiskContractError("QQ-RISK-4008", "RISK_INPUT_INVALID", f"{field} string set")
+        if len(set(values)) != len(values) or any(
+            not isinstance(item, str) or not 1 <= len(item) <= 128 for item in values
+        ):
+            raise RiskContractError(
+                "QQ-RISK-4008", "RISK_INPUT_INVALID", f"{field} string set values"
+            )
+        return
+    raise RiskContractError("QQ-RISK-4008", "RISK_INPUT_INVALID", f"{field} kind")
 
 
 def ceil_div_us(delta_ns: int) -> int:
@@ -385,3 +975,594 @@ def _as_mutable_mapping(value: MutableJsonValue) -> dict[str, MutableJsonValue]:
     if not isinstance(value, dict):
         raise RiskContractError("QQ-RISK-4008", "RISK_INPUT_INVALID", "root must be object")
     return value
+
+
+_HEX64 = re.compile(r"^[0-9a-f]{64}$", re.ASCII)
+_UUID = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+    re.ASCII,
+)
+_CURRENCY = re.compile(r"^[A-Z]{3}$", re.ASCII)
+_DECIMAL = re.compile(r"^-?(0|[1-9][0-9]{0,17})(\.[0-9]{1,8})?$", re.ASCII)
+_NON_NEG_DECIMAL = re.compile(r"^(0|[1-9][0-9]{0,17})(\.[0-9]{1,8})?$", re.ASCII)
+_POSITIVE_DECIMAL = re.compile(r"^(?=.*[1-9])(0|[1-9][0-9]{0,17})(\.[0-9]{1,8})?$", re.ASCII)
+_RULE_ID = re.compile(r"^[A-Z0-9][A-Z0-9_.-]{0,127}$", re.ASCII)
+
+
+class _SchemaError(ValueError):
+    def __init__(self, detail: str) -> None:
+        super().__init__(detail)
+        self.detail = detail
+
+
+def _validate_risk_input_schema(payload: Mapping[str, object]) -> None:
+    _exact_keys(
+        payload,
+        {
+            "schema_version",
+            "input_version",
+            "evaluation_time",
+            "valuation_currency",
+            "rule_set_version",
+            "rule_set_hash",
+            "order",
+            "account",
+            "portfolio",
+            "market",
+        },
+        "$",
+    )
+    _const(payload["schema_version"], 1, "$.schema_version")
+    _pattern(payload["input_version"], _HEX64, "$.input_version")
+    _date_time_z(payload["evaluation_time"], "$.evaluation_time")
+    _pattern(payload["valuation_currency"], _CURRENCY, "$.valuation_currency")
+    _bounded_string(payload["rule_set_version"], "$.rule_set_version", 1, 64)
+    _pattern(payload["rule_set_hash"], _HEX64, "$.rule_set_hash")
+    _validate_order_schema(_object(payload["order"], "$.order"))
+    _validate_account_schema(_object(payload["account"], "$.account"))
+    _validate_portfolio_schema(_object(payload["portfolio"], "$.portfolio"))
+    _validate_market_schema(_object(payload["market"], "$.market"))
+
+
+def _validate_rule_set_schema(payload: Mapping[str, object]) -> None:
+    _exact_keys(
+        payload,
+        {
+            "schema_version",
+            "rule_set_id",
+            "rule_set_version",
+            "content_hash",
+            "valuation_currency",
+            "hard_limit_policy_version",
+            "hard_limit_policy_hash",
+            "evaluation_timeout_us",
+            "freshness_limits_ms",
+            "system_hard_limits",
+            "reduce_only_policy",
+            "rules",
+        },
+        "$",
+    )
+    _const(payload["schema_version"], 1, "$.schema_version")
+    _pattern(payload["rule_set_id"], _UUID, "$.rule_set_id")
+    _bounded_string(payload["rule_set_version"], "$.rule_set_version", 1, 64)
+    _pattern(payload["content_hash"], _HEX64, "$.content_hash")
+    _pattern(payload["valuation_currency"], _CURRENCY, "$.valuation_currency")
+    _bounded_string(payload["hard_limit_policy_version"], "$.hard_limit_policy_version", 1, 64)
+    _pattern(payload["hard_limit_policy_hash"], _HEX64, "$.hard_limit_policy_hash")
+    _integer_range(payload["evaluation_timeout_us"], "$.evaluation_timeout_us", 1, 4000)
+    _validate_freshness_limits(_object(payload["freshness_limits_ms"], "$.freshness_limits_ms"))
+    _validate_hard_limits(_object(payload["system_hard_limits"], "$.system_hard_limits"))
+    _validate_reduce_policy(_object(payload["reduce_only_policy"], "$.reduce_only_policy"))
+    rules = _array(payload["rules"], "$.rules", 0, 4096)
+    for index, rule in enumerate(rules):
+        _validate_rule_schema(_object(rule, f"$.rules[{index}]"), f"$.rules[{index}]")
+
+
+def _validate_order_schema(order: Mapping[str, object]) -> None:
+    _exact_keys(
+        order,
+        {
+            "schema_version",
+            "checksum",
+            "order_id",
+            "aggregate_version",
+            "intent_id",
+            "account_id",
+            "portfolio_id",
+            "strategy_id",
+            "strategy_version",
+            "instrument_id",
+            "side",
+            "position_effect",
+            "order_type",
+            "quantity",
+            "limit_price",
+            "time_in_force",
+            "registered_at",
+            "market_data_version",
+            "risk_effect",
+            "reduction_evidence",
+        },
+        "$.order",
+    )
+    _const(order["schema_version"], 1, "$.order.schema_version")
+    _pattern(order["checksum"], _HEX64, "$.order.checksum")
+    _pattern(order["order_id"], _UUID, "$.order.order_id")
+    _integer_range(order["aggregate_version"], "$.order.aggregate_version", 1, None)
+    _pattern(order["intent_id"], _UUID, "$.order.intent_id")
+    for field, max_length in (
+        ("account_id", 128),
+        ("portfolio_id", 128),
+        ("strategy_id", 128),
+        ("strategy_version", 64),
+        ("instrument_id", 64),
+        ("market_data_version", 128),
+    ):
+        _bounded_string(order[field], f"$.order.{field}", 1, max_length)
+    _enum(order["side"], {"BUY", "SELL"}, "$.order.side")
+    _enum(order["position_effect"], {"OPEN", "CLOSE", "AUTO"}, "$.order.position_effect")
+    _enum(order["order_type"], {"LIMIT", "MARKET", "BEST"}, "$.order.order_type")
+    _integer_range(order["quantity"], "$.order.quantity", 1, None)
+    if order["limit_price"] is not None:
+        _pattern(order["limit_price"], _POSITIVE_DECIMAL, "$.order.limit_price")
+    if order["order_type"] == "LIMIT" and not isinstance(order["limit_price"], str):
+        raise _SchemaError("$.order.limit_price: LIMIT requires decimal string")
+    _enum(order["time_in_force"], {"DAY", "IOC", "FOK"}, "$.order.time_in_force")
+    _date_time_z(order["registered_at"], "$.order.registered_at")
+    _enum(order["risk_effect"], {"INCREASE", "REDUCE", "UNKNOWN"}, "$.order.risk_effect")
+    if order["risk_effect"] == "REDUCE":
+        _validate_reduction_evidence(
+            _object(order["reduction_evidence"], "$.order.reduction_evidence")
+        )
+    elif order["reduction_evidence"] is not None:
+        raise _SchemaError("$.order.reduction_evidence: must be null unless REDUCE")
+
+
+def _validate_snapshot_metadata(metadata: Mapping[str, object], path: str) -> None:
+    _exact_keys(
+        metadata,
+        {
+            "source",
+            "snapshot_version",
+            "schema_version",
+            "aggregate_version",
+            "as_of",
+            "trading_day",
+            "quality",
+            "missing_fields",
+            "checksum",
+        },
+        path,
+    )
+    _bounded_string(metadata["source"], f"{path}.source", 1, 128)
+    _bounded_string(metadata["snapshot_version"], f"{path}.snapshot_version", 1, 128)
+    _const(metadata["schema_version"], 1, f"{path}.schema_version")
+    if metadata["aggregate_version"] is not None:
+        _integer_range(metadata["aggregate_version"], f"{path}.aggregate_version", 1, None)
+    _date_time_z(metadata["as_of"], f"{path}.as_of")
+    _date_value(metadata["trading_day"], f"{path}.trading_day")
+    _enum(
+        metadata["quality"],
+        {"FRESH", "STALE", "PARTIAL", "TIMEOUT", "UNAVAILABLE"},
+        f"{path}.quality",
+    )
+    missing = _array(metadata["missing_fields"], f"{path}.missing_fields", 0, 64)
+    _unique_items(missing, f"{path}.missing_fields")
+    for index, item in enumerate(missing):
+        _bounded_string(item, f"{path}.missing_fields[{index}]", 1, 128)
+    if metadata["quality"] in {"FRESH", "STALE"} and missing:
+        raise _SchemaError(f"{path}.missing_fields: must be empty for {metadata['quality']}")
+    if metadata["quality"] == "PARTIAL" and not missing:
+        raise _SchemaError(f"{path}.missing_fields: must be non-empty for PARTIAL")
+    _pattern(metadata["checksum"], _HEX64, f"{path}.checksum")
+
+
+def _validate_account_schema(account: Mapping[str, object]) -> None:
+    _exact_keys(
+        account,
+        {
+            "metadata",
+            "account_id",
+            "currency",
+            "equity",
+            "available_cash",
+            "projected_available_cash",
+            "margin_used",
+            "daily_loss",
+            "open_order_notional",
+        },
+        "$.account",
+    )
+    _validate_snapshot_metadata(
+        _object(account["metadata"], "$.account.metadata"), "$.account.metadata"
+    )
+    _bounded_string(account["account_id"], "$.account.account_id", 1, 128)
+    _pattern(account["currency"], _CURRENCY, "$.account.currency")
+    for field in (
+        "equity",
+        "available_cash",
+        "projected_available_cash",
+        "margin_used",
+        "daily_loss",
+        "open_order_notional",
+    ):
+        _nullable_decimal(account[field], f"$.account.{field}")
+
+
+def _validate_portfolio_schema(portfolio: Mapping[str, object]) -> None:
+    _exact_keys(
+        portfolio,
+        {"metadata", "portfolio_id", "account_id", "base_currency", "scope_metrics"},
+        "$.portfolio",
+    )
+    _validate_snapshot_metadata(
+        _object(portfolio["metadata"], "$.portfolio.metadata"), "$.portfolio.metadata"
+    )
+    _bounded_string(portfolio["portfolio_id"], "$.portfolio.portfolio_id", 1, 128)
+    _bounded_string(portfolio["account_id"], "$.portfolio.account_id", 1, 128)
+    _pattern(portfolio["base_currency"], _CURRENCY, "$.portfolio.base_currency")
+    rows = _array(portfolio["scope_metrics"], "$.portfolio.scope_metrics", 4, 4)
+    for index, row in enumerate(rows):
+        _validate_scope_metric_schema(
+            _object(row, f"$.portfolio.scope_metrics[{index}]"),
+            f"$.portfolio.scope_metrics[{index}]",
+        )
+
+
+def _validate_scope_metric_schema(row: Mapping[str, object], path: str) -> None:
+    _exact_keys(
+        row,
+        {
+            "scope",
+            "scope_id",
+            "enabled",
+            "position_quantity",
+            "projected_position_quantity",
+            "projected_gross_exposure",
+            "projected_net_exposure",
+            "projected_leverage",
+            "activity_window_ms",
+            "order_count_window",
+            "cancel_ratio_bps",
+        },
+        path,
+    )
+    _enum(row["scope"], {"ACCOUNT", "PORTFOLIO", "STRATEGY", "INSTRUMENT"}, f"{path}.scope")
+    _bounded_string(row["scope_id"], f"{path}.scope_id", 1, 128)
+    if row["enabled"] is not None and not isinstance(row["enabled"], bool):
+        raise _SchemaError(f"{path}.enabled: must be boolean or null")
+    for field in ("position_quantity", "projected_position_quantity", "order_count_window"):
+        if row[field] is not None:
+            _integer_range(
+                row[field], f"{path}.{field}", 0 if field == "order_count_window" else None, None
+            )
+    _nullable_decimal(row["projected_gross_exposure"], f"{path}.projected_gross_exposure")
+    _nullable_decimal(row["projected_net_exposure"], f"{path}.projected_net_exposure")
+    _nullable_decimal(row["projected_leverage"], f"{path}.projected_leverage")
+    _integer_range(row["activity_window_ms"], f"{path}.activity_window_ms", 1, 86_400_000)
+    if row["cancel_ratio_bps"] is not None:
+        _integer_range(row["cancel_ratio_bps"], f"{path}.cancel_ratio_bps", 0, 10_000)
+
+
+def _validate_market_schema(market: Mapping[str, object]) -> None:
+    _exact_keys(
+        market,
+        {
+            "metadata",
+            "instrument_id",
+            "trading_status",
+            "currency",
+            "risk_price",
+            "risk_price_source",
+            "reference_price",
+            "price_deviation_bps",
+            "upper_price_limit",
+            "lower_price_limit",
+        },
+        "$.market",
+    )
+    _validate_snapshot_metadata(
+        _object(market["metadata"], "$.market.metadata"), "$.market.metadata"
+    )
+    _bounded_string(market["instrument_id"], "$.market.instrument_id", 1, 64)
+    _enum(
+        market["trading_status"],
+        {"TRADING", "HALTED", "SUSPENDED", "CLOSED", "UNKNOWN"},
+        "$.market.trading_status",
+    )
+    _pattern(market["currency"], _CURRENCY, "$.market.currency")
+    for field in ("risk_price", "reference_price", "upper_price_limit", "lower_price_limit"):
+        if market[field] is not None:
+            _pattern(market[field], _POSITIVE_DECIMAL, f"$.market.{field}")
+    _enum(
+        market["risk_price_source"],
+        {"LIMIT_PRICE", "MARKET_WORST_CASE", "UNAVAILABLE"},
+        "$.market.risk_price_source",
+    )
+    if market["price_deviation_bps"] is not None:
+        _integer_range(market["price_deviation_bps"], "$.market.price_deviation_bps", 0, None)
+
+
+def _validate_reduction_evidence(evidence: Mapping[str, object]) -> None:
+    _exact_keys(
+        evidence,
+        {
+            "classification",
+            "position_snapshot_version",
+            "position_quantity_before",
+            "reserved_reduce_quantity",
+            "max_reducible_quantity",
+            "projected_position_quantity",
+            "would_flip_position",
+        },
+        "$.order.reduction_evidence",
+    )
+    _const(
+        evidence["classification"],
+        "VERIFIED_REDUCE_ONLY",
+        "$.order.reduction_evidence.classification",
+    )
+    _bounded_string(
+        evidence["position_snapshot_version"],
+        "$.order.reduction_evidence.position_snapshot_version",
+        1,
+        128,
+    )
+    _integer_range(
+        evidence["position_quantity_before"],
+        "$.order.reduction_evidence.position_quantity_before",
+        None,
+        None,
+    )
+    _integer_range(
+        evidence["reserved_reduce_quantity"],
+        "$.order.reduction_evidence.reserved_reduce_quantity",
+        0,
+        None,
+    )
+    _integer_range(
+        evidence["max_reducible_quantity"],
+        "$.order.reduction_evidence.max_reducible_quantity",
+        0,
+        None,
+    )
+    _integer_range(
+        evidence["projected_position_quantity"],
+        "$.order.reduction_evidence.projected_position_quantity",
+        None,
+        None,
+    )
+    _const(evidence["would_flip_position"], False, "$.order.reduction_evidence.would_flip_position")
+
+
+def _validate_freshness_limits(limits: Mapping[str, object]) -> None:
+    _exact_keys(limits, {"account", "portfolio", "market"}, "$.freshness_limits_ms")
+    for key in ("account", "portfolio", "market"):
+        _integer_range(limits[key], f"$.freshness_limits_ms.{key}", 0, 86_400_000)
+
+
+def _validate_hard_limits(limits: Mapping[str, object]) -> None:
+    _exact_keys(
+        limits,
+        {
+            "allow_new_risk",
+            "max_order_quantity",
+            "max_order_notional",
+            "max_price_deviation_bps",
+            "max_projected_gross_exposure",
+            "max_projected_net_exposure_abs",
+            "max_projected_leverage",
+            "max_daily_loss",
+            "activity_window_ms",
+            "max_order_count_window",
+            "max_cancel_ratio_bps",
+        },
+        "$.system_hard_limits",
+    )
+    if not isinstance(limits["allow_new_risk"], bool):
+        raise _SchemaError("$.system_hard_limits.allow_new_risk: must be boolean")
+    for field in ("max_order_quantity", "activity_window_ms", "max_order_count_window"):
+        _integer_range(
+            limits[field],
+            f"$.system_hard_limits.{field}",
+            1,
+            86_400_000 if field == "activity_window_ms" else None,
+        )
+    _integer_range(
+        limits["max_price_deviation_bps"], "$.system_hard_limits.max_price_deviation_bps", 0, None
+    )
+    _integer_range(
+        limits["max_cancel_ratio_bps"], "$.system_hard_limits.max_cancel_ratio_bps", 0, 10_000
+    )
+    for field in (
+        "max_order_notional",
+        "max_projected_gross_exposure",
+        "max_projected_net_exposure_abs",
+        "max_projected_leverage",
+        "max_daily_loss",
+    ):
+        _pattern(limits[field], _NON_NEG_DECIMAL, f"$.system_hard_limits.{field}")
+
+
+def _validate_reduce_policy(policy: Mapping[str, object]) -> None:
+    _exact_keys(policy, {"enabled", "exempt_rule_ids"}, "$.reduce_only_policy")
+    if not isinstance(policy["enabled"], bool):
+        raise _SchemaError("$.reduce_only_policy.enabled: must be boolean")
+    exempt = _array(policy["exempt_rule_ids"], "$.reduce_only_policy.exempt_rule_ids", 0, 256)
+    _unique_items(exempt, "$.reduce_only_policy.exempt_rule_ids")
+    for index, rule_id in enumerate(exempt):
+        _pattern(rule_id, _RULE_ID, f"$.reduce_only_policy.exempt_rule_ids[{index}]")
+
+
+def _validate_rule_schema(rule: Mapping[str, object], path: str) -> None:
+    _exact_keys(
+        rule,
+        {
+            "rule_id",
+            "scope",
+            "scope_id",
+            "priority",
+            "metric",
+            "operator",
+            "limit",
+            "reduction_exception",
+        },
+        path,
+    )
+    _pattern(rule["rule_id"], _RULE_ID, f"{path}.rule_id")
+    _enum(
+        rule["scope"], {"SYSTEM", "ACCOUNT", "PORTFOLIO", "STRATEGY", "INSTRUMENT"}, f"{path}.scope"
+    )
+    if rule["scope"] == "SYSTEM":
+        if rule["scope_id"] is not None:
+            raise _SchemaError(f"{path}.scope_id: SYSTEM requires null")
+    else:
+        _bounded_string(rule["scope_id"], f"{path}.scope_id", 1, 128)
+    _integer_range(rule["priority"], f"{path}.priority", 0, 1_000_000)
+    _enum(
+        rule["metric"],
+        {
+            "TRADING_ENABLED",
+            "INSTRUMENT_ALLOWED",
+            "ORDER_QUANTITY",
+            "ORDER_NOTIONAL",
+            "PRICE_DEVIATION_BPS",
+            "AVAILABLE_CASH",
+            "POSITION_QUANTITY",
+            "PROJECTED_GROSS_EXPOSURE",
+            "PROJECTED_NET_EXPOSURE_ABS",
+            "PROJECTED_LEVERAGE",
+            "DAILY_LOSS",
+            "ORDER_COUNT_WINDOW",
+            "CANCEL_RATIO_BPS",
+        },
+        f"{path}.metric",
+    )
+    _enum(rule["operator"], {"BOOLEAN_TRUE", "IN_SET", "MAX", "MIN"}, f"{path}.operator")
+    _validate_limit_schema(_object(rule["limit"], f"{path}.limit"), f"{path}.limit")
+    _enum(
+        rule["reduction_exception"], {"NEVER", "ALLOW_IF_VERIFIED"}, f"{path}.reduction_exception"
+    )
+
+
+def _validate_limit_schema(limit: Mapping[str, object], path: str) -> None:
+    kind = limit.get("kind")
+    if kind == "DECIMAL":
+        _exact_keys(limit, {"kind", "value", "currency"}, path)
+        _pattern(limit["value"], _NON_NEG_DECIMAL, f"{path}.value")
+        if limit["currency"] is not None:
+            _pattern(limit["currency"], _CURRENCY, f"{path}.currency")
+        return
+    if kind == "INTEGER":
+        _exact_keys(limit, {"kind", "value"}, path)
+        _integer_range(limit["value"], f"{path}.value", 0, None)
+        return
+    if kind == "BOOLEAN":
+        _exact_keys(limit, {"kind", "value"}, path)
+        if not isinstance(limit["value"], bool):
+            raise _SchemaError(f"{path}.value: must be boolean")
+        return
+    if kind == "STRING_SET":
+        _exact_keys(limit, {"kind", "values"}, path)
+        values = _array(limit["values"], f"{path}.values", 1, 10_000)
+        _unique_items(values, f"{path}.values")
+        for index, value in enumerate(values):
+            _bounded_string(value, f"{path}.values[{index}]", 1, 128)
+        return
+    raise _SchemaError(f"{path}: must match exactly one limit branch")
+
+
+def _exact_keys(value: Mapping[str, object], expected: set[str], path: str) -> None:
+    missing = expected - set(value)
+    extra = set(value) - expected
+    if missing:
+        raise _SchemaError(f"{path}: missing required property {sorted(missing)[0]!r}")
+    if extra:
+        raise _SchemaError(f"{path}: additional property {sorted(extra)[0]!r} is forbidden")
+
+
+def _object(value: object, path: str) -> Mapping[str, object]:
+    if not isinstance(value, Mapping):
+        raise _SchemaError(f"{path}: must be object")
+    if not all(isinstance(key, str) for key in value):
+        raise _SchemaError(f"{path}: object keys must be strings")
+    return cast(Mapping[str, object], value)
+
+
+def _array(value: object, path: str, minimum: int, maximum: int) -> tuple[object, ...]:
+    if not isinstance(value, (list, tuple)):
+        raise _SchemaError(f"{path}: must be array")
+    items = tuple(value)
+    if len(items) < minimum:
+        raise _SchemaError(f"{path}: has too few items")
+    if len(items) > maximum:
+        raise _SchemaError(f"{path}: has too many items")
+    return items
+
+
+def _unique_items(values: tuple[object, ...], path: str) -> None:
+    seen: set[str] = set()
+    for value in values:
+        canonical = json.dumps(_normalize_json(value), sort_keys=True, separators=(",", ":"))
+        if canonical in seen:
+            raise _SchemaError(f"{path}: duplicate item")
+        seen.add(canonical)
+
+
+def _bounded_string(value: object, path: str, minimum: int, maximum: int) -> None:
+    if not isinstance(value, str):
+        raise _SchemaError(f"{path}: must be string")
+    if len(value) < minimum:
+        raise _SchemaError(f"{path}: shorter than minLength")
+    if len(value) > maximum:
+        raise _SchemaError(f"{path}: longer than maxLength")
+
+
+def _pattern(value: object, pattern: re.Pattern[str], path: str) -> None:
+    if not isinstance(value, str) or pattern.fullmatch(value) is None:
+        raise _SchemaError(f"{path}: does not match pattern")
+
+
+def _enum(value: object, allowed: set[object], path: str) -> None:
+    if value not in allowed:
+        raise _SchemaError(f"{path}: unknown enum value {value!r}")
+
+
+def _const(value: object, expected: object, path: str) -> None:
+    if value != expected:
+        raise _SchemaError(f"{path}: must equal {expected!r}")
+
+
+def _integer_range(value: object, path: str, minimum: int | None, maximum: int | None) -> None:
+    if not isinstance(value, int) or isinstance(value, bool):
+        raise _SchemaError(f"{path}: must be integer")
+    if minimum is not None and value < minimum:
+        raise _SchemaError(f"{path}: must be >= {minimum}")
+    if maximum is not None and value > maximum:
+        raise _SchemaError(f"{path}: must be <= {maximum}")
+
+
+def _nullable_decimal(value: object, path: str) -> None:
+    if value is not None:
+        _pattern(value, _DECIMAL, path)
+
+
+def _date_time_z(value: object, path: str) -> None:
+    if not isinstance(value, str) or not value.endswith("Z"):
+        raise _SchemaError(f"{path}: must be UTC date-time ending in Z")
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise _SchemaError(f"{path}: is not a valid date-time") from exc
+    if "T" not in value or parsed.tzinfo is None:
+        raise _SchemaError(f"{path}: is not a valid date-time")
+
+
+def _date_value(value: object, path: str) -> None:
+    if not isinstance(value, str):
+        raise _SchemaError(f"{path}: must be date")
+    try:
+        date.fromisoformat(value)
+    except ValueError as exc:
+        raise _SchemaError(f"{path}: is not a valid date") from exc
