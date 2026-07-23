@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:quantiqmt:command:strategy.submit_target:v1",
+  "title": "SubmitStrategyTargetPayloadV1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["target_id", "target_type", "strategy_id", "strategy_version", "scope_id", "instrument_id", "decision_id", "input_event_id", "effective_at", "valid_until"],
+  "properties": {
+    "target_id": {"type": "string", "minLength": 16, "maxLength": 64},
+    "target_type": {"enum": ["WEIGHT", "POSITION"]},
+    "strategy_id": {"type": "string", "minLength": 1, "maxLength": 128},
+    "strategy_version": {"type": "string", "minLength": 1, "maxLength": 64},
+    "scope_id": {"type": "string", "minLength": 1, "maxLength": 128},
+    "instrument_id": {"type": "string", "minLength": 1, "maxLength": 64},
+    "target_weight": {"type": ["string", "null"], "pattern": "^-?[0-9]+(\\.[0-9]+)?$"},
+    "target_quantity": {"type": ["integer", "null"]},
+    "decision_id": {"type": "string", "minLength": 16, "maxLength": 64},
+    "input_event_id": {"type": "string", "minLength": 16, "maxLength": 64},
+    "effective_at": {"type": "string", "format": "date-time"},
+    "valid_until": {"type": "string", "format": "date-time"},
+    "reason_code": {"type": ["string", "null"], "maxLength": 128}
+  },
+  "oneOf": [
+    {"properties": {"target_type": {"const": "WEIGHT"}}, "required": ["target_weight"]},
+    {"properties": {"target_type": {"const": "POSITION"}}, "required": ["target_quantity"]}
+  ]
+}

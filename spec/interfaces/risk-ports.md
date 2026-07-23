@@ -1,5 +1,20 @@
 # PORTS-RISK：Risk L4 契约
 
+## Deployable runtime Schema boundary (TASK-029)
+
+The authoritative Schema documents remain the accepted files indexed by
+`spec/manifest.yaml` and `spec/contracts/catalog.yaml`. Deployments MUST use the
+immutable runtime bundle packaged under `quantiqmt.contracts.schema_bundle`;
+`SchemaRegistry.runtime_default()` MUST NOT read a source-checkout `spec/**`
+path. `SchemaRegistry.project_default()` is a development-only checkout loader.
+
+`SchemaRegistry.validator()` is the single machine API for envelope and payload
+Schema validation. A producer MUST validate the payload Schema first, then run
+the PORTS-RISK semantic validator, then freeze the DTO. Missing, corrupt, or
+catalog-version-mismatched bundle resources are startup failures; no fallback or
+permissive default is allowed. Schema failures are contract validation failures
+and MUST prevent projection, persistence, publication, or execution.
+
 本规范冻结 `RiskInputV1`、Snapshot DTO、`RiskRuleSetV1`、`RiskDecisionV1`、规则排序、fail-closed、减仓例外和审计映射。机器字段以 `CONTRACT-RISK-INPUT-V1`、`CONTRACT-RISK-RULE-SET-V1`、`CONTRACT-RISK-DECISION-V1`、`CONTRACT-RISK-AUDIT-OUTPUT-V1` 为准。
 
 ## 逻辑签名与纯计算边界

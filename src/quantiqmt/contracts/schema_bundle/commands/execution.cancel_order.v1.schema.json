@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:quantiqmt:command:execution.cancel_order:v1",
+  "title": "ExecutionCancelOrderPayloadV1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["cancel_request_id", "order_id", "client_order_id", "broker", "account_id", "expected_order_version", "fencing_token", "requested_at"],
+  "properties": {
+    "cancel_request_id": {"type": "string", "format": "uuid", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"},
+    "order_id": {"type": "string", "format": "uuid", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"},
+    "client_order_id": {"type": "string", "minLength": 1, "maxLength": 128},
+    "broker_order_id": {"type": ["string", "null"], "minLength": 1, "maxLength": 128},
+    "broker": {"type": "string", "minLength": 1, "maxLength": 64},
+    "account_id": {"type": "string", "minLength": 1, "maxLength": 128},
+    "expected_order_version": {"type": "integer", "minimum": 1},
+    "fencing_token": {"type": "integer", "minimum": 1},
+    "requested_at": {"type": "string", "format": "date-time", "pattern": "Z$"}
+  }
+}

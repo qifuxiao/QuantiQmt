@@ -1,0 +1,88 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:quantiqmt:contract:risk-rule-set:v1",
+  "title": "RiskRuleSetV1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "rule_set_id", "rule_set_version", "content_hash", "valuation_currency", "hard_limit_policy_version", "hard_limit_policy_hash", "evaluation_timeout_us", "freshness_limits_ms", "system_hard_limits", "reduce_only_policy", "rules"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "rule_set_id": {"type": "string", "format": "uuid", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"},
+    "rule_set_version": {"type": "string", "minLength": 1, "maxLength": 64},
+    "content_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "valuation_currency": {"$ref": "#/$defs/currency"},
+    "hard_limit_policy_version": {"type": "string", "minLength": 1, "maxLength": 64},
+    "hard_limit_policy_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "evaluation_timeout_us": {"type": "integer", "minimum": 1, "maximum": 4000},
+    "freshness_limits_ms": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["account", "portfolio", "market"],
+      "properties": {
+        "account": {"type": "integer", "minimum": 0, "maximum": 86400000},
+        "portfolio": {"type": "integer", "minimum": 0, "maximum": 86400000},
+        "market": {"type": "integer", "minimum": 0, "maximum": 86400000}
+      }
+    },
+    "system_hard_limits": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["allow_new_risk", "max_order_quantity", "max_order_notional", "max_price_deviation_bps", "max_projected_gross_exposure", "max_projected_net_exposure_abs", "max_projected_leverage", "max_daily_loss", "activity_window_ms", "max_order_count_window", "max_cancel_ratio_bps"],
+      "properties": {
+        "allow_new_risk": {"type": "boolean"},
+        "max_order_quantity": {"type": "integer", "minimum": 1},
+        "max_order_notional": {"$ref": "#/$defs/nonNegativeDecimal"},
+        "max_price_deviation_bps": {"type": "integer", "minimum": 0},
+        "max_projected_gross_exposure": {"$ref": "#/$defs/nonNegativeDecimal"},
+        "max_projected_net_exposure_abs": {"$ref": "#/$defs/nonNegativeDecimal"},
+        "max_projected_leverage": {"$ref": "#/$defs/nonNegativeDecimal"},
+        "max_daily_loss": {"$ref": "#/$defs/nonNegativeDecimal"},
+        "activity_window_ms": {"type": "integer", "minimum": 1, "maximum": 86400000},
+        "max_order_count_window": {"type": "integer", "minimum": 1},
+        "max_cancel_ratio_bps": {"type": "integer", "minimum": 0, "maximum": 10000}
+      }
+    },
+    "reduce_only_policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enabled", "exempt_rule_ids"],
+      "properties": {
+        "enabled": {"type": "boolean"},
+        "exempt_rule_ids": {"type": "array", "items": {"type": "string", "pattern": "^[A-Z0-9][A-Z0-9_.-]{0,127}$"}, "uniqueItems": true, "maxItems": 256}
+      }
+    },
+    "rules": {"type": "array", "items": {"$ref": "#/$defs/rule"}, "maxItems": 4096}
+  },
+  "$defs": {
+    "currency": {"type": "string", "pattern": "^[A-Z]{3}$"},
+    "nonNegativeDecimal": {"type": "string", "pattern": "^(0|[1-9][0-9]{0,17})(\\.[0-9]{1,8})?$"},
+    "limit": {
+      "oneOf": [
+        {"type": "object", "additionalProperties": false, "required": ["kind", "value", "currency"], "properties": {"kind": {"const": "DECIMAL"}, "value": {"$ref": "#/$defs/nonNegativeDecimal"}, "currency": {"type": ["string", "null"], "pattern": "^[A-Z]{3}$"}}},
+        {"type": "object", "additionalProperties": false, "required": ["kind", "value"], "properties": {"kind": {"const": "INTEGER"}, "value": {"type": "integer", "minimum": 0}}},
+        {"type": "object", "additionalProperties": false, "required": ["kind", "value"], "properties": {"kind": {"const": "BOOLEAN"}, "value": {"type": "boolean"}}},
+        {"type": "object", "additionalProperties": false, "required": ["kind", "values"], "properties": {"kind": {"const": "STRING_SET"}, "values": {"type": "array", "items": {"type": "string", "minLength": 1, "maxLength": 128}, "minItems": 1, "maxItems": 10000, "uniqueItems": true}}}
+      ]
+    },
+    "rule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["rule_id", "scope", "scope_id", "priority", "metric", "operator", "limit", "reduction_exception"],
+      "properties": {
+        "rule_id": {"type": "string", "pattern": "^[A-Z0-9][A-Z0-9_.-]{0,127}$"},
+        "scope": {"enum": ["SYSTEM", "ACCOUNT", "PORTFOLIO", "STRATEGY", "INSTRUMENT"]},
+        "scope_id": {"type": ["string", "null"], "minLength": 1, "maxLength": 128},
+        "priority": {"type": "integer", "minimum": 0, "maximum": 1000000},
+        "metric": {"enum": ["TRADING_ENABLED", "INSTRUMENT_ALLOWED", "ORDER_QUANTITY", "ORDER_NOTIONAL", "PRICE_DEVIATION_BPS", "AVAILABLE_CASH", "POSITION_QUANTITY", "PROJECTED_GROSS_EXPOSURE", "PROJECTED_NET_EXPOSURE_ABS", "PROJECTED_LEVERAGE", "DAILY_LOSS", "ORDER_COUNT_WINDOW", "CANCEL_RATIO_BPS"]},
+        "operator": {"enum": ["BOOLEAN_TRUE", "IN_SET", "MAX", "MIN"]},
+        "limit": {"$ref": "#/$defs/limit"},
+        "reduction_exception": {"enum": ["NEVER", "ALLOW_IF_VERIFIED"]}
+      },
+      "allOf": [
+        {"if": {"properties": {"scope": {"const": "SYSTEM"}}}, "then": {"properties": {"scope_id": {"type": "null"}}}, "else": {"properties": {"scope_id": {"type": "string"}}}},
+        {"if": {"properties": {"metric": {"enum": ["ORDER_NOTIONAL", "AVAILABLE_CASH", "PROJECTED_GROSS_EXPOSURE", "PROJECTED_NET_EXPOSURE_ABS", "DAILY_LOSS"]}}, "required": ["metric"]}, "then": {"properties": {"limit": {"type": "object", "required": ["kind", "value", "currency"], "properties": {"kind": {"const": "DECIMAL"}, "currency": {"$ref": "#/$defs/currency"}}}}}},
+        {"if": {"properties": {"metric": {"const": "PROJECTED_LEVERAGE"}}, "required": ["metric"]}, "then": {"properties": {"limit": {"type": "object", "required": ["kind", "value", "currency"], "properties": {"kind": {"const": "DECIMAL"}, "currency": {"type": "null"}}}}}}
+      ]
+    }
+  }
+}

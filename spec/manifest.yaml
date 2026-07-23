@@ -1,8 +1,8 @@
 specification:
   name: quantiqmt
-  version: 0.6.0
+  version: 0.6.1
   status: accepted
-  updated: 2026-07-10
+  updated: 2026-07-23
   normative_root: spec
   explanatory_root: docs
 
@@ -130,13 +130,13 @@ catalogs:
       path: reviews/IMPLEMENTATION-READINESS-0.5.md
 
 change:
-  id: SPEC-0.6-RISK-L4-CONTRACTS
+  id: SPEC-0.6.1-RISK-RUNTIME-SCHEMA
   compatibility: backward_compatible_additive_contracts_events_and_errors
-  previous_version: 0.5.0
+  previous_version: 0.6.0
   public_message_schema_changes: "additive risk.order_evaluated.v2; its standard schema plus mandatory PORTS-RISK semantic validator define audit validity; published risk.order_evaluated.v1 schema and identity remain unchanged as a lossy compatibility projection"
   storage_schema_changes: none
   error_catalog_change: "catalog v3 adds QQ-RISK-4003 through QQ-RISK-4011; existing meanings unchanged"
-  runtime_code_change: none
+  runtime_code_change: "SchemaRegistry loads the immutable packaged contract bundle in wheel/container deployments; source checkout loading remains an explicit development path"
   semantic_validation_change: "RiskAuditOutput requires fail-closed cross-field semantic validation before v1 projection, v1/v2 Outbox persistence, or Execution; timeout guard is last and timed but excluded from completed_rule_count"
   internal_contracts_added: [CONTRACT-RISK-INPUT-V1, CONTRACT-RISK-RULE-SET-V1, CONTRACT-RISK-DECISION-V1, CONTRACT-RISK-AUDIT-OUTPUT-V1, PORTS-RISK]
   public_contracts_added: [CONTRACT-RISK-ORDER-EVALUATED-V2]
@@ -146,6 +146,7 @@ change:
     - merge_and_independently_review_task_015_specs
     - implement_and_activate_task_005_against_spec_0_6
     - enable_spec_0_6_risk_evaluator_and_atomic_v2_authoritative_plus_v1_compatibility_audit_outbox
+    - deploy_runtime_schema_bundle_with_contracts_package
   migration:
     runtime_data: not_applicable
     public_events: "no backfill; new decisions atomically persist authoritative risk.order_evaluated.v2 plus unchanged lossy risk.order_evaluated.v1 compatibility projection until all v1 consumers migrate"
@@ -157,3 +158,4 @@ change:
     public_events: "rollback consumers to v1 is wire-compatible but loses complete typed audit for new decisions; keep trading fail-closed unless authoritative v2 persistence remains enabled"
     rule_sets: "keep trading fail-closed and reactivate the last independently validated immutable RuleSet; do not synthesize permissive defaults"
     task_queue: "return TASK-005 to blocked if any L4 contract ambiguity is found; no persisted production data is changed by this task"
+    runtime_schema_bundle: "fail startup on missing, corrupt, or version-mismatched bundle; rollback only to the previous independently validated bundle"

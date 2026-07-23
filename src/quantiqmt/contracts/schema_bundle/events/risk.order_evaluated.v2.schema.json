@@ -1,0 +1,141 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:quantiqmt:event:risk.order_evaluated:v2",
+  "title": "RiskOrderEvaluatedPayloadV2",
+  "description": "Authoritative RiskAuditOutput structure. Draft 2020-12 validates field structure only. Cross-field ordering, uniqueness, cardinality, RuleResult/RuleTiming identity, completed_rule_count, timeout, and latency-sum invariants are mandatory under the PORTS-RISK RiskAuditSemanticValidator contract. A schema-valid object that fails semantic validation is not a valid RiskAuditOutput and MUST NOT be persisted, projected to v1, published, or used to enter Execution.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "decision", "evaluated_at", "total_latency_us", "evaluation_timeout_us", "completed_rule_count", "rule_timings"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "decision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "decision_id", "decision_origin", "input_version", "semantic_decision_hash", "order_id", "expected_order_version", "decision", "primary_reason_code", "error_code", "rule_set_version", "rule_set_hash", "snapshot_states", "rule_results"],
+      "properties": {
+        "schema_version": {"const": 1},
+        "decision_id": {"type": "string", "format": "uuid", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"},
+        "decision_origin": {"enum": ["EVALUATOR", "INPUT_GUARD", "TIMEOUT_GUARD"]},
+        "input_version": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "semantic_decision_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "order_id": {"type": "string", "format": "uuid", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"},
+        "expected_order_version": {"type": "integer", "minimum": 1},
+        "decision": {"enum": ["PASS", "REJECT"]},
+        "primary_reason_code": {
+          "enum": ["RISK_ALL_APPLICABLE_RULES_PASSED", "RISK_RULE_PASSED", "RISK_RULE_NOT_APPLICABLE", "RISK_RULE_BREACH", "RISK_HARD_LIMIT_BREACH", "RISK_TRADING_DISABLED", "RISK_INSTRUMENT_NOT_ALLOWED", "RISK_SNAPSHOT_STALE", "RISK_SNAPSHOT_PARTIAL", "RISK_SNAPSHOT_TIMEOUT", "RISK_SNAPSHOT_UNAVAILABLE", "RISK_SNAPSHOT_VERSION_MISMATCH", "RISK_RULE_SET_VERSION_MISMATCH", "RISK_INPUT_INVALID", "RISK_RULE_SET_INVALID", "RISK_REDUCTION_EVIDENCE_INVALID", "RISK_REDUCE_ONLY_EXCEPTION_APPLIED", "RISK_EVALUATION_TIMEOUT"]
+        },
+        "error_code": {"type": ["string", "null"], "pattern": "^QQ-RISK-40(0[1-9]|1[01])$"},
+        "rule_set_version": {"type": "string", "minLength": 1, "maxLength": 64},
+        "rule_set_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "snapshot_states": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["account", "portfolio", "market"],
+          "properties": {
+            "account": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["snapshot_version", "quality", "age_ms", "max_age_ms"],
+              "properties": {
+                "snapshot_version": {"type": "string", "minLength": 1, "maxLength": 128},
+                "quality": {"enum": ["FRESH", "STALE", "PARTIAL", "TIMEOUT", "UNAVAILABLE", "VERSION_MISMATCH"]},
+                "age_ms": {"type": ["integer", "null"], "minimum": 0},
+                "max_age_ms": {"type": "integer", "minimum": 0}
+              }
+            },
+            "portfolio": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["snapshot_version", "quality", "age_ms", "max_age_ms"],
+              "properties": {
+                "snapshot_version": {"type": "string", "minLength": 1, "maxLength": 128},
+                "quality": {"enum": ["FRESH", "STALE", "PARTIAL", "TIMEOUT", "UNAVAILABLE", "VERSION_MISMATCH"]},
+                "age_ms": {"type": ["integer", "null"], "minimum": 0},
+                "max_age_ms": {"type": "integer", "minimum": 0}
+              }
+            },
+            "market": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["snapshot_version", "quality", "age_ms", "max_age_ms"],
+              "properties": {
+                "snapshot_version": {"type": "string", "minLength": 1, "maxLength": 128},
+                "quality": {"enum": ["FRESH", "STALE", "PARTIAL", "TIMEOUT", "UNAVAILABLE", "VERSION_MISMATCH"]},
+                "age_ms": {"type": ["integer", "null"], "minimum": 0},
+                "max_age_ms": {"type": "integer", "minimum": 0}
+              }
+            }
+          }
+        },
+        "rule_results": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 8192,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["evaluation_index", "rule_id", "phase", "scope", "scope_id", "priority", "metric", "result", "reason_code", "measured_value", "limit_value", "exception_applied"],
+            "properties": {
+              "evaluation_index": {"type": "integer", "minimum": 0},
+              "rule_id": {"type": "string", "minLength": 1, "maxLength": 128},
+              "phase": {"enum": ["INPUT_VALIDITY", "SNAPSHOT_VALIDITY", "SYSTEM_HARD_LIMIT", "SCOPED_RULE", "TIMEOUT_GUARD"]},
+              "scope": {"enum": ["SYSTEM", "ACCOUNT", "PORTFOLIO", "STRATEGY", "INSTRUMENT"]},
+              "scope_id": {"type": ["string", "null"], "minLength": 1, "maxLength": 128},
+              "priority": {"type": "integer", "minimum": 0, "maximum": 1000000},
+              "metric": {"type": ["string", "null"], "minLength": 1, "maxLength": 64},
+              "result": {"enum": ["PASS", "REJECT", "NOT_APPLICABLE"]},
+              "reason_code": {
+                "enum": ["RISK_ALL_APPLICABLE_RULES_PASSED", "RISK_RULE_PASSED", "RISK_RULE_NOT_APPLICABLE", "RISK_RULE_BREACH", "RISK_HARD_LIMIT_BREACH", "RISK_TRADING_DISABLED", "RISK_INSTRUMENT_NOT_ALLOWED", "RISK_SNAPSHOT_STALE", "RISK_SNAPSHOT_PARTIAL", "RISK_SNAPSHOT_TIMEOUT", "RISK_SNAPSHOT_UNAVAILABLE", "RISK_SNAPSHOT_VERSION_MISMATCH", "RISK_RULE_SET_VERSION_MISMATCH", "RISK_INPUT_INVALID", "RISK_RULE_SET_INVALID", "RISK_REDUCTION_EVIDENCE_INVALID", "RISK_REDUCE_ONLY_EXCEPTION_APPLIED", "RISK_EVALUATION_TIMEOUT"]
+              },
+              "measured_value": {
+                "oneOf": [
+                  {"type": "null"},
+                  {"type": "object", "additionalProperties": false, "required": ["kind", "value", "currency"], "properties": {"kind": {"const": "DECIMAL"}, "value": {"type": "string", "pattern": "^-?(0|[1-9][0-9]{0,17})(\\.[0-9]{1,8})?$"}, "currency": {"type": ["string", "null"], "pattern": "^[A-Z]{3}$"}}},
+                  {"type": "object", "additionalProperties": false, "required": ["kind", "value"], "properties": {"kind": {"const": "INTEGER"}, "value": {"type": "integer"}}},
+                  {"type": "object", "additionalProperties": false, "required": ["kind", "value"], "properties": {"kind": {"const": "BOOLEAN"}, "value": {"type": "boolean"}}},
+                  {"type": "object", "additionalProperties": false, "required": ["kind", "value"], "properties": {"kind": {"const": "STRING"}, "value": {"type": "string", "minLength": 1, "maxLength": 128}}},
+                  {"type": "object", "additionalProperties": false, "required": ["kind", "values"], "properties": {"kind": {"const": "STRING_SET"}, "values": {"type": "array", "items": {"type": "string", "minLength": 1, "maxLength": 128}, "minItems": 1, "maxItems": 10000, "uniqueItems": true}}}
+                ]
+              },
+              "limit_value": {
+                "oneOf": [
+                  {"type": "null"},
+                  {"type": "object", "additionalProperties": false, "required": ["kind", "value", "currency"], "properties": {"kind": {"const": "DECIMAL"}, "value": {"type": "string", "pattern": "^-?(0|[1-9][0-9]{0,17})(\\.[0-9]{1,8})?$"}, "currency": {"type": ["string", "null"], "pattern": "^[A-Z]{3}$"}}},
+                  {"type": "object", "additionalProperties": false, "required": ["kind", "value"], "properties": {"kind": {"const": "INTEGER"}, "value": {"type": "integer"}}},
+                  {"type": "object", "additionalProperties": false, "required": ["kind", "value"], "properties": {"kind": {"const": "BOOLEAN"}, "value": {"type": "boolean"}}},
+                  {"type": "object", "additionalProperties": false, "required": ["kind", "value"], "properties": {"kind": {"const": "STRING"}, "value": {"type": "string", "minLength": 1, "maxLength": 128}}},
+                  {"type": "object", "additionalProperties": false, "required": ["kind", "values"], "properties": {"kind": {"const": "STRING_SET"}, "values": {"type": "array", "items": {"type": "string", "minLength": 1, "maxLength": 128}, "minItems": 1, "maxItems": 10000, "uniqueItems": true}}}
+                ]
+              },
+              "exception_applied": {"type": "boolean"}
+            }
+          }
+        }
+      },
+      "allOf": [
+        {"if": {"properties": {"decision": {"const": "PASS"}}}, "then": {"properties": {"primary_reason_code": {"const": "RISK_ALL_APPLICABLE_RULES_PASSED"}, "error_code": {"type": "null"}, "decision_origin": {"const": "EVALUATOR"}}}},
+        {"if": {"properties": {"decision": {"const": "REJECT"}}}, "then": {"properties": {"error_code": {"type": "string"}}}}
+      ]
+    },
+    "evaluated_at": {"type": "string", "format": "date-time", "pattern": "Z$"},
+    "total_latency_us": {"type": "integer", "minimum": 0},
+    "evaluation_timeout_us": {"type": "integer", "minimum": 1, "maximum": 4000},
+    "completed_rule_count": {"type": "integer", "minimum": 0, "maximum": 8192},
+    "rule_timings": {
+      "description": "Structurally valid timings; PORTS-RISK additionally requires ordered one-to-one identity with decision.rule_results, including the synthetic timeout guard timing.",
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 8192,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["evaluation_index", "rule_id", "latency_us"],
+        "properties": {
+          "evaluation_index": {"type": "integer", "minimum": 0},
+          "rule_id": {"type": "string", "minLength": 1, "maxLength": 128},
+          "latency_us": {"type": "integer", "minimum": 0}
+        }
+      }
+    }
+  }
+}
