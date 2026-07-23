@@ -1,7 +1,7 @@
 ---
 id: TASK-029
 title: Define deployable Risk output Schema and runtime validation contract
-status: ready
+status: active
 depends_on: [TASK-015]
 spec_refs: [CONTRACT-RISK-DECISION-V1, CONTRACT-RISK-AUDIT-OUTPUT-V1, CONTRACT-RISK-ORDER-EVALUATED-V2, PORTS-RISK, CONTRACT-CATALOG]
 allowed_paths:
@@ -16,6 +16,7 @@ allowed_paths:
   - tests/unit/contracts/**
   - tasks/backlog/TASK-005-risk-engine.md
   - tasks/backlog/TASK-029-risk-runtime-schema-contract.md
+  - tasks/active/TASK-029-risk-runtime-schema-contract.md
   - tasks/active/TASK-005-risk-engine.md
   - tasks/active/README.md
   - tasks/index.yaml
