@@ -1,7 +1,7 @@
 ---
 id: TASK-016
 title: Complete Strategy SDK and runtime L4 contracts
-status: ready
+status: active
 depends_on: [TASK-014]
 spec_refs: [INV-TRADING, PORTS-STRATEGY, SM-STRATEGY, CONTRACT-STRATEGY-TARGET-V1, NFR-RELIABILITY, NFR-OBSERVABILITY]
 allowed_paths: [spec/manifest.yaml, spec/contracts/**, spec/interfaces/**, spec/state-machines/**, spec/workflows/**, spec/nfr/**, tasks/backlog/TASK-008-strategy-sdk.md, tasks/backlog/TASK-016-strategy-runtime-contracts.md, tasks/index.yaml]
