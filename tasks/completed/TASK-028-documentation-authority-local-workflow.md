@@ -1,7 +1,7 @@
 ---
 id: TASK-028
 title: Documentation authority, local environment, and team workflow cleanup
-status: active
+status: completed
 depends_on: [TASK-014]
 spec_refs: [REVIEW-IMPLEMENTATION-READINESS-0.5]
 allowed_paths:
@@ -72,7 +72,14 @@ verification:
 - Human project members explicitly authorized restoring TASK-028 from completed to active and adding exactly the three Engineering Convention files above to `allowed_paths`; TASK-005 remains active and isolated.
 - Old PR #30, its branch, commit, and review are intentionally skipped and are not evidence for this follow-up.
 - This change is rebuilt as a clean follow-up from the latest `origin/main`.
-- TASK-028 must remain active until an independent reviewer approves this new head; it is not completed by this change.
+- TASK-028 remained active until the independent reviewer approved PR #35; this separate human-authorized migration records the resulting completed state.
+
+### Completion evidence
+
+- PR #35 Head `29e594f93d09d13dc0ef0af9efdff474a425ca5e` received an independent APPROVE and was merged into `main`.
+- PR #35 merge commit / current `origin/main`: `7d013f3333c6fd61ed9da6611ef76e6738f06058`.
+- CI passed 4/4; `tests/spec tests/contract` passed with 195 tests.
+- This completed status migration is written under explicit human authorization; no document content or business code is changed by the migration.
 
 ## Required evidence
 
