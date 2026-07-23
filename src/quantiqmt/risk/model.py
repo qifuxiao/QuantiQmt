@@ -269,9 +269,26 @@ class RuleResult:
             raise RiskContractError(
                 "QQ-RISK-4008", "RISK_INPUT_INVALID", "scoped rule id is required"
             )
-        if not isinstance(priority, int) or priority < 0:
+        if not isinstance(priority, int) or not 0 <= priority <= 1_000_000:
             raise RiskContractError("QQ-RISK-4008", "RISK_INPUT_INVALID", "invalid rule priority")
-        if metric is not None and (not isinstance(metric, str) or not 1 <= len(metric) <= 64):
+        metrics = {
+            "TRADING_ENABLED",
+            "INSTRUMENT_ALLOWED",
+            "ORDER_QUANTITY",
+            "ORDER_NOTIONAL",
+            "PRICE_DEVIATION_BPS",
+            "AVAILABLE_CASH",
+            "POSITION_QUANTITY",
+            "PROJECTED_GROSS_EXPOSURE",
+            "PROJECTED_NET_EXPOSURE_ABS",
+            "PROJECTED_LEVERAGE",
+            "DAILY_LOSS",
+            "ORDER_COUNT_WINDOW",
+            "CANCEL_RATIO_BPS",
+        }
+        if metric is not None and (
+            not isinstance(metric, str) or not 1 <= len(metric) <= 64 or metric not in metrics
+        ):
             raise RiskContractError("QQ-RISK-4008", "RISK_INPUT_INVALID", "invalid metric")
         if result not in {"PASS", "REJECT", "NOT_APPLICABLE"}:
             raise RiskContractError("QQ-RISK-4008", "RISK_INPUT_INVALID", "invalid rule result")
@@ -315,6 +332,12 @@ class RuleResult:
             "RISK_RULE_NOT_APPLICABLE",
         }:
             raise RiskContractError("QQ-RISK-4008", "RISK_INPUT_INVALID", "reject reason mismatch")
+        if exception_applied and (
+            result != "PASS" or reason_code != "RISK_REDUCE_ONLY_EXCEPTION_APPLIED"
+        ):
+            raise RiskContractError(
+                "QQ-RISK-4008", "RISK_INPUT_INVALID", "exception semantics mismatch"
+            )
         _validate_typed_output(measured_value, "measured_value")
         _validate_typed_output(limit_value, "limit_value")
         instance = object.__new__(cls)
@@ -475,8 +498,10 @@ class RiskDecisionV1:
             )
         if error_code is not None and not isinstance(error_code, str):
             raise RiskContractError("QQ-RISK-4008", "RISK_INPUT_INVALID", "invalid error code")
-        if not isinstance(rule_results, tuple) or not all(
-            isinstance(item, RuleResult) for item in rule_results
+        if (
+            not isinstance(rule_results, tuple)
+            or not 1 <= len(rule_results) <= 8192
+            or not all(isinstance(item, RuleResult) for item in rule_results)
         ):
             raise RiskContractError("QQ-RISK-4008", "RISK_INPUT_INVALID", "invalid rule results")
         if not rule_results or [item.evaluation_index for item in rule_results] != list(
@@ -526,6 +551,30 @@ class RiskDecisionV1:
                 raise RiskContractError(
                     "QQ-RISK-4008", "RISK_INPUT_INVALID", f"invalid {name} max age"
                 )
+        primary_reasons = {
+            "RISK_ALL_APPLICABLE_RULES_PASSED",
+            "RISK_RULE_PASSED",
+            "RISK_RULE_NOT_APPLICABLE",
+            "RISK_RULE_BREACH",
+            "RISK_HARD_LIMIT_BREACH",
+            "RISK_TRADING_DISABLED",
+            "RISK_INSTRUMENT_NOT_ALLOWED",
+            "RISK_SNAPSHOT_STALE",
+            "RISK_SNAPSHOT_PARTIAL",
+            "RISK_SNAPSHOT_TIMEOUT",
+            "RISK_SNAPSHOT_UNAVAILABLE",
+            "RISK_SNAPSHOT_VERSION_MISMATCH",
+            "RISK_RULE_SET_VERSION_MISMATCH",
+            "RISK_INPUT_INVALID",
+            "RISK_RULE_SET_INVALID",
+            "RISK_REDUCTION_EVIDENCE_INVALID",
+            "RISK_REDUCE_ONLY_EXCEPTION_APPLIED",
+            "RISK_EVALUATION_TIMEOUT",
+        }
+        if primary_reason_code not in primary_reasons:
+            raise RiskContractError("QQ-RISK-4008", "RISK_INPUT_INVALID", "invalid primary reason")
+        if error_code is not None and not re.fullmatch(r"QQ-RISK-40(?:0[1-9]|1[01])", error_code):
+            raise RiskContractError("QQ-RISK-4008", "RISK_INPUT_INVALID", "invalid risk error code")
         if decision == "PASS" and (
             primary_reason_code != "RISK_ALL_APPLICABLE_RULES_PASSED"
             or error_code is not None
@@ -632,8 +681,10 @@ class RiskAuditOutputV1:
             )
         if not isinstance(completed_rule_count, int) or not 0 <= completed_rule_count <= 8192:
             raise RiskContractError("QQ-RISK-4008", "RISK_INPUT_INVALID", "invalid completed count")
-        if not isinstance(rule_timings, tuple) or not all(
-            isinstance(item, RuleTiming) for item in rule_timings
+        if (
+            not isinstance(rule_timings, tuple)
+            or not 1 <= len(rule_timings) <= 8192
+            or not all(isinstance(item, RuleTiming) for item in rule_timings)
         ):
             raise RiskContractError("QQ-RISK-4008", "RISK_INPUT_INVALID", "invalid rule timings")
         instance = object.__new__(cls)
