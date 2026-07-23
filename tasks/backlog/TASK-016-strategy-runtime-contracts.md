@@ -24,12 +24,20 @@ verification:
 
 ## Acceptance criteria
 
-- [ ] 定义 StrategyContext 只读 DTO、snapshot version、权限 scope 和 Live/Backtest 一致性约束。
-- [ ] 定义 on_market/on_timer/on_order/on_trade callback 输入与 deadline。
-- [ ] 定义 StrategyOutput、Target/OrderIntent 输出校验、频率限制和 generation fencing。
-- [ ] 定义 Checkpoint envelope、schema_version、checksum、restore 失败行为。
-- [ ] 定义 Runtime 资源限制、异常处理、PAUSED/ERROR 转换和审计事件。
-- [ ] 更新 TASK-008，使其可直接实现并验证。
+- [x] 定义 StrategyContext 只读 DTO、snapshot version、权限 scope 和 Live/Backtest 一致性约束。
+- [x] 定义 on_market/on_timer/on_order/on_trade callback 输入与 deadline。
+- [x] 定义 StrategyOutput、Target/OrderIntent 输出校验、频率限制和 generation fencing。
+- [x] 定义 Checkpoint envelope、schema_version、checksum、restore 失败行为。
+- [x] 定义 Runtime 资源限制、异常处理、PAUSED/ERROR 转换和审计事件。
+- [x] 更新 TASK-008，使其可直接实现并验证。
+
+## Evidence
+
+- Added machine-validated Context, Callback, Output and Checkpoint schemas and registered them in `spec/manifest.yaml`.
+- PORTS-STRATEGY now freezes read-only snapshot/version semantics, least-privilege scopes, callback deadlines, schema-first output validation, generation fencing, checkpoint checksum/restore fail-closed behavior, resource limits and audit transitions.
+- SM-STRATEGY and WF-STRATEGY-RUNTIME define PAUSED/ERROR transitions, serial bounded callbacks, immutable verified runtime artifacts and the no-source-checkout-spec rule.
+- TASK-008 now references the frozen contracts and has a direct implementation boundary.
+- TASK-016 remains `active`; completion still requires independent Review and human governance migration.
 
 ## Review focus
 

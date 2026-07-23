@@ -17,12 +17,19 @@ machine:
     - {from: READY, event: Enable, to: RUNNING, guard: runtime_prerequisites_fresh}
     - {from: RUNNING, event: Pause, to: PAUSED, guard: true}
     - {from: RUNNING, event: RuntimeFailure, to: ERROR, guard: true}
-    - {from: PAUSED, event: Resume, to: RUNNING, guard: runtime_prerequisites_fresh_and_approved}
+    - {from: PAUSED, event: Resume, to: RUNNING, guard: runtime_prerequisites_fresh_and_approved_and_new_generation}
     - {from: RUNNING, event: Stop, to: STOPPING, guard: stop_policy_present}
     - {from: PAUSED, event: Stop, to: STOPPING, guard: stop_policy_present}
     - {from: ERROR, event: Stop, to: STOPPING, guard: stop_policy_present}
     - {from: STOPPING, event: Stopped, to: STOPPED, guard: checkpoint_flushed_or_explicitly_failed}
+    - {from: RUNNING, event: CallbackDeadlineExceeded, to: PAUSED, guard: recoverable_runtime_fault}
+    - {from: RUNNING, event: InvalidOutput, to: PAUSED, guard: output_rejected_and_audited}
+    - {from: RUNNING, event: SecurityOrIntegrityFailure, to: ERROR, guard: fail_closed_and_audited}
+    - {from: ERROR, event: ReloadVerifiedArtifact, to: INITIALIZING, guard: artifact_verified}
   invariants:
     - "only RUNNING may emit trading outputs"
     - "worker failure does not mutate OMS orders"
     - "resume requires explicit health and approval guards"
+    - "callback execution is serial per strategy and bounded by an absolute deadline"
+    - "only the current RUNNING generation may emit outputs"
+    - "state transitions emit correlation-linked audit events"

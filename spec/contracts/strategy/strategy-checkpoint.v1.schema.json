@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:quantiqmt:contract:strategy-checkpoint:v1",
+  "title": "StrategyCheckpointEnvelopeV1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["checkpoint_id", "strategy_id", "strategy_version", "generation", "schema_version", "captured_at", "payload", "payload_sha256"],
+  "properties": {
+    "checkpoint_id": {"type": "string", "minLength": 16, "maxLength": 64},
+    "strategy_id": {"type": "string", "minLength": 1, "maxLength": 128},
+    "strategy_version": {"type": "string", "minLength": 1, "maxLength": 64},
+    "generation": {"type": "integer", "minimum": 1},
+    "schema_version": {"const": "1.0"},
+    "captured_at": {"type": "string", "format": "date-time"},
+    "payload": {"type": "object"},
+    "payload_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+  }
+}

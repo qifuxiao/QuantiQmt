@@ -1,0 +1,17 @@
+workflow:
+  id: WF-STRATEGY-RUNTIME
+  input: strategy_artifact_and_versioned_context
+  steps:
+    - {id: verify_artifact, owner: StrategyRuntime, failure: transition_error}
+    - {id: load_checkpoint, owner: StrategyRuntime, failure: transition_paused}
+    - {id: initialize_isolated_worker, owner: StrategyRuntime, failure: transition_error}
+    - {id: dispatch_serial_callback, owner: StrategyRuntime, guard: deadline_and_generation_valid, failure: transition_paused}
+    - {id: validate_output, owner: StrategyRuntime, guard: output_schema_scope_frequency_and_generation_valid, failure: reject_output_and_audit}
+    - {id: publish_target_or_intent, owner: StrategyRuntime, guard: running_generation, destination: TargetResolver_or_OMS}
+    - {id: checkpoint_atomically, owner: StrategyRuntime, failure: transition_paused}
+  invariants:
+    - runtime_bundle_is_immutable_and_verified
+    - runtime_never_reads_source_checkout_spec
+    - only_running_generation_emits_outputs
+    - strategy_failure_does_not_mutate_oms_orders
+    - resume_requires_fresh_context_checkpoint_and_approval

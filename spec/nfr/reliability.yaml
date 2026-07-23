@@ -20,3 +20,10 @@ nfr:
   rpo:
     audit_target: zero
     status: uncommitted_until_restore_drill_proves_it
+  strategy_runtime:
+    callback_dispatch: serial_per_strategy
+    callback_deadline_ms: 1000
+    queue_depth: 256
+    output_frequency_per_minute: 120
+    checkpoint_restore: atomic_and_fail_closed
+    source_checkout_spec_access: forbidden

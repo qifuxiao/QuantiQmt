@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:quantiqmt:contract:strategy-callback:v1",
+  "title": "StrategyCallbackEnvelopeV1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["callback_id", "callback_type", "generation", "context_snapshot", "deadline_at", "payload"],
+  "properties": {
+    "callback_id": {"type": "string", "minLength": 16, "maxLength": 64},
+    "callback_type": {"enum": ["on_market", "on_timer", "on_order", "on_trade"]},
+    "generation": {"type": "integer", "minimum": 1},
+    "context_snapshot": {"type": "string", "minLength": 1, "maxLength": 128},
+    "deadline_at": {"type": "string", "format": "date-time"},
+    "payload": {"type": "object"}
+  }
+}
