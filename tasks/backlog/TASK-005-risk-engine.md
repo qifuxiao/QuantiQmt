@@ -1,8 +1,8 @@
 ---
 id: TASK-005
 title: Implement deterministic risk evaluator
-status: active
-depends_on: [TASK-003, TASK-015]
+status: blocked
+depends_on: [TASK-003, TASK-015, TASK-029]
 spec_refs: [INV-RISK, INV-CONSISTENCY, WF-SUBMIT-ORDER, CONTRACT-RISK-INPUT-V1, CONTRACT-RISK-RULE-SET-V1, CONTRACT-RISK-DECISION-V1, CONTRACT-RISK-AUDIT-OUTPUT-V1, CONTRACT-RISK-ORDER-EVALUATED-V1, CONTRACT-RISK-ORDER-EVALUATED-V2, CONTRACT-ERROR-CATALOG, PORTS-RISK, NFR-PERFORMANCE, NFR-OBSERVABILITY]
 allowed_paths: [src/quantiqmt/risk/**, tests/unit/risk/**, tests/property/risk/**]
 forbidden_paths: [src/quantiqmt/broker/**, src/quantiqmt/storage/**]
