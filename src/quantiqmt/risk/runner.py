@@ -123,7 +123,7 @@ class RiskEvaluationRunner:
                 break
             results.append(result)
             timings.append(
-                RuleTiming(
+                RuleTiming._validated(
                     result.evaluation_index,
                     result.rule_id,
                     max(1, ceil_div_us(after_ns - before_ns)),
@@ -141,7 +141,7 @@ class RiskEvaluationRunner:
         decision = self._evaluator.decide(risk_input, rule_set, tuple(results))
         self._admission.release()
         return self._validate_and_record(
-            RiskAuditOutputV1(
+            RiskAuditOutputV1._validated(
                 decision=decision,
                 evaluated_at=rfc3339_z(self._clock.utc_now()),  # type: ignore[arg-type]
                 total_latency_us=max(
@@ -167,14 +167,14 @@ class RiskEvaluationRunner:
         index = len(results)
         guard = timeout_result(index)
         results.append(guard)
-        timings.append(RuleTiming(index, guard.rule_id, 1))
+        timings.append(RuleTiming._validated(index, guard.rule_id, 1))
         decision = timeout_decision(risk_input, rule_set, tuple(results))
         total = max(
             timeout_us,
             sum(t.latency_us for t in timings),
             ceil_div_us(self._clock.monotonic_ns() - start_ns),
         )
-        return RiskAuditOutputV1(
+        return RiskAuditOutputV1._validated(
             decision=decision,
             evaluated_at=rfc3339_z(self._clock.utc_now()),  # type: ignore[arg-type]
             total_latency_us=total,
@@ -189,13 +189,13 @@ class RiskEvaluationRunner:
         timeout_us = _timeout_us(rule_set)
         guard = timeout_result(0)
         decision = timeout_decision(risk_input, rule_set, (guard,))
-        return RiskAuditOutputV1(
+        return RiskAuditOutputV1._validated(
             decision=decision,
             evaluated_at=rfc3339_z(self._clock.utc_now()),  # type: ignore[arg-type]
             total_latency_us=timeout_us,
             evaluation_timeout_us=timeout_us,
             completed_rule_count=0,
-            rule_timings=(RuleTiming(0, guard.rule_id, 1),),
+            rule_timings=(RuleTiming._validated(0, guard.rule_id, 1),),
         )
 
     def _validate_and_record(

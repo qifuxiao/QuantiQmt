@@ -3,7 +3,7 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from threading import Event
 from typing import Any
 
@@ -13,12 +13,15 @@ from quantiqmt.contracts import SchemaRegistry
 from quantiqmt.risk import (
     AcceptedHardPolicy,
     DeterministicRiskEvaluator,
+    RiskAuditOutputV1,
     RiskAuditSemanticValidator,
     RiskContractError,
+    RiskDecisionV1,
     RiskEvaluationRunner,
     RiskInputV1,
     RiskRuleSetV1,
     RuleResult,
+    RuleTiming,
     build_risk_v1_payload,
     build_risk_v2_envelope,
     hard_limit_policy_hash,
@@ -291,16 +294,15 @@ def test_audit_validator_rejects_mismatched_timing_and_timeout_semantics() -> No
     audit = RiskEvaluationRunner(
         DeterministicRiskEvaluator(), FakeClock([0, 1000, 2000, 3000, 4000])
     ).run(RiskInputV1.create(with_input_hash(valid_input(), rule_set)), rule_set_dto(rule_set))
-    bad = audit.__class__(
-        audit.decision,
-        audit.evaluated_at,
-        0,
-        audit.evaluation_timeout_us,
-        audit.completed_rule_count,
-        audit.rule_timings,
-    )
     with pytest.raises(RiskContractError):
-        RiskAuditSemanticValidator().validate(bad)
+        audit.__class__._validated(
+            decision=audit.decision,
+            evaluated_at=audit.evaluated_at,
+            total_latency_us=0,
+            evaluation_timeout_us=audit.evaluation_timeout_us,
+            completed_rule_count=audit.completed_rule_count,
+            rule_timings=audit.rule_timings,
+        )
 
 
 def test_runner_timeout_fences_late_pass() -> None:
@@ -737,7 +739,7 @@ class GateEvaluator(DeterministicRiskEvaluator):
 class DuplicateRuleEvaluator(DeterministicRiskEvaluator):
     def iter_rule_results(self, risk_input: RiskInputV1, rule_set: RiskRuleSetV1) -> Any:
         del risk_input, rule_set
-        result = RuleResult(
+        result = RuleResult._validated(
             0,
             "DUPLICATE",
             "INPUT_VALIDITY",
@@ -992,3 +994,45 @@ def with_input_hash(payload: dict[str, Any], rule_set: dict[str, Any]) -> dict[s
         result[name]["metadata"]["checksum"] = hash_snapshot_without_metadata_checksum(result[name])
     result["input_version"] = hash_without(result, "input_version")
     return result
+
+
+@pytest.mark.parametrize(
+    "dto_call",
+    [
+        lambda: RuleResult(
+            0, "RULE", "SCOPED_RULE", "ACCOUNT", "acct-1", 1, None, "PASS", "OK", None, None
+        ),
+        lambda: RuleTiming(0, "RULE", 1),
+        lambda: RiskDecisionV1(),
+        lambda: RiskAuditOutputV1(),
+    ],
+)
+def test_output_dto_public_constructors_are_closed(dto_call: Any) -> None:
+    with pytest.raises(TypeError):
+        dto_call()
+
+
+@pytest.mark.parametrize("offset_ms", [-1, 0, 1])
+def test_freshness_boundaries_use_integer_milliseconds(offset_ms: int) -> None:
+    rule_set = valid_rule_set()
+    payload = valid_input(rule_set)
+    payload["account"]["metadata"]["as_of"] = (
+        datetime.fromisoformat(NOW.replace("Z", "+00:00"))
+        .replace(microsecond=0)
+        .isoformat()
+        .replace("+00:00", "Z")
+    )
+    evaluation = datetime.fromisoformat(NOW.replace("Z", "+00:00"))
+    payload["evaluation_time"] = (
+        (evaluation.replace(microsecond=0) + timedelta(milliseconds=1000 + offset_ms))
+        .isoformat()
+        .replace("+00:00", "Z")
+    )
+    payload = with_input_hash(payload, rule_set)
+    decision = DeterministicRiskEvaluator().evaluate(
+        RiskInputV1.create(payload), rule_set_dto(rule_set)
+    )
+    if offset_ms > 0:
+        assert decision.error_code == "QQ-RISK-4002"
+    else:
+        assert decision.error_code != "QQ-RISK-4002"
