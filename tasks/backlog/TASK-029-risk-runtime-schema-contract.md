@@ -16,6 +16,8 @@ allowed_paths:
   - tests/unit/contracts/**
   - tasks/backlog/TASK-005-risk-engine.md
   - tasks/backlog/TASK-029-risk-runtime-schema-contract.md
+  - tasks/active/TASK-005-risk-engine.md
+  - tasks/active/README.md
   - tasks/index.yaml
 forbidden_paths:
   - migrations/**
