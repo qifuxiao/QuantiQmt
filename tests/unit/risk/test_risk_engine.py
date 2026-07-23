@@ -1,23 +1,28 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from threading import Event
 from typing import Any
 
 import pytest
 
 from quantiqmt.contracts import SchemaRegistry
 from quantiqmt.risk import (
+    AcceptedHardPolicy,
     DeterministicRiskEvaluator,
     RiskAuditSemanticValidator,
     RiskContractError,
     RiskEvaluationRunner,
     RiskInputV1,
     RiskRuleSetV1,
+    RuleResult,
     build_risk_v1_payload,
     build_risk_v2_envelope,
     hard_limit_policy_hash,
+    hash_snapshot_without_metadata_checksum,
     hash_without,
     project_risk_v1_envelope,
 )
@@ -30,7 +35,7 @@ NOW = "2026-07-02T02:00:00Z"
 
 def test_evaluator_is_deterministic_and_hash_excludes_runtime_fields() -> None:
     risk_input = RiskInputV1.create(valid_input())
-    rule_set = RiskRuleSetV1.create(valid_rule_set())
+    rule_set = rule_set_dto(valid_rule_set())
     evaluator = DeterministicRiskEvaluator()
 
     first = evaluator.evaluate(risk_input, rule_set)
@@ -53,7 +58,7 @@ def test_phase_scope_priority_rule_id_sorting_and_all_rules_are_evaluated() -> N
     rules = with_hashes(rules)
 
     decision = DeterministicRiskEvaluator().evaluate(
-        RiskInputV1.create(with_input_hash(valid_input(), rules)), RiskRuleSetV1.create(rules)
+        RiskInputV1.create(with_input_hash(valid_input(), rules)), rule_set_dto(rules)
     )
 
     ids = [result.rule_id for result in decision.rule_results]
@@ -107,7 +112,7 @@ def test_snapshot_and_input_fail_closed_taxonomy(mutation: Any, error: str) -> N
     payload = with_input_hash(payload, rule_set)
 
     decision = DeterministicRiskEvaluator().evaluate(
-        RiskInputV1.unchecked(payload), RiskRuleSetV1.create(rule_set)
+        RiskInputV1.create(payload), rule_set_dto(rule_set)
     )
 
     assert decision.decision == "REJECT"
@@ -122,7 +127,7 @@ def test_rule_set_invalid_and_binding_mismatch_fail_closed() -> None:
     loose = with_hashes(loose)
     payload = with_input_hash(valid_input(), loose)
     decision = DeterministicRiskEvaluator().evaluate(
-        RiskInputV1.create(payload), RiskRuleSetV1.create(loose)
+        RiskInputV1.create(payload), rule_set_dto(loose)
     )
     assert decision.error_code == "QQ-RISK-4007"
 
@@ -130,9 +135,29 @@ def test_rule_set_invalid_and_binding_mismatch_fail_closed() -> None:
     mismatch["rule_set_hash"] = "a" * 64
     mismatch["input_version"] = hash_without(mismatch, "input_version")
     decision = DeterministicRiskEvaluator().evaluate(
-        RiskInputV1.create(mismatch), RiskRuleSetV1.create(rule_set)
+        RiskInputV1.create(mismatch), rule_set_dto(rule_set)
     )
     assert decision.error_code == "QQ-RISK-4011"
+
+
+def test_shared_rule_set_scope_identity_mismatch_is_not_applicable() -> None:
+    rule_set = valid_rule_set()
+    rule_set["rules"] = [
+        scoped_rule("RULE.OTHER_ACCOUNT", "ACCOUNT", "acct-other", 1, "ORDER_QUANTITY", 1),
+        scoped_rule("RULE.THIS_ACCOUNT", "ACCOUNT", "acct-1", 2, "ORDER_QUANTITY", 500),
+    ]
+    rule_set = with_hashes(rule_set)
+
+    decision = DeterministicRiskEvaluator().evaluate(
+        RiskInputV1.create(with_input_hash(valid_input(rule_set), rule_set)),
+        rule_set_dto(rule_set),
+    )
+
+    other = next(
+        result for result in decision.rule_results if result.rule_id == "RULE.OTHER_ACCOUNT"
+    )
+    assert other.result == "NOT_APPLICABLE"
+    assert decision.error_code is None
 
 
 def test_hard_rules_cannot_be_relaxed_by_dynamic_priority() -> None:
@@ -142,12 +167,47 @@ def test_hard_rules_cannot_be_relaxed_by_dynamic_priority() -> None:
     payload = with_input_hash(payload, rule_set)
 
     decision = DeterministicRiskEvaluator().evaluate(
-        RiskInputV1.create(payload), RiskRuleSetV1.create(rule_set)
+        RiskInputV1.create(payload), rule_set_dto(rule_set)
     )
 
     assert decision.decision == "REJECT"
     assert decision.primary_reason_code == "RISK_HARD_LIMIT_BREACH"
     assert decision.error_code == "QQ-RISK-4001"
+
+
+def test_snapshot_aggregate_version_taxonomy_is_source_local() -> None:
+    rule_set = valid_rule_set()
+    payload = valid_input(rule_set)
+    payload["order"]["aggregate_version"] = 5
+    payload["account"]["metadata"]["aggregate_version"] = 1
+    payload["portfolio"]["metadata"]["aggregate_version"] = 1
+    decision = DeterministicRiskEvaluator().evaluate(
+        RiskInputV1.create(with_input_hash(payload, rule_set)), rule_set_dto(rule_set)
+    )
+    assert decision.error_code is None
+
+    timeout_payload = valid_input(rule_set)
+    timeout_payload["account"]["metadata"]["quality"] = "TIMEOUT"
+    timeout_payload["account"]["metadata"]["aggregate_version"] = None
+    decision = DeterministicRiskEvaluator().evaluate(
+        RiskInputV1.create(with_input_hash(timeout_payload, rule_set)), rule_set_dto(rule_set)
+    )
+    assert decision.error_code == "QQ-RISK-4010"
+
+    unavailable_payload = valid_input(rule_set)
+    unavailable_payload["account"]["metadata"]["quality"] = "UNAVAILABLE"
+    unavailable_payload["account"]["metadata"]["aggregate_version"] = None
+    decision = DeterministicRiskEvaluator().evaluate(
+        RiskInputV1.create(with_input_hash(unavailable_payload, rule_set)), rule_set_dto(rule_set)
+    )
+    assert decision.error_code == "QQ-RISK-4006"
+
+    invalid_payload = valid_input(rule_set)
+    invalid_payload["account"]["metadata"]["aggregate_version"] = None
+    decision = DeterministicRiskEvaluator().evaluate(
+        RiskInputV1.create(with_input_hash(invalid_payload, rule_set)), rule_set_dto(rule_set)
+    )
+    assert decision.error_code == "QQ-RISK-4008"
 
 
 def test_reduce_only_requires_explicit_evidence_and_never_bypasses_hard_limits() -> None:
@@ -169,7 +229,7 @@ def test_reduce_only_requires_explicit_evidence_and_never_bypasses_hard_limits()
     payload = reduce_input(rule_set)
 
     decision = DeterministicRiskEvaluator().evaluate(
-        RiskInputV1.create(payload), RiskRuleSetV1.create(rule_set)
+        RiskInputV1.create(payload), rule_set_dto(rule_set)
     )
 
     exempt = next(result for result in decision.rule_results if result.rule_id == "RULE.POSITION")
@@ -177,11 +237,11 @@ def test_reduce_only_requires_explicit_evidence_and_never_bypasses_hard_limits()
     assert exempt.exception_applied is True
 
     bad = deepcopy(payload)
-    bad["order"]["reduction_evidence"] = None
+    bad["order"]["reduction_evidence"]["position_snapshot_version"] = "wrong"
     bad["order"]["risk_effect"] = "REDUCE"
     bad = with_input_hash(bad, rule_set)
     decision = DeterministicRiskEvaluator().evaluate(
-        RiskInputV1.create(bad), RiskRuleSetV1.create(rule_set)
+        RiskInputV1.create(bad), rule_set_dto(rule_set)
     )
     assert decision.error_code == "QQ-RISK-4009"
 
@@ -190,9 +250,7 @@ def test_audit_validator_and_v1_v2_projection_use_validated_audit() -> None:
     rule_set = valid_rule_set()
     audit = RiskEvaluationRunner(
         DeterministicRiskEvaluator(), FakeClock([0, 1000, 2000, 3000, 4000])
-    ).run(
-        RiskInputV1.create(with_input_hash(valid_input(), rule_set)), RiskRuleSetV1.create(rule_set)
-    )
+    ).run(RiskInputV1.create(with_input_hash(valid_input(), rule_set)), rule_set_dto(rule_set))
 
     RiskAuditSemanticValidator().validate(audit)
     v1 = build_risk_v1_payload(audit)
@@ -200,17 +258,39 @@ def test_audit_validator_and_v1_v2_projection_use_validated_audit() -> None:
     assert v1["rule_results"][0]["latency_us"] == audit.rule_timings[0].latency_us  # type: ignore[index]
 
     registry = SchemaRegistry.project_default()
-    assert project_risk_v1_envelope(audit, registry=registry, causation_id="message-00000001")
-    assert build_risk_v2_envelope(audit, registry=registry, causation_id="message-00000001")
+    risk_input = RiskInputV1.create(with_input_hash(valid_input(), rule_set))
+    v1_envelope = project_risk_v1_envelope(
+        audit, risk_input, registry=registry, causation_id="message-00000001"
+    )
+    v2_envelope = build_risk_v2_envelope(
+        audit, risk_input, registry=registry, causation_id="message-00000001"
+    )
+    assert v1_envelope.to_primitive()["correlation_id"] == UUID2
+    assert v2_envelope.to_primitive()["correlation_id"] == UUID2
+
+
+def test_envelope_builders_reject_mixed_audit_and_input_binding() -> None:
+    rule_set = valid_rule_set()
+    input_a = RiskInputV1.create(with_input_hash(valid_input(rule_set), rule_set))
+    payload_b = valid_input(rule_set)
+    payload_b["order"]["order_id"] = "550e8400-e29b-41d4-a716-446655440099"
+    input_b = RiskInputV1.create(with_input_hash(payload_b, rule_set))
+    audit = RiskEvaluationRunner(
+        DeterministicRiskEvaluator(), FakeClock([0, 1000, 2000, 3000, 4000])
+    ).run(input_a, rule_set_dto(rule_set))
+    registry = SchemaRegistry.project_default()
+
+    with pytest.raises(RiskContractError):
+        project_risk_v1_envelope(audit, input_b, registry=registry, causation_id=None)
+    with pytest.raises(RiskContractError):
+        build_risk_v2_envelope(audit, input_b, registry=registry, causation_id=None)
 
 
 def test_audit_validator_rejects_mismatched_timing_and_timeout_semantics() -> None:
     rule_set = valid_rule_set()
     audit = RiskEvaluationRunner(
         DeterministicRiskEvaluator(), FakeClock([0, 1000, 2000, 3000, 4000])
-    ).run(
-        RiskInputV1.create(with_input_hash(valid_input(), rule_set)), RiskRuleSetV1.create(rule_set)
-    )
+    ).run(RiskInputV1.create(with_input_hash(valid_input(), rule_set)), rule_set_dto(rule_set))
     bad = audit.__class__(
         audit.decision,
         audit.evaluated_at,
@@ -228,7 +308,7 @@ def test_runner_timeout_fences_late_pass() -> None:
     rule_set["evaluation_timeout_us"] = 1
     rule_set = with_hashes(rule_set)
     audit = RiskEvaluationRunner(DeterministicRiskEvaluator(), FakeClock([0, 2_000, 3_000])).run(
-        RiskInputV1.create(with_input_hash(valid_input(), rule_set)), RiskRuleSetV1.create(rule_set)
+        RiskInputV1.create(with_input_hash(valid_input(), rule_set)), rule_set_dto(rule_set)
     )
     assert audit.decision.decision_origin == "TIMEOUT_GUARD"
     assert audit.decision.error_code == "QQ-RISK-4005"
@@ -236,11 +316,387 @@ def test_runner_timeout_fences_late_pass() -> None:
     RiskAuditSemanticValidator().validate(audit)
 
 
+def test_runner_uses_bounded_admission_saturation_and_same_input_version_fencing() -> None:
+    rule_set = valid_rule_set()
+    rule_set["evaluation_timeout_us"] = 1
+    rule_set = with_hashes(rule_set)
+    release = Event()
+    observer = RecordingObserver()
+    runner = RiskEvaluationRunner(
+        BlockingEvaluator(release),
+        FakeClock([0, 0, 0, 0, 0, 0, 0, 0, 0]),
+        metrics_observer=observer,
+    )
+    risk_input = RiskInputV1.create(with_input_hash(valid_input(), rule_set))
+    audit = runner.run(risk_input, rule_set_dto(rule_set))
+    assert audit.decision.decision_origin == "TIMEOUT_GUARD"
+    second_payload = valid_input(rule_set)
+    second_payload["order"]["order_id"] = "550e8400-e29b-41d4-a716-446655440099"
+    saturated = runner.run(
+        RiskInputV1.create(with_input_hash(second_payload, rule_set)), rule_set_dto(rule_set)
+    )
+    assert saturated.decision.decision_origin == "TIMEOUT_GUARD"
+    release.set()
+    repeated = runner.run(risk_input, rule_set_dto(rule_set))
+    assert repeated.decision.decision_origin == "TIMEOUT_GUARD"
+    labels = [event[2] for event in observer.events if event[0] == "risk_decisions_total"]
+    assert labels
+    assert set(labels[0]) == {"decision", "origin", "error_code"}
+    assert runner._seen_filter.storage_bit_length <= runner._seen_filter.bounded_bit_count
+
+
+def test_saturation_does_not_invalidate_admitted_attempt() -> None:
+    rule_set = valid_rule_set()
+    release = Event()
+    entered = Event()
+    runner = RiskEvaluationRunner(
+        GateEvaluator(entered, release),
+        FakeClock([0] * 100),
+    )
+    risk_input = RiskInputV1.create(with_input_hash(valid_input(rule_set), rule_set))
+    second_payload = valid_input(rule_set)
+    second_payload["order"]["order_id"] = "550e8400-e29b-41d4-a716-446655440099"
+    second_input = RiskInputV1.create(with_input_hash(second_payload, rule_set))
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        future = executor.submit(runner.run, risk_input, rule_set_dto(rule_set))
+        assert entered.wait(timeout=1)
+        saturated = runner.run(second_input, rule_set_dto(rule_set))
+        release.set()
+        audit = future.result(timeout=1)
+    assert saturated.decision.decision_origin == "TIMEOUT_GUARD"
+    assert audit.decision.decision_origin == "EVALUATOR"
+    assert audit.decision.error_code is None
+
+
+def test_many_unique_input_versions_keep_runner_state_bounded() -> None:
+    rule_set = valid_rule_set()
+    runner = RiskEvaluationRunner(DeterministicRiskEvaluator(), FakeClock([0] * 10_000))
+    for index in range(300):
+        payload = valid_input(rule_set)
+        payload["order"]["order_id"] = f"550e8400-e29b-41d4-a716-44665544{index:04d}"
+        runner.run(RiskInputV1.create(with_input_hash(payload, rule_set)), rule_set_dto(rule_set))
+    assert runner._seen_filter.storage_bit_length <= runner._seen_filter.bounded_bit_count
+
+
+def test_runner_fail_closed_when_audit_semantics_are_invalid() -> None:
+    rule_set = valid_rule_set()
+    audit_input = RiskInputV1.create(with_input_hash(valid_input(), rule_set))
+    runner = RiskEvaluationRunner(DuplicateRuleEvaluator(), FakeClock([0, 1000, 2000, 3000, 4000]))
+    with pytest.raises(RiskContractError):
+        runner.run(audit_input, rule_set_dto(rule_set))
+
+
 def test_float_is_rejected_before_evaluation() -> None:
     payload = valid_input()
     payload["market"]["risk_price"] = 10.0
     with pytest.raises(RiskContractError, match="float is forbidden"):
         RiskInputV1.create(payload)
+
+
+def test_fail_closed_taxonomy_4001_through_4011_has_stable_examples() -> None:
+    seen: set[str] = set()
+    seen.add(
+        DeterministicRiskEvaluator()
+        .evaluate(
+            RiskInputV1.create(with_input_hash(high_quantity_input(), valid_rule_set())),
+            rule_set_dto(valid_rule_set()),
+        )
+        .error_code
+        or ""
+    )
+    for quality, _code in {
+        "STALE": "QQ-RISK-4002",
+        "PARTIAL": "QQ-RISK-4003",
+        "TIMEOUT": "QQ-RISK-4010",
+        "UNAVAILABLE": "QQ-RISK-4006",
+    }.items():
+        payload = valid_input()
+        payload["account"]["metadata"]["quality"] = quality
+        if quality == "PARTIAL":
+            payload["account"]["metadata"]["missing_fields"] = ["equity"]
+        payload = with_input_hash(payload, valid_rule_set())
+        seen.add(
+            DeterministicRiskEvaluator()
+            .evaluate(RiskInputV1.create(payload), rule_set_dto(valid_rule_set()))
+            .error_code
+            or ""
+        )
+    version_mismatch = valid_input()
+    version_mismatch["portfolio"]["metadata"]["trading_day"] = "2026-07-03"
+    version_mismatch = with_input_hash(version_mismatch, valid_rule_set())
+    seen.add(
+        DeterministicRiskEvaluator()
+        .evaluate(RiskInputV1.create(version_mismatch), rule_set_dto(valid_rule_set()))
+        .error_code
+        or ""
+    )
+    timeout_rules = valid_rule_set()
+    timeout_rules["evaluation_timeout_us"] = 1
+    timeout_rules = with_hashes(timeout_rules)
+    seen.add(
+        RiskEvaluationRunner(DeterministicRiskEvaluator(), FakeClock([0, 2000, 3000]))
+        .run(
+            RiskInputV1.create(with_input_hash(valid_input(), timeout_rules)),
+            rule_set_dto(timeout_rules),
+        )
+        .decision.error_code
+        or ""
+    )
+    with pytest.raises(RiskContractError) as rule_error:
+        loose = valid_rule_set()
+        loose["system_hard_limits"]["max_order_quantity"] = 999
+        rule_set_dto(with_hashes(loose))
+    seen.add(rule_error.value.code)
+    payload = valid_input()
+    payload["order"]["checksum"] = "0" * 64
+    payload["input_version"] = hash_without(payload, "input_version")
+    seen.add(
+        DeterministicRiskEvaluator()
+        .evaluate(RiskInputV1.create(payload), rule_set_dto(valid_rule_set()))
+        .error_code
+        or ""
+    )
+    bad_reduce = reduce_input(valid_rule_set())
+    bad_reduce["order"]["reduction_evidence"]["position_snapshot_version"] = "bad"
+    bad_reduce = with_input_hash(bad_reduce, valid_rule_set())
+    seen.add(
+        DeterministicRiskEvaluator()
+        .evaluate(RiskInputV1.create(bad_reduce), rule_set_dto(valid_rule_set()))
+        .error_code
+        or ""
+    )
+    mismatch = valid_input()
+    mismatch["rule_set_hash"] = "a" * 64
+    mismatch["input_version"] = hash_without(mismatch, "input_version")
+    seen.add(
+        DeterministicRiskEvaluator()
+        .evaluate(RiskInputV1.create(mismatch), rule_set_dto(valid_rule_set()))
+        .error_code
+        or ""
+    )
+    assert seen >= {f"QQ-RISK-{code}" for code in range(4001, 4012)}
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        lambda payload: payload["order"].__setitem__("registered_at", "not-a-dateZ"),
+        lambda payload: payload["order"].__setitem__("side", "HOLD"),
+        lambda payload: payload["order"].__setitem__("limit_price", "01.00"),
+        lambda payload: payload["portfolio"]["scope_metrics"].append(
+            scope_metric("ACCOUNT", "acct-2")
+        ),
+        lambda payload: payload["portfolio"]["metadata"]["missing_fields"].extend(["x", "x"]),
+        lambda payload: payload["order"].__setitem__("extra", True),
+        lambda payload: payload["order"].__setitem__("risk_effect", "REDUCE"),
+    ],
+)
+def test_runtime_schema_validator_covers_schema_semantics(mutation: Any) -> None:
+    rule_set = valid_rule_set()
+    payload = valid_input(rule_set)
+    mutation(payload)
+    payload = with_input_hash(payload, rule_set)
+    with pytest.raises(RiskContractError) as exc:
+        RiskInputV1.create(payload)
+    assert exc.value.code == "QQ-RISK-4008"
+
+
+@pytest.mark.parametrize(
+    ("mutation", "error"),
+    [
+        (lambda payload: payload["account"].__setitem__("daily_loss", None), "QQ-RISK-4008"),
+        (
+            lambda payload: payload["account"].__setitem__("projected_available_cash", None),
+            "QQ-RISK-4008",
+        ),
+        (
+            lambda payload: payload["portfolio"]["scope_metrics"][0].__setitem__(
+                "projected_gross_exposure", None
+            ),
+            "QQ-RISK-4008",
+        ),
+        (
+            lambda payload: payload["portfolio"]["scope_metrics"][0].__setitem__(
+                "projected_leverage", None
+            ),
+            "QQ-RISK-4008",
+        ),
+        (
+            lambda payload: payload["portfolio"]["scope_metrics"][3].__setitem__(
+                "projected_position_quantity", None
+            ),
+            "QQ-RISK-4008",
+        ),
+        (lambda payload: payload["market"].__setitem__("risk_price", None), "QQ-RISK-4008"),
+    ],
+)
+def test_fresh_required_nullable_fields_fail_in_input_guard(mutation: Any, error: str) -> None:
+    rule_set = valid_rule_set()
+    rule_set["rules"].append(
+        scoped_rule("RULE.CASH", "ACCOUNT", "acct-1", 2, "AVAILABLE_CASH", "1.00")
+    )
+    rule_set["rules"].append(
+        scoped_rule(
+            "RULE.POSITION",
+            "INSTRUMENT",
+            "600000.XSHG",
+            3,
+            "POSITION_QUANTITY",
+            500,
+        )
+    )
+    rule_set = with_hashes(rule_set)
+    payload = valid_input(rule_set)
+    mutation(payload)
+    audit = RiskEvaluationRunner(
+        DeterministicRiskEvaluator(), FakeClock([0, 1000, 2000, 3000, 4000, 5000])
+    ).run(RiskInputV1.create(with_input_hash(payload, rule_set)), rule_set_dto(rule_set))
+    assert audit.decision.decision_origin == "INPUT_GUARD"
+    assert audit.decision.error_code == error
+    RiskAuditSemanticValidator().validate(audit)
+
+
+def test_partial_missing_fields_must_match_required_null_fields() -> None:
+    rule_set = valid_rule_set()
+    payload = valid_input(rule_set)
+    payload["account"]["metadata"]["quality"] = "PARTIAL"
+    payload["account"]["daily_loss"] = None
+    payload["account"]["metadata"]["missing_fields"] = ["account.projected_available_cash"]
+    audit = RiskEvaluationRunner(
+        DeterministicRiskEvaluator(), FakeClock([0, 1000, 2000, 3000, 4000, 5000])
+    ).run(RiskInputV1.create(with_input_hash(payload, rule_set)), rule_set_dto(rule_set))
+    assert audit.decision.decision_origin == "INPUT_GUARD"
+    assert audit.decision.error_code == "QQ-RISK-4008"
+
+
+def test_outputs_are_deep_frozen_and_primitives_are_defensive_copies() -> None:
+    rule_set = valid_rule_set()
+    audit = RiskEvaluationRunner(
+        DeterministicRiskEvaluator(), FakeClock([0, 1000, 2000, 3000, 4000, 5000])
+    ).run(
+        RiskInputV1.create(with_input_hash(valid_input(rule_set), rule_set)),
+        rule_set_dto(rule_set),
+    )
+    with pytest.raises(TypeError):
+        audit.decision.snapshot_states["account"]["quality"] = "STALE"  # type: ignore[index]
+    measured = next(result for result in audit.decision.rule_results if result.measured_value)
+    with pytest.raises(TypeError):
+        measured.measured_value["value"] = 0  # type: ignore[index]
+    primitive = audit.to_primitive()
+    primitive["decision"]["snapshot_states"]["account"]["quality"] = "STALE"  # type: ignore[index]
+    assert audit.to_primitive()["decision"]["snapshot_states"]["account"]["quality"] == "FRESH"  # type: ignore[index]
+
+
+def test_public_dto_constructors_and_unchecked_are_closed() -> None:
+    payload = valid_input()
+    rule_set = valid_rule_set()
+    with pytest.raises(TypeError):
+        RiskInputV1(payload)  # type: ignore[call-arg]
+    with pytest.raises(TypeError):
+        RiskRuleSetV1(rule_set)  # type: ignore[call-arg]
+    with pytest.raises(TypeError):
+        RiskInputV1.unchecked(payload)
+    with pytest.raises(TypeError):
+        RiskRuleSetV1.unchecked(rule_set)
+
+
+def test_schema_validation_and_deep_freeze_reject_mutation_and_extra_fields() -> None:
+    payload = valid_input()
+    dto = RiskInputV1.create(payload)
+    payload["order"]["quantity"] = 999
+    assert dto.to_primitive()["order"]["quantity"] == 100
+    payload_with_extra = valid_input()
+    payload_with_extra["order"]["unexpected"] = "bad"
+    payload_with_extra = with_input_hash(payload_with_extra, valid_rule_set())
+    with pytest.raises(RiskContractError) as exc:
+        RiskInputV1.create(payload_with_extra)
+    assert exc.value.code == "QQ-RISK-4008"
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        lambda payload: payload["account"].__setitem__("projected_available_cash", "1.00"),
+        lambda payload: payload["portfolio"]["scope_metrics"][0].__setitem__(
+            "projected_gross_exposure", "9999.00"
+        ),
+        lambda payload: payload["market"].__setitem__("risk_price", "10.10"),
+        lambda payload: payload["portfolio"]["scope_metrics"][0].__setitem__(
+            "scope_id", "wrong-account"
+        ),
+        lambda payload: payload["account"]["metadata"].__setitem__("aggregate_version", 0),
+        lambda payload: payload["order"].__setitem__("checksum", "0" * 64),
+    ],
+)
+def test_checksum_scope_version_and_price_recompute_fail_closed(mutation: Any) -> None:
+    rule_set = valid_rule_set()
+    payload = valid_input(rule_set)
+    mutation(payload)
+    payload["input_version"] = hash_without(payload, "input_version")
+    try:
+        risk_input = RiskInputV1.create(payload)
+    except RiskContractError as exc:
+        assert exc.code == "QQ-RISK-4008"
+        return
+    decision = DeterministicRiskEvaluator().evaluate(risk_input, rule_set_dto(rule_set))
+    assert decision.decision == "REJECT"
+    assert decision.error_code == "QQ-RISK-4008"
+
+
+def test_reduce_exception_requires_policy_whitelist_rule_declaration_and_valid_evidence() -> None:
+    rule_set = valid_rule_set()
+    rule_set["rules"] = [
+        scoped_rule(
+            "RULE.POSITION",
+            "INSTRUMENT",
+            "600000.XSHG",
+            1,
+            "POSITION_QUANTITY",
+            50,
+            reduction_exception="ALLOW_IF_VERIFIED",
+        )
+    ]
+    rule_set = with_hashes(rule_set)
+    decision = DeterministicRiskEvaluator().evaluate(
+        RiskInputV1.create(reduce_input(rule_set)), rule_set_dto(rule_set)
+    )
+    assert next(r for r in decision.rule_results if r.rule_id == "RULE.POSITION").result == "REJECT"
+
+    unlisted = deepcopy(rule_set)
+    unlisted["reduce_only_policy"] = {"enabled": True, "exempt_rule_ids": []}
+    unlisted = with_hashes(unlisted)
+    decision = DeterministicRiskEvaluator().evaluate(
+        RiskInputV1.create(reduce_input(unlisted)), rule_set_dto(unlisted)
+    )
+    assert next(r for r in decision.rule_results if r.rule_id == "RULE.POSITION").result == "REJECT"
+
+    declared = deepcopy(rule_set)
+    declared["rules"][0]["reduction_exception"] = "NEVER"
+    declared["reduce_only_policy"] = {"enabled": True, "exempt_rule_ids": ["RULE.POSITION"]}
+    declared = with_hashes(declared)
+    decision = DeterministicRiskEvaluator().evaluate(
+        RiskInputV1.create(reduce_input(declared)), rule_set_dto(declared)
+    )
+    assert decision.error_code == "QQ-RISK-4007"
+
+
+@pytest.mark.parametrize(
+    ("field", "relaxed"),
+    [
+        ("max_order_quantity", 1_000),
+        ("max_order_notional", "100000.00"),
+        ("max_projected_gross_exposure", "200000.00"),
+        ("max_daily_loss", "999999.00"),
+        ("activity_window_ms", 120000),
+    ],
+)
+def test_candidate_cannot_relax_accepted_system_hard_baseline(field: str, relaxed: Any) -> None:
+    candidate = valid_rule_set()
+    candidate["system_hard_limits"][field] = relaxed
+    candidate = with_hashes(candidate)
+    with pytest.raises(RiskContractError) as exc:
+        rule_set_dto(candidate)
+    assert exc.value.code == "QQ-RISK-4007"
 
 
 @dataclass
@@ -256,6 +712,56 @@ class FakeClock:
         return datetime(2026, 7, 2, 2, 0, 0, tzinfo=UTC)
 
 
+class BlockingEvaluator(DeterministicRiskEvaluator):
+    def __init__(self, release: Event) -> None:
+        self._release = release
+
+    def iter_rule_results(self, risk_input: RiskInputV1, rule_set: RiskRuleSetV1) -> Any:
+        del risk_input, rule_set
+        self._release.wait()
+        return
+        yield  # pragma: no cover
+
+
+class GateEvaluator(DeterministicRiskEvaluator):
+    def __init__(self, entered: Event, release: Event) -> None:
+        self._entered = entered
+        self._release = release
+
+    def iter_rule_results(self, risk_input: RiskInputV1, rule_set: RiskRuleSetV1) -> Any:
+        self._entered.set()
+        assert self._release.wait(timeout=1)
+        yield from super().iter_rule_results(risk_input, rule_set)
+
+
+class DuplicateRuleEvaluator(DeterministicRiskEvaluator):
+    def iter_rule_results(self, risk_input: RiskInputV1, rule_set: RiskRuleSetV1) -> Any:
+        del risk_input, rule_set
+        result = RuleResult(
+            0,
+            "DUPLICATE",
+            "INPUT_VALIDITY",
+            "SYSTEM",
+            None,
+            1,
+            None,
+            "PASS",
+            "RISK_RULE_PASSED",
+            None,
+            None,
+        )
+        yield result
+        yield result
+
+
+class RecordingObserver:
+    def __init__(self) -> None:
+        self.events: list[tuple[str, int, dict[str, str]]] = []
+
+    def observe(self, name: str, value: int, labels: dict[str, str]) -> None:
+        self.events.append((name, value, dict(labels)))
+
+
 def valid_input(rule_set: dict[str, Any] | None = None) -> dict[str, Any]:
     rules = rule_set or valid_rule_set()
     payload: dict[str, Any] = {
@@ -267,7 +773,7 @@ def valid_input(rule_set: dict[str, Any] | None = None) -> dict[str, Any]:
         "rule_set_hash": rules["content_hash"],
         "order": {
             "schema_version": 1,
-            "checksum": "a" * 64,
+            "checksum": "0" * 64,
             "order_id": UUID1,
             "aggregate_version": 1,
             "intent_id": UUID2,
@@ -345,6 +851,12 @@ def reduce_input(rule_set: dict[str, Any]) -> dict[str, Any]:
             row["position_quantity"] = 200
             row["projected_position_quantity"] = 100
     return with_input_hash(payload, rule_set)
+
+
+def high_quantity_input() -> dict[str, Any]:
+    payload = valid_input()
+    payload["order"]["quantity"] = 501
+    return with_input_hash(payload, valid_rule_set())
 
 
 def valid_rule_set() -> dict[str, Any]:
@@ -430,7 +942,7 @@ def metadata(source: str, version: str, *, aggregate_version: int | None = 1) ->
         "trading_day": "2026-07-02",
         "quality": "FRESH",
         "missing_fields": [],
-        "checksum": "b" * 64,
+        "checksum": "0" * 64,
     }
 
 
@@ -457,9 +969,26 @@ def with_hashes(rule_set: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
+def accepted_policy(rule_set: dict[str, Any] | None = None) -> AcceptedHardPolicy:
+    rules = rule_set or valid_rule_set()
+    return AcceptedHardPolicy.create(
+        version=rules["hard_limit_policy_version"],
+        valuation_currency=rules["valuation_currency"],
+        system_hard_limits=rules["system_hard_limits"],
+        policy_hash=hard_limit_policy_hash(rules),
+    )
+
+
+def rule_set_dto(rule_set: dict[str, Any]) -> RiskRuleSetV1:
+    return RiskRuleSetV1.create(rule_set, accepted_hard_policy=accepted_policy())
+
+
 def with_input_hash(payload: dict[str, Any], rule_set: dict[str, Any]) -> dict[str, Any]:
     result = deepcopy(payload)
     result["rule_set_version"] = rule_set["rule_set_version"]
     result["rule_set_hash"] = rule_set["content_hash"]
+    result["order"]["checksum"] = hash_without(result["order"], "checksum")
+    for name in ("account", "portfolio", "market"):
+        result[name]["metadata"]["checksum"] = hash_snapshot_without_metadata_checksum(result[name])
     result["input_version"] = hash_without(result, "input_version")
     return result
