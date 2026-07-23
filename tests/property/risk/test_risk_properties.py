@@ -20,11 +20,14 @@ from tests.unit.risk.test_risk_engine import (
 
 from quantiqmt.risk import (
     DeterministicRiskEvaluator,
+    RiskAuditOutputV1,
     RiskContractError,
+    RiskDecisionV1,
     RiskEvaluationRunner,
     RiskInputV1,
     RuleResult,
     RuleTiming,
+    hash_without,
 )
 
 
@@ -153,8 +156,9 @@ def test_generated_snapshot_consistency_taxonomy(quality: str) -> None:
             payload["account"]["metadata"]["missing_fields"] = ["account.daily_loss"]
         if quality in {"TIMEOUT", "UNAVAILABLE"}:
             payload["account"]["metadata"]["aggregate_version"] = None
+    payload = with_input_hash(payload, rule_set)
     decision = DeterministicRiskEvaluator().evaluate(
-        RiskInputV1.create(with_input_hash(payload, rule_set)), rule_set_dto(rule_set)
+        RiskInputV1.create(payload), rule_set_dto(rule_set)
     )
     assert decision.error_code == expected
 
@@ -288,3 +292,76 @@ def test_generated_public_output_construction_is_always_closed(index: int, outco
         )
     with pytest.raises(TypeError):
         RuleTiming(index, "RULE", index)
+
+
+@given(
+    st.sampled_from(["BOGUS", "DECIMAL", "INTEGER", "BOOLEAN", "STRING", "STRING_SET"]),
+    st.integers(min_value=-1, max_value=2),
+)
+def test_generated_validated_factories_fail_closed(kind: str, index: int) -> None:
+    with pytest.raises(RiskContractError):
+        RuleResult._validated(
+            index,
+            "RULE",
+            "SCOPED_RULE",
+            "ACCOUNT",
+            "acct-1",
+            1,
+            "ORDER_QUANTITY",
+            "PASS",
+            "RISK_RULE_PASSED",
+            {"kind": kind, "value": {"invalid": index}},
+            None,
+        )
+    with pytest.raises(RiskContractError):
+        RiskDecisionV1._validated(
+            decision_id="not-a-uuid",
+            decision_origin="EVALUATOR",
+            input_version="0" * 64,
+            semantic_decision_hash="0" * 64,
+            order_id="not-a-uuid",
+            expected_order_version=1,
+            decision="PASS",
+            primary_reason_code="RISK_ALL_APPLICABLE_RULES_PASSED",
+            error_code=None,
+            rule_set_version="r1",
+            rule_set_hash="0" * 64,
+            snapshot_states={},
+            rule_results=(),
+        )
+    with pytest.raises(RiskContractError):
+        RiskAuditOutputV1._validated(
+            decision=object(),  # type: ignore[arg-type]
+            evaluated_at="not-a-dateZ",
+            total_latency_us=0,
+            evaluation_timeout_us=1,
+            completed_rule_count=0,
+            rule_timings=(),
+        )
+
+
+@given(st.sampled_from(["order", "account", "portfolio", "market"]))
+def test_generated_checksum_tampering_fails_closed(source: str) -> None:
+    rule_set = valid_rule_set()
+    payload = valid_input(rule_set)
+    if source == "order":
+        payload["order"]["quantity"] = 101
+    else:
+        snapshot = payload[source]
+        if source == "account":
+            snapshot["equity"] = "9999.00"
+        elif source == "portfolio":
+            snapshot["scope_metrics"][0]["projected_gross_exposure"] = "9999.00"
+        else:
+            snapshot["risk_price"] = "10.10"
+    payload = with_input_hash(payload, rule_set)
+    if source == "order":
+        payload["order"]["checksum"] = "0" * 64
+    else:
+        payload[source]["metadata"]["checksum"] = "0" * 64
+    payload["input_version"] = hash_without(payload, "input_version")
+    decision = DeterministicRiskEvaluator().evaluate(
+        RiskInputV1.create(payload), rule_set_dto(rule_set)
+    )
+    assert decision.decision == "REJECT"
+    assert decision.error_code == "QQ-RISK-4008"

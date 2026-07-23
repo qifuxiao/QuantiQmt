@@ -294,16 +294,15 @@ def test_audit_validator_rejects_mismatched_timing_and_timeout_semantics() -> No
     audit = RiskEvaluationRunner(
         DeterministicRiskEvaluator(), FakeClock([0, 1000, 2000, 3000, 4000])
     ).run(RiskInputV1.create(with_input_hash(valid_input(), rule_set)), rule_set_dto(rule_set))
-    bad = audit.__class__._validated(
-        decision=audit.decision,
-        evaluated_at=audit.evaluated_at,
-        total_latency_us=0,
-        evaluation_timeout_us=audit.evaluation_timeout_us,
-        completed_rule_count=audit.completed_rule_count,
-        rule_timings=audit.rule_timings,
-    )
     with pytest.raises(RiskContractError):
-        RiskAuditSemanticValidator().validate(bad)
+        audit.__class__._validated(
+            decision=audit.decision,
+            evaluated_at=audit.evaluated_at,
+            total_latency_us=0,
+            evaluation_timeout_us=audit.evaluation_timeout_us,
+            completed_rule_count=audit.completed_rule_count,
+            rule_timings=audit.rule_timings,
+        )
 
 
 def test_runner_timeout_fences_late_pass() -> None:

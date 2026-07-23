@@ -598,6 +598,7 @@ def _result(
         measured_value,
         limit_value,
         exception_applied,
+        _synthetic=evaluation_index == -1,
     )
 
 

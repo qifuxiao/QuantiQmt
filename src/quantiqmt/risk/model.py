@@ -241,13 +241,15 @@ class RuleResult:
         measured_value: Mapping[str, JsonValue] | None,
         limit_value: Mapping[str, JsonValue] | None,
         exception_applied: bool = False,
+        *,
+        _synthetic: bool = False,
     ) -> RuleResult:
         # Synthetic candidates use -1 until the deterministic sort assigns an index.
-        if not isinstance(evaluation_index, int) or evaluation_index < -1:
+        if not isinstance(evaluation_index, int) or (evaluation_index < 0 and not _synthetic):
             raise RiskContractError(
                 "QQ-RISK-4008", "RISK_INPUT_INVALID", "invalid evaluation index"
             )
-        if not isinstance(rule_id, str) or not rule_id:
+        if not isinstance(rule_id, str) or not 1 <= len(rule_id) <= 128:
             raise RiskContractError("QQ-RISK-4008", "RISK_INPUT_INVALID", "invalid rule id")
         if phase not in {
             "INPUT_VALIDITY",
@@ -269,14 +271,52 @@ class RuleResult:
             )
         if not isinstance(priority, int) or priority < 0:
             raise RiskContractError("QQ-RISK-4008", "RISK_INPUT_INVALID", "invalid rule priority")
-        if metric is not None and not isinstance(metric, str):
+        if metric is not None and (not isinstance(metric, str) or not 1 <= len(metric) <= 64):
             raise RiskContractError("QQ-RISK-4008", "RISK_INPUT_INVALID", "invalid metric")
         if result not in {"PASS", "REJECT", "NOT_APPLICABLE"}:
             raise RiskContractError("QQ-RISK-4008", "RISK_INPUT_INVALID", "invalid rule result")
-        if not isinstance(reason_code, str) or not reason_code:
+        reasons = {
+            "RISK_ALL_APPLICABLE_RULES_PASSED",
+            "RISK_RULE_PASSED",
+            "RISK_RULE_NOT_APPLICABLE",
+            "RISK_RULE_BREACH",
+            "RISK_HARD_LIMIT_BREACH",
+            "RISK_TRADING_DISABLED",
+            "RISK_INSTRUMENT_NOT_ALLOWED",
+            "RISK_SNAPSHOT_STALE",
+            "RISK_SNAPSHOT_PARTIAL",
+            "RISK_SNAPSHOT_TIMEOUT",
+            "RISK_SNAPSHOT_UNAVAILABLE",
+            "RISK_SNAPSHOT_VERSION_MISMATCH",
+            "RISK_RULE_SET_VERSION_MISMATCH",
+            "RISK_INPUT_INVALID",
+            "RISK_RULE_SET_INVALID",
+            "RISK_REDUCTION_EVIDENCE_INVALID",
+            "RISK_REDUCE_ONLY_EXCEPTION_APPLIED",
+            "RISK_EVALUATION_TIMEOUT",
+        }
+        if reason_code not in reasons:
             raise RiskContractError("QQ-RISK-4008", "RISK_INPUT_INVALID", "invalid reason code")
         if not isinstance(exception_applied, bool):
             raise RiskContractError("QQ-RISK-4008", "RISK_INPUT_INVALID", "invalid exception flag")
+        if result == "PASS" and reason_code not in {
+            "RISK_RULE_PASSED",
+            "RISK_ALL_APPLICABLE_RULES_PASSED",
+            "RISK_REDUCE_ONLY_EXCEPTION_APPLIED",
+        }:
+            raise RiskContractError("QQ-RISK-4008", "RISK_INPUT_INVALID", "pass reason mismatch")
+        if result == "NOT_APPLICABLE" and reason_code != "RISK_RULE_NOT_APPLICABLE":
+            raise RiskContractError(
+                "QQ-RISK-4008", "RISK_INPUT_INVALID", "not-applicable reason mismatch"
+            )
+        if result == "REJECT" and reason_code in {
+            "RISK_RULE_PASSED",
+            "RISK_ALL_APPLICABLE_RULES_PASSED",
+            "RISK_RULE_NOT_APPLICABLE",
+        }:
+            raise RiskContractError("QQ-RISK-4008", "RISK_INPUT_INVALID", "reject reason mismatch")
+        _validate_typed_output(measured_value, "measured_value")
+        _validate_typed_output(limit_value, "limit_value")
         instance = object.__new__(cls)
         for name, value in {
             "evaluation_index": evaluation_index,
@@ -341,7 +381,7 @@ class RuleTiming:
     def _validated(cls, evaluation_index: int, rule_id: str, latency_us: int) -> RuleTiming:
         if not isinstance(evaluation_index, int) or evaluation_index < 0:
             raise RiskContractError("QQ-RISK-4008", "RISK_INPUT_INVALID", "invalid timing index")
-        if not isinstance(rule_id, str) or not rule_id:
+        if not isinstance(rule_id, str) or not 1 <= len(rule_id) <= 128:
             raise RiskContractError("QQ-RISK-4008", "RISK_INPUT_INVALID", "invalid timing rule id")
         if not isinstance(latency_us, int) or latency_us < 0:
             raise RiskContractError("QQ-RISK-4008", "RISK_INPUT_INVALID", "invalid rule latency")
@@ -415,12 +455,105 @@ class RiskDecisionV1:
             )
         if not isinstance(expected_order_version, int) or expected_order_version < 1:
             raise RiskContractError("QQ-RISK-4008", "RISK_INPUT_INVALID", "invalid order version")
+        if not re.fullmatch(
+            r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", decision_id
+        ):
+            raise RiskContractError("QQ-RISK-4008", "RISK_INPUT_INVALID", "invalid decision id")
+        if not re.fullmatch(r"[0-9a-f]{64}", input_version) or not re.fullmatch(
+            r"[0-9a-f]{64}", rule_set_hash
+        ):
+            raise RiskContractError("QQ-RISK-4008", "RISK_INPUT_INVALID", "invalid version hash")
+        if not re.fullmatch(r"[0-9a-f]{64}", semantic_decision_hash):
+            raise RiskContractError("QQ-RISK-4008", "RISK_INPUT_INVALID", "invalid semantic hash")
+        if not re.fullmatch(
+            r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", order_id
+        ):
+            raise RiskContractError("QQ-RISK-4008", "RISK_INPUT_INVALID", "invalid order id")
+        if not isinstance(rule_set_version, str) or not 1 <= len(rule_set_version) <= 64:
+            raise RiskContractError(
+                "QQ-RISK-4008", "RISK_INPUT_INVALID", "invalid rule set version"
+            )
         if error_code is not None and not isinstance(error_code, str):
             raise RiskContractError("QQ-RISK-4008", "RISK_INPUT_INVALID", "invalid error code")
         if not isinstance(rule_results, tuple) or not all(
             isinstance(item, RuleResult) for item in rule_results
         ):
             raise RiskContractError("QQ-RISK-4008", "RISK_INPUT_INVALID", "invalid rule results")
+        if not rule_results or [item.evaluation_index for item in rule_results] != list(
+            range(len(rule_results))
+        ):
+            raise RiskContractError(
+                "QQ-RISK-4008", "RISK_INPUT_INVALID", "non-contiguous rule results"
+            )
+        if len({item.rule_id for item in rule_results}) != len(rule_results):
+            raise RiskContractError("QQ-RISK-4008", "RISK_INPUT_INVALID", "duplicate rule result")
+        states = _as_mutable_mapping(thaw_json(freeze_json(snapshot_states)))
+        if set(states) != {"account", "portfolio", "market"}:
+            raise RiskContractError("QQ-RISK-4008", "RISK_INPUT_INVALID", "invalid snapshot states")
+        for name, state_obj in states.items():
+            if not isinstance(state_obj, dict) or set(state_obj) != {
+                "snapshot_version",
+                "quality",
+                "age_ms",
+                "max_age_ms",
+            }:
+                raise RiskContractError(
+                    "QQ-RISK-4008", "RISK_INPUT_INVALID", f"invalid {name} snapshot state"
+                )
+            if (
+                not isinstance(state_obj["snapshot_version"], str)
+                or not state_obj["snapshot_version"]
+            ):
+                raise RiskContractError(
+                    "QQ-RISK-4008", "RISK_INPUT_INVALID", f"invalid {name} version"
+                )
+            if state_obj["quality"] not in {
+                "FRESH",
+                "STALE",
+                "PARTIAL",
+                "TIMEOUT",
+                "UNAVAILABLE",
+                "VERSION_MISMATCH",
+            }:
+                raise RiskContractError(
+                    "QQ-RISK-4008", "RISK_INPUT_INVALID", f"invalid {name} quality"
+                )
+            if state_obj["age_ms"] is not None and (
+                not isinstance(state_obj["age_ms"], int) or state_obj["age_ms"] < 0
+            ):
+                raise RiskContractError("QQ-RISK-4008", "RISK_INPUT_INVALID", f"invalid {name} age")
+            if not isinstance(state_obj["max_age_ms"], int) or state_obj["max_age_ms"] < 0:
+                raise RiskContractError(
+                    "QQ-RISK-4008", "RISK_INPUT_INVALID", f"invalid {name} max age"
+                )
+        if decision == "PASS" and (
+            primary_reason_code != "RISK_ALL_APPLICABLE_RULES_PASSED"
+            or error_code is not None
+            or decision_origin != "EVALUATOR"
+        ):
+            raise RiskContractError("QQ-RISK-4008", "RISK_INPUT_INVALID", "pass decision semantics")
+        if decision == "REJECT" and error_code is None:
+            raise RiskContractError(
+                "QQ-RISK-4008", "RISK_INPUT_INVALID", "reject decision requires error"
+            )
+        primitive = {
+            "schema_version": 1,
+            "decision_id": decision_id,
+            "decision_origin": decision_origin,
+            "input_version": input_version,
+            "semantic_decision_hash": semantic_decision_hash,
+            "order_id": order_id,
+            "expected_order_version": expected_order_version,
+            "decision": decision,
+            "primary_reason_code": primary_reason_code,
+            "error_code": error_code,
+            "rule_set_version": rule_set_version,
+            "rule_set_hash": rule_set_hash,
+            "snapshot_states": states,
+            "rule_results": [item.to_primitive() for item in rule_results],
+        }
+        if semantic_decision_hash != _compute_semantic_decision_hash(primitive):
+            raise RiskContractError("QQ-RISK-4008", "RISK_INPUT_INVALID", "semantic hash mismatch")
         instance = object.__new__(cls)
         for name, value in {
             "decision_id": decision_id,
@@ -434,7 +567,7 @@ class RiskDecisionV1:
             "error_code": error_code,
             "rule_set_version": rule_set_version,
             "rule_set_hash": rule_set_hash,
-            "snapshot_states": _as_frozen_mapping(freeze_json(snapshot_states)),
+            "snapshot_states": _as_frozen_mapping(freeze_json(states)),
             "rule_results": tuple(rule_results),
         }.items():
             object.__setattr__(instance, name, value)
@@ -490,11 +623,15 @@ class RiskAuditOutputV1:
     ) -> RiskAuditOutputV1:
         if not isinstance(decision, RiskDecisionV1) or not isinstance(evaluated_at, str):
             raise RiskContractError("QQ-RISK-4008", "RISK_INPUT_INVALID", "invalid audit identity")
-        if any(
-            not isinstance(value, int) or value < 0
-            for value in (total_latency_us, evaluation_timeout_us, completed_rule_count)
-        ):
+        _date_time_z(evaluated_at, "$.evaluated_at")
+        if not isinstance(total_latency_us, int) or total_latency_us < 0:
             raise RiskContractError("QQ-RISK-4008", "RISK_INPUT_INVALID", "invalid audit timing")
+        if not isinstance(evaluation_timeout_us, int) or not 1 <= evaluation_timeout_us <= 4000:
+            raise RiskContractError(
+                "QQ-RISK-4008", "RISK_INPUT_INVALID", "invalid evaluation timeout"
+            )
+        if not isinstance(completed_rule_count, int) or not 0 <= completed_rule_count <= 8192:
+            raise RiskContractError("QQ-RISK-4008", "RISK_INPUT_INVALID", "invalid completed count")
         if not isinstance(rule_timings, tuple) or not all(
             isinstance(item, RuleTiming) for item in rule_timings
         ):
@@ -509,6 +646,9 @@ class RiskAuditOutputV1:
             "rule_timings": tuple(rule_timings),
         }.items():
             object.__setattr__(instance, name, value)
+        from quantiqmt.risk.audit import RiskAuditSemanticValidator
+
+        RiskAuditSemanticValidator().validate(instance)
         return instance
 
     def __post_init__(self) -> None:
@@ -593,6 +733,10 @@ def v2_message_id(decision_identifier: str) -> str:
 
 
 def semantic_decision_hash(decision: Mapping[str, object]) -> str:
+    return _compute_semantic_decision_hash(decision)
+
+
+def _compute_semantic_decision_hash(decision: Mapping[str, object]) -> str:
     return sha256_lower_hex(
         canonical_json_bytes(
             {
@@ -614,6 +758,68 @@ def decimal_value(value: object, *, field: str) -> Decimal:
             "QQ-RISK-4008", "RISK_INPUT_INVALID", f"{field} invalid decimal"
         ) from exc
     return parsed
+
+
+def _validate_typed_output(value: Mapping[str, JsonValue] | None, field: str) -> None:
+    if value is None:
+        return
+    raw = cast(Mapping[str, object], value)
+    kind = raw.get("kind")
+    if kind == "DECIMAL":
+        if set(raw) != {"kind", "value", "currency"}:
+            raise RiskContractError("QQ-RISK-4008", "RISK_INPUT_INVALID", f"{field} decimal shape")
+        text = raw.get("value")
+        currency = raw.get("currency")
+        if not isinstance(text, str) or not re.fullmatch(
+            r"^-?(0|[1-9][0-9]{0,17})(\.[0-9]{1,8})?$", text
+        ):
+            raise RiskContractError(
+                "QQ-RISK-4008", "RISK_INPUT_INVALID", f"{field} decimal pattern"
+            )
+        try:
+            Decimal(text)
+        except InvalidOperation as exc:
+            raise RiskContractError(
+                "QQ-RISK-4008", "RISK_INPUT_INVALID", f"{field} decimal"
+            ) from exc
+        if currency is not None and (
+            not isinstance(currency, str) or not re.fullmatch(r"^[A-Z]{3}$", currency)
+        ):
+            raise RiskContractError("QQ-RISK-4008", "RISK_INPUT_INVALID", f"{field} currency")
+        return
+    if kind == "INTEGER":
+        if (
+            set(raw) != {"kind", "value"}
+            or isinstance(raw.get("value"), bool)
+            or not isinstance(raw.get("value"), int)
+        ):
+            raise RiskContractError("QQ-RISK-4008", "RISK_INPUT_INVALID", f"{field} integer")
+        return
+    if kind == "BOOLEAN":
+        if set(raw) != {"kind", "value"} or not isinstance(raw.get("value"), bool):
+            raise RiskContractError("QQ-RISK-4008", "RISK_INPUT_INVALID", f"{field} boolean")
+        return
+    if kind == "STRING":
+        text = raw.get("value")
+        if set(raw) != {"kind", "value"} or not isinstance(text, str) or not 1 <= len(text) <= 128:
+            raise RiskContractError("QQ-RISK-4008", "RISK_INPUT_INVALID", f"{field} string")
+        return
+    if kind == "STRING_SET":
+        values = raw.get("values")
+        if (
+            set(raw) != {"kind", "values"}
+            or not isinstance(values, tuple)
+            or not 1 <= len(values) <= 10000
+        ):
+            raise RiskContractError("QQ-RISK-4008", "RISK_INPUT_INVALID", f"{field} string set")
+        if len(set(values)) != len(values) or any(
+            not isinstance(item, str) or not 1 <= len(item) <= 128 for item in values
+        ):
+            raise RiskContractError(
+                "QQ-RISK-4008", "RISK_INPUT_INVALID", f"{field} string set values"
+            )
+        return
+    raise RiskContractError("QQ-RISK-4008", "RISK_INPUT_INVALID", f"{field} kind")
 
 
 def ceil_div_us(delta_ns: int) -> int:
