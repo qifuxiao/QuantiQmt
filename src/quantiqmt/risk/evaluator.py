@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from collections.abc import Iterator, Mapping
-from dataclasses import replace
 from decimal import ROUND_CEILING, Decimal
 from types import MappingProxyType
 from typing import Literal, cast
@@ -157,7 +156,7 @@ class DeterministicRiskEvaluator:
         )
         results = _synthetic_results(context)
         for index, result in enumerate(results):
-            yield replace(result, evaluation_index=index)
+            yield _with_index(result, index)
         if any(result.result == "REJECT" for result in results):
             return
         offset = len(results)
@@ -167,7 +166,7 @@ class DeterministicRiskEvaluator:
         ]
         business_results.sort(key=_sort_key)
         for index, result in enumerate(business_results, start=offset):
-            yield replace(result, evaluation_index=index)
+            yield _with_index(result, index)
 
     def decide(
         self,
@@ -532,7 +531,7 @@ def _decision(
         "rule_results": [result.to_primitive() for result in results],
     }
     semantic_hash = semantic_decision_hash(primitive)
-    return RiskDecisionV1(
+    return RiskDecisionV1._validated(
         decision_id=cast(str, primitive["decision_id"]),
         decision_origin=decision_origin,
         input_version=cast(str, primitive["input_version"]),
@@ -586,7 +585,7 @@ def _result(
     *,
     exception_applied: bool = False,
 ) -> RuleResult:
-    return RuleResult(
+    return RuleResult._validated(
         evaluation_index,
         rule_id,
         phase,
@@ -599,6 +598,23 @@ def _result(
         measured_value,
         limit_value,
         exception_applied,
+    )
+
+
+def _with_index(result: RuleResult, index: int) -> RuleResult:
+    return RuleResult._validated(
+        index,
+        result.rule_id,
+        result.phase,
+        result.scope,
+        result.scope_id,
+        result.priority,
+        result.metric,
+        result.result,
+        result.reason_code,
+        result.measured_value,
+        result.limit_value,
+        exception_applied=result.exception_applied,
     )
 
 
@@ -731,12 +747,8 @@ def _safe_age_ms(risk_input: Mapping[str, object], name: str) -> int | None:
     try:
         snapshot = _mapping(risk_input[name], name)
         metadata = _mapping(snapshot["metadata"], "metadata")
-        return int(
-            (
-                parse_utc(risk_input["evaluation_time"]) - parse_utc(metadata["as_of"])
-            ).total_seconds()
-            * 1000
-        )
+        delta = parse_utc(risk_input["evaluation_time"]) - parse_utc(metadata["as_of"])
+        return delta.days * 86_400_000 + delta.seconds * 1_000 + delta.microseconds // 1_000
     except (RiskContractError, KeyError):
         return None
 

@@ -4,6 +4,7 @@ from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
 from threading import Event
 
+import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 from tests.unit.risk.test_risk_engine import (
@@ -22,6 +23,8 @@ from quantiqmt.risk import (
     RiskContractError,
     RiskEvaluationRunner,
     RiskInputV1,
+    RuleResult,
+    RuleTiming,
 )
 
 
@@ -265,3 +268,23 @@ def test_generated_timeout_saturation_does_not_invalidate_admitted_result(_: boo
         audit = future.result(timeout=1)
     assert saturated.decision.decision_origin == "TIMEOUT_GUARD"
     assert audit.decision.decision_origin == "EVALUATOR"
+
+
+@given(st.integers(min_value=-3, max_value=3), st.sampled_from(["PASS", "REJECT", "BAD"]))
+def test_generated_public_output_construction_is_always_closed(index: int, outcome: str) -> None:
+    with pytest.raises(TypeError):
+        RuleResult(
+            index,
+            "RULE",
+            "SCOPED_RULE",
+            "ACCOUNT",
+            "acct-1",
+            1,
+            None,
+            outcome,
+            "RISK_RULE_PASSED",
+            {"kind": "INTEGER", "value": index},
+            None,
+        )
+    with pytest.raises(TypeError):
+        RuleTiming(index, "RULE", index)

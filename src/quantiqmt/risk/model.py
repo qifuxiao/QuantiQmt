@@ -208,7 +208,7 @@ class RiskRuleSetV1:
         return cast(dict[str, MutableJsonValue], thaw_json(self.values))
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, init=False)
 class RuleResult:
     evaluation_index: int
     rule_id: str
@@ -222,6 +222,82 @@ class RuleResult:
     measured_value: Mapping[str, JsonValue] | None
     limit_value: Mapping[str, JsonValue] | None
     exception_applied: bool = False
+
+    def __init__(self, *_args: object, **_kwargs: object) -> None:
+        raise TypeError("RuleResult must be constructed by the validated factory")
+
+    @classmethod
+    def _validated(
+        cls,
+        evaluation_index: int,
+        rule_id: str,
+        phase: RulePhase,
+        scope: RuleScope,
+        scope_id: str | None,
+        priority: int,
+        metric: str | None,
+        result: RuleOutcome,
+        reason_code: str,
+        measured_value: Mapping[str, JsonValue] | None,
+        limit_value: Mapping[str, JsonValue] | None,
+        exception_applied: bool = False,
+    ) -> RuleResult:
+        # Synthetic candidates use -1 until the deterministic sort assigns an index.
+        if not isinstance(evaluation_index, int) or evaluation_index < -1:
+            raise RiskContractError(
+                "QQ-RISK-4008", "RISK_INPUT_INVALID", "invalid evaluation index"
+            )
+        if not isinstance(rule_id, str) or not rule_id:
+            raise RiskContractError("QQ-RISK-4008", "RISK_INPUT_INVALID", "invalid rule id")
+        if phase not in {
+            "INPUT_VALIDITY",
+            "SNAPSHOT_VALIDITY",
+            "SYSTEM_HARD_LIMIT",
+            "SCOPED_RULE",
+            "TIMEOUT_GUARD",
+        }:
+            raise RiskContractError("QQ-RISK-4008", "RISK_INPUT_INVALID", "invalid rule phase")
+        if scope not in {"SYSTEM", "ACCOUNT", "PORTFOLIO", "STRATEGY", "INSTRUMENT"}:
+            raise RiskContractError("QQ-RISK-4008", "RISK_INPUT_INVALID", "invalid rule scope")
+        if scope == "SYSTEM" and scope_id is not None:
+            raise RiskContractError(
+                "QQ-RISK-4008", "RISK_INPUT_INVALID", "system scope id must be null"
+            )
+        if scope != "SYSTEM" and (not isinstance(scope_id, str) or not scope_id):
+            raise RiskContractError(
+                "QQ-RISK-4008", "RISK_INPUT_INVALID", "scoped rule id is required"
+            )
+        if not isinstance(priority, int) or priority < 0:
+            raise RiskContractError("QQ-RISK-4008", "RISK_INPUT_INVALID", "invalid rule priority")
+        if metric is not None and not isinstance(metric, str):
+            raise RiskContractError("QQ-RISK-4008", "RISK_INPUT_INVALID", "invalid metric")
+        if result not in {"PASS", "REJECT", "NOT_APPLICABLE"}:
+            raise RiskContractError("QQ-RISK-4008", "RISK_INPUT_INVALID", "invalid rule result")
+        if not isinstance(reason_code, str) or not reason_code:
+            raise RiskContractError("QQ-RISK-4008", "RISK_INPUT_INVALID", "invalid reason code")
+        if not isinstance(exception_applied, bool):
+            raise RiskContractError("QQ-RISK-4008", "RISK_INPUT_INVALID", "invalid exception flag")
+        instance = object.__new__(cls)
+        for name, value in {
+            "evaluation_index": evaluation_index,
+            "rule_id": rule_id,
+            "phase": phase,
+            "scope": scope,
+            "scope_id": scope_id,
+            "priority": priority,
+            "metric": metric,
+            "result": result,
+            "reason_code": reason_code,
+            "measured_value": None
+            if measured_value is None
+            else _as_frozen_mapping(freeze_json(measured_value)),
+            "limit_value": None
+            if limit_value is None
+            else _as_frozen_mapping(freeze_json(limit_value)),
+            "exception_applied": exception_applied,
+        }.items():
+            object.__setattr__(instance, name, value)
+        return instance
 
     def __post_init__(self) -> None:
         if self.measured_value is not None:
@@ -252,11 +328,28 @@ class RuleResult:
         }
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, init=False)
 class RuleTiming:
     evaluation_index: int
     rule_id: str
     latency_us: int
+
+    def __init__(self, *_args: object, **_kwargs: object) -> None:
+        raise TypeError("RuleTiming must be constructed by the validated factory")
+
+    @classmethod
+    def _validated(cls, evaluation_index: int, rule_id: str, latency_us: int) -> RuleTiming:
+        if not isinstance(evaluation_index, int) or evaluation_index < 0:
+            raise RiskContractError("QQ-RISK-4008", "RISK_INPUT_INVALID", "invalid timing index")
+        if not isinstance(rule_id, str) or not rule_id:
+            raise RiskContractError("QQ-RISK-4008", "RISK_INPUT_INVALID", "invalid timing rule id")
+        if not isinstance(latency_us, int) or latency_us < 0:
+            raise RiskContractError("QQ-RISK-4008", "RISK_INPUT_INVALID", "invalid rule latency")
+        instance = object.__new__(cls)
+        object.__setattr__(instance, "evaluation_index", evaluation_index)
+        object.__setattr__(instance, "rule_id", rule_id)
+        object.__setattr__(instance, "latency_us", latency_us)
+        return instance
 
     def to_primitive(self) -> dict[str, int | str]:
         return {
@@ -266,7 +359,7 @@ class RuleTiming:
         }
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, init=False)
 class RiskDecisionV1:
     decision_id: str
     decision_origin: DecisionOrigin
@@ -281,6 +374,71 @@ class RiskDecisionV1:
     rule_set_hash: str
     snapshot_states: Mapping[str, JsonValue]
     rule_results: tuple[RuleResult, ...]
+
+    def __init__(self, *_args: object, **_kwargs: object) -> None:
+        raise TypeError("RiskDecisionV1 must be constructed by the validated factory")
+
+    @classmethod
+    def _validated(
+        cls,
+        *,
+        decision_id: str,
+        decision_origin: DecisionOrigin,
+        input_version: str,
+        semantic_decision_hash: str,
+        order_id: str,
+        expected_order_version: int,
+        decision: RiskDecisionOutcome,
+        primary_reason_code: str,
+        error_code: str | None,
+        rule_set_version: str,
+        rule_set_hash: str,
+        snapshot_states: Mapping[str, JsonValue],
+        rule_results: tuple[RuleResult, ...],
+    ) -> RiskDecisionV1:
+        if decision_origin not in {"EVALUATOR", "INPUT_GUARD", "TIMEOUT_GUARD"}:
+            raise RiskContractError("QQ-RISK-4008", "RISK_INPUT_INVALID", "invalid decision origin")
+        if decision not in {"PASS", "REJECT"} or not all(
+            isinstance(value, str) and value
+            for value in (
+                decision_id,
+                input_version,
+                semantic_decision_hash,
+                order_id,
+                primary_reason_code,
+                rule_set_version,
+                rule_set_hash,
+            )
+        ):
+            raise RiskContractError(
+                "QQ-RISK-4008", "RISK_INPUT_INVALID", "invalid decision identity"
+            )
+        if not isinstance(expected_order_version, int) or expected_order_version < 1:
+            raise RiskContractError("QQ-RISK-4008", "RISK_INPUT_INVALID", "invalid order version")
+        if error_code is not None and not isinstance(error_code, str):
+            raise RiskContractError("QQ-RISK-4008", "RISK_INPUT_INVALID", "invalid error code")
+        if not isinstance(rule_results, tuple) or not all(
+            isinstance(item, RuleResult) for item in rule_results
+        ):
+            raise RiskContractError("QQ-RISK-4008", "RISK_INPUT_INVALID", "invalid rule results")
+        instance = object.__new__(cls)
+        for name, value in {
+            "decision_id": decision_id,
+            "decision_origin": decision_origin,
+            "input_version": input_version,
+            "semantic_decision_hash": semantic_decision_hash,
+            "order_id": order_id,
+            "expected_order_version": expected_order_version,
+            "decision": decision,
+            "primary_reason_code": primary_reason_code,
+            "error_code": error_code,
+            "rule_set_version": rule_set_version,
+            "rule_set_hash": rule_set_hash,
+            "snapshot_states": _as_frozen_mapping(freeze_json(snapshot_states)),
+            "rule_results": tuple(rule_results),
+        }.items():
+            object.__setattr__(instance, name, value)
+        return instance
 
     def __post_init__(self) -> None:
         object.__setattr__(
@@ -307,7 +465,7 @@ class RiskDecisionV1:
         }
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, init=False)
 class RiskAuditOutputV1:
     decision: RiskDecisionV1
     evaluated_at: str
@@ -315,6 +473,43 @@ class RiskAuditOutputV1:
     evaluation_timeout_us: int
     completed_rule_count: int
     rule_timings: tuple[RuleTiming, ...]
+
+    def __init__(self, *_args: object, **_kwargs: object) -> None:
+        raise TypeError("RiskAuditOutputV1 must be constructed by the validated factory")
+
+    @classmethod
+    def _validated(
+        cls,
+        *,
+        decision: RiskDecisionV1,
+        evaluated_at: str,
+        total_latency_us: int,
+        evaluation_timeout_us: int,
+        completed_rule_count: int,
+        rule_timings: tuple[RuleTiming, ...],
+    ) -> RiskAuditOutputV1:
+        if not isinstance(decision, RiskDecisionV1) or not isinstance(evaluated_at, str):
+            raise RiskContractError("QQ-RISK-4008", "RISK_INPUT_INVALID", "invalid audit identity")
+        if any(
+            not isinstance(value, int) or value < 0
+            for value in (total_latency_us, evaluation_timeout_us, completed_rule_count)
+        ):
+            raise RiskContractError("QQ-RISK-4008", "RISK_INPUT_INVALID", "invalid audit timing")
+        if not isinstance(rule_timings, tuple) or not all(
+            isinstance(item, RuleTiming) for item in rule_timings
+        ):
+            raise RiskContractError("QQ-RISK-4008", "RISK_INPUT_INVALID", "invalid rule timings")
+        instance = object.__new__(cls)
+        for name, value in {
+            "decision": decision,
+            "evaluated_at": evaluated_at,
+            "total_latency_us": total_latency_us,
+            "evaluation_timeout_us": evaluation_timeout_us,
+            "completed_rule_count": completed_rule_count,
+            "rule_timings": tuple(rule_timings),
+        }.items():
+            object.__setattr__(instance, name, value)
+        return instance
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "rule_timings", tuple(self.rule_timings))
