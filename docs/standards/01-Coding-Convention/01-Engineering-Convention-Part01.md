@@ -1,6 +1,6 @@
 # quantiqmt Engineering Convention
 
-> 本文规定通用编码风格。事件名、Payload、核心接口、流程和状态机以 `docs/README.md` 所列 L4 Catalog/Specification 为准；本文历史示例不构成接口契约。
+> **Authority notice：**本文规定通用编码风格；安全与交易不变量及最新 Accepted ADR 保持最高优先级。Event、Payload、DTO、核心接口、Workflow 和状态机的规范性实现契约，以 `spec/manifest.yaml` 索引的 `spec/**` 为准。`docs/README.md` 仅是解释性导航，不构成实现契约；本文及其他 `docs/**` 与 `spec/**` 冲突时，按仓库规范优先级处理。本文历史示例不构成接口契约。
 
 > Version: 1.0
 >
