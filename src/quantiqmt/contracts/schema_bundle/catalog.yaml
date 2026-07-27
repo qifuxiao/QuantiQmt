@@ -1,0 +1,44 @@
+catalog:
+  id: CONTRACT-CATALOG
+  version: 3
+  status: accepted
+messages:
+  - {name: strategy.submit_order_intent.v1, kind: command, owner: OrderApplication, schema: commands/strategy.submit_order_intent.v1.schema.json, status: active}
+  - {name: strategy.submit_target.v1, kind: command, owner: TargetResolver, schema: commands/strategy.submit_target.v1.schema.json, status: active}
+  - {name: execution.cancel_order.v1, kind: command, owner: OrderApplication, schema: commands/execution.cancel_order.v1.schema.json, status: active}
+  - {name: broker.trade_reported.v1, kind: event, publisher: BrokerAdapter, consumers: [OMS, Reconciliation, Audit], schema: events/broker.trade_reported.v1.schema.json, status: active}
+  - {name: oms.order_status_changed.v1, kind: event, publisher: OMS, consumers: [StrategyRuntime, Portfolio, Audit, Alert], schema: events/oms.order_status_changed.v1.schema.json, status: active}
+  - {name: market.tick_received.v1, kind: event, publisher: MarketGateway, consumers: [StrategyRuntime, MarketQuality], status: planned}
+  - {name: market.bar_closed.v1, kind: event, publisher: BarAggregator, consumers: [StrategyRuntime, Storage], status: planned}
+  - {name: market.quality_changed.v1, kind: event, publisher: MarketQuality, consumers: [StrategyRuntime, Risk, Alert], status: planned}
+  - {name: market.session_changed.v1, kind: event, publisher: SessionScheduler, consumers: [StrategyRuntime, Risk, OMS], status: planned}
+  - {name: strategy.signal_generated.v1, kind: event, publisher: StrategyRuntime, consumers: [Audit, Analytics], status: planned}
+  - {name: strategy.target_generated.v1, kind: event, publisher: StrategyRuntime, consumers: [TargetResolver, Audit], status: planned}
+  - {name: strategy.target_resolved.v1, kind: event, publisher: TargetResolver, consumers: [OrderApplication, Audit], status: planned}
+  - {name: strategy.state_changed.v1, kind: event, publisher: StrategyRuntime, consumers: [ControlPlane, Alert], status: planned}
+  - {name: strategy.intent_rejected.v1, kind: event, publisher: OrderApplication, consumers: [StrategyRuntime, Audit], status: planned}
+  - {name: risk.order_evaluated.v1, kind: event, publisher: RiskEngine, consumers: [OrderApplication, Audit, Metrics], schema: events/risk.order_evaluated.v1.schema.json, status: active}
+  - {name: risk.order_evaluated.v2, kind: event, publisher: RiskEngine, consumers: [OrderApplication, Audit, Metrics], schema: events/risk.order_evaluated.v2.schema.json, status: active}
+  - {name: risk.limit_breached.v1, kind: event, publisher: RiskEngine, consumers: [ControlPlane, Alert], status: planned}
+  - {name: risk.rule_set_activated.v1, kind: event, publisher: ConfigService, consumers: [RiskEngine, Audit], status: planned}
+  - {name: oms.order_registered.v1, kind: event, publisher: OMS, consumers: [Risk, StrategyRuntime, Audit], schema: events/oms.order_registered.v1.schema.json, status: active}
+  - {name: oms.order_suspended.v1, kind: event, publisher: OMS, consumers: [Reconciliation, ControlPlane, Alert], status: planned}
+  - {name: execution.attempt_started.v1, kind: event, publisher: ExecutionEngine, consumers: [OMS, Audit], schema: events/execution.attempt_started.v1.schema.json, status: active}
+  - {name: execution.outcome_unknown.v1, kind: event, publisher: ExecutionEngine, consumers: [OMS, Reconciliation, Alert], schema: events/execution.outcome_unknown.v1.schema.json, status: active}
+  - {name: broker.order_reported.v1, kind: event, publisher: BrokerAdapter, consumers: [OMS, Reconciliation, Audit], schema: events/broker.order_reported.v1.schema.json, status: active}
+  - {name: ledger.trade_posted.v1, kind: event, publisher: AccountLedger, consumers: [Portfolio, Risk, Audit], schema: events/ledger.trade_posted.v1.schema.json, status: active}
+  - {name: ledger.adjustment_posted.v1, kind: event, publisher: AccountLedger, consumers: [Portfolio, Risk, Audit], status: planned}
+  - {name: portfolio.position_changed.v1, kind: event, publisher: PortfolioProjection, consumers: [Risk, StrategyRuntime, API], schema: events/portfolio.position_changed.v1.schema.json, status: active}
+  - {name: portfolio.snapshot_created.v1, kind: event, publisher: PortfolioProjection, consumers: [Recovery, Risk], status: planned}
+  - {name: account.snapshot_observed.v1, kind: event, publisher: BrokerAdapter, consumers: [Reconciliation, Risk], status: planned}
+  - {name: portfolio.snapshot_observed.v1, kind: event, publisher: BrokerAdapter, consumers: [Reconciliation, Risk], status: planned}
+  - {name: reconciliation.case_opened.v1, kind: event, publisher: Reconciliation, consumers: [ControlPlane, Alert], status: planned}
+  - {name: reconciliation.case_resolved.v1, kind: event, publisher: Reconciliation, consumers: [OMS, Ledger, Audit], status: planned}
+  - {name: system.mode_changed.v1, kind: event, publisher: TradingCore, consumers: [TradingComponents], status: planned}
+  - {name: system.component_health_changed.v1, kind: event, publisher: HealthService, consumers: [ControlPlane, Alert], status: planned}
+  - {name: system.kill_switch_changed.v1, kind: event, publisher: ControlPlane, consumers: [Risk, OMS, Execution, Audit], status: planned}
+  - {name: config.version_activated.v1, kind: event, publisher: ConfigService, consumers: [AffectedComponents, Audit], status: planned}
+rules:
+  active_requires_schema: true
+  published_name_reuse: forbidden
+  planned_message_must_be_activated_by_spec_change_task: true

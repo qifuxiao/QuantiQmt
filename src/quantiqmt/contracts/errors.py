@@ -15,3 +15,7 @@ class UnsupportedSchemaVersionError(ContractError):
 
 class ContractValidationError(ContractError):
     """Raised when an envelope or payload violates its JSON Schema."""
+
+
+class SchemaBundleError(RuntimeError):
+    """Raised when the deployable schema bundle is missing or inconsistent."""

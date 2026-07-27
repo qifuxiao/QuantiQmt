@@ -1,0 +1,1 @@
+"""Packaged immutable contract schemas."""

@@ -13,6 +13,8 @@ from decimal import ROUND_CEILING, Decimal, InvalidOperation
 from types import MappingProxyType
 from typing import Literal, cast
 
+from quantiqmt.contracts import SchemaRegistry
+
 JsonValue = None | bool | int | str | tuple["JsonValue", ...] | Mapping[str, "JsonValue"]
 MutableJsonValue = (
     None | bool | int | str | list["MutableJsonValue"] | dict[str, "MutableJsonValue"]
@@ -340,6 +342,28 @@ class RuleResult:
             )
         _validate_typed_output(measured_value, "measured_value")
         _validate_typed_output(limit_value, "limit_value")
+        if not _synthetic:
+            _validate_output_schema(
+                "rule_result",
+                {
+                    "evaluation_index": evaluation_index,
+                    "rule_id": rule_id,
+                    "phase": phase,
+                    "scope": scope,
+                    "scope_id": scope_id,
+                    "priority": priority,
+                    "metric": metric,
+                    "result": result,
+                    "reason_code": reason_code,
+                    "measured_value": None
+                    if measured_value is None
+                    else thaw_json(freeze_json(measured_value)),
+                    "limit_value": None
+                    if limit_value is None
+                    else thaw_json(freeze_json(limit_value)),
+                    "exception_applied": exception_applied,
+                },
+            )
         instance = object.__new__(cls)
         for name, value in {
             "evaluation_index": evaluation_index,
@@ -408,6 +432,14 @@ class RuleTiming:
             raise RiskContractError("QQ-RISK-4008", "RISK_INPUT_INVALID", "invalid timing rule id")
         if not isinstance(latency_us, int) or latency_us < 0:
             raise RiskContractError("QQ-RISK-4008", "RISK_INPUT_INVALID", "invalid rule latency")
+        _validate_output_schema(
+            "timing",
+            {
+                "evaluation_index": evaluation_index,
+                "rule_id": rule_id,
+                "latency_us": latency_us,
+            },
+        )
         instance = object.__new__(cls)
         object.__setattr__(instance, "evaluation_index", evaluation_index)
         object.__setattr__(instance, "rule_id", rule_id)
@@ -601,6 +633,7 @@ class RiskDecisionV1:
             "snapshot_states": states,
             "rule_results": [item.to_primitive() for item in rule_results],
         }
+        _validate_output_schema("decision", primitive)
         if semantic_decision_hash != _compute_semantic_decision_hash(primitive):
             raise RiskContractError("QQ-RISK-4008", "RISK_INPUT_INVALID", "semantic hash mismatch")
         instance = object.__new__(cls)
@@ -687,6 +720,18 @@ class RiskAuditOutputV1:
             or not all(isinstance(item, RuleTiming) for item in rule_timings)
         ):
             raise RiskContractError("QQ-RISK-4008", "RISK_INPUT_INVALID", "invalid rule timings")
+        _validate_output_schema(
+            "audit",
+            {
+                "schema_version": 1,
+                "decision": decision.to_primitive(),
+                "evaluated_at": evaluated_at,
+                "total_latency_us": total_latency_us,
+                "evaluation_timeout_us": evaluation_timeout_us,
+                "completed_rule_count": completed_rule_count,
+                "rule_timings": [timing.to_primitive() for timing in rule_timings],
+            },
+        )
         instance = object.__new__(cls)
         for name, value in {
             "decision": decision,
@@ -697,9 +742,9 @@ class RiskAuditOutputV1:
             "rule_timings": tuple(rule_timings),
         }.items():
             object.__setattr__(instance, name, value)
-        from quantiqmt.risk.audit import RiskAuditSemanticValidator
+        from quantiqmt.risk.audit import validate_risk_audit_output
 
-        RiskAuditSemanticValidator().validate(instance)
+        validate_risk_audit_output(instance)
         return instance
 
     def __post_init__(self) -> None:
@@ -765,14 +810,37 @@ def _validate_schema(
     schema_file: str, payload: Mapping[str, object], code: str, reason_code: str
 ) -> None:
     try:
-        if schema_file == "risk-input.v1.schema.json":
-            _validate_risk_input_schema(payload)
-        elif schema_file == "rule-set.v1.schema.json":
-            _validate_rule_set_schema(payload)
-        else:  # pragma: no cover - fixed internal call sites
+        registry = SchemaRegistry.runtime_default()
+        relative = {
+            "risk-input.v1.schema.json": "risk/risk-input.v1.schema.json",
+            "rule-set.v1.schema.json": "risk/rule-set.v1.schema.json",
+        }.get(schema_file)
+        if relative is None:  # pragma: no cover - fixed internal call sites
             raise ValueError(f"unknown risk schema {schema_file}")
-    except _SchemaError as exc:
-        raise RiskContractError(code, reason_code, exc.detail) from exc
+        registry.validator().validate_schema(payload, registry.document(relative))
+    except Exception as exc:
+        raise RiskContractError(code, reason_code, str(exc)) from exc
+
+
+def _validate_output_schema(kind: str, payload: Mapping[str, object]) -> None:
+    """Validate output DTOs against the packaged authoritative v2 schema."""
+    try:
+        registry = SchemaRegistry.runtime_default()
+        schema = registry.payload("risk.order_evaluated.v2", 2)
+        decision_schema = schema["properties"]["decision"]
+        if kind == "decision":
+            target = decision_schema
+        elif kind == "rule_result":
+            target = decision_schema["properties"]["rule_results"]["items"]
+        elif kind == "timing":
+            target = schema["properties"]["rule_timings"]["items"]
+        elif kind == "audit":
+            target = schema
+        else:  # pragma: no cover - fixed internal call sites
+            raise ValueError(f"unknown output schema kind {kind}")
+        registry.validator().validate_schema(payload, target)
+    except Exception as exc:
+        raise RiskContractError("QQ-RISK-4008", "RISK_INPUT_INVALID", str(exc)) from exc
 
 
 def decision_id(input_version: str, content_hash: str) -> str:

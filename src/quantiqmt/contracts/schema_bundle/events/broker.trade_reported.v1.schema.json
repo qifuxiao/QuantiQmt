@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:quantiqmt:event:broker.trade_reported:v1",
+  "title": "BrokerTradeReportedPayloadV1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["broker", "account_id", "trading_day", "trade_id", "broker_order_id", "instrument_id", "side", "position_effect", "price", "quantity", "trade_time", "received_at"],
+  "properties": {
+    "broker": {"type": "string", "minLength": 1, "maxLength": 64},
+    "account_id": {"type": "string", "minLength": 1, "maxLength": 128},
+    "trading_day": {"type": "string", "format": "date"},
+    "trade_id": {"type": "string", "minLength": 1, "maxLength": 128},
+    "order_id": {"type": ["string", "null"]},
+    "client_order_id": {"type": ["string", "null"]},
+    "broker_order_id": {"type": "string", "minLength": 1, "maxLength": 128},
+    "instrument_id": {"type": "string", "minLength": 1, "maxLength": 64},
+    "side": {"enum": ["BUY", "SELL"]},
+    "position_effect": {"enum": ["OPEN", "CLOSE", "AUTO"]},
+    "price": {"type": "string", "pattern": "^[0-9]+(\\.[0-9]+)?$"},
+    "quantity": {"type": "integer", "minimum": 1},
+    "commission": {"type": ["string", "null"], "pattern": "^[0-9]+(\\.[0-9]+)?$"},
+    "tax": {"type": ["string", "null"], "pattern": "^[0-9]+(\\.[0-9]+)?$"},
+    "trade_time": {"type": "string", "format": "date-time"},
+    "broker_sequence": {"type": ["integer", "null"], "minimum": 0},
+    "received_at": {"type": "string", "format": "date-time"}
+  }
+}

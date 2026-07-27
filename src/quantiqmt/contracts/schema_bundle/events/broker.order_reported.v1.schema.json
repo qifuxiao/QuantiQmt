@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:quantiqmt:event:broker.order_reported:v1",
+  "title": "BrokerOrderReportedPayloadV1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["report_id", "broker", "account_id", "trading_day", "client_order_id", "broker_status", "cum_quantity", "leaves_quantity", "report_time", "received_at"],
+  "properties": {
+    "report_id": {"type": "string", "minLength": 1, "maxLength": 128},
+    "broker": {"type": "string", "minLength": 1, "maxLength": 64},
+    "account_id": {"type": "string", "minLength": 1, "maxLength": 128},
+    "trading_day": {"type": "string", "format": "date"},
+    "order_id": {"type": ["string", "null"], "format": "uuid", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"},
+    "client_order_id": {"type": "string", "minLength": 1, "maxLength": 128},
+    "broker_order_id": {"type": ["string", "null"], "minLength": 1, "maxLength": 128},
+    "broker_status": {"enum": ["ACCEPTED", "REJECTED", "PARTIALLY_FILLED", "FILLED", "CANCELED", "EXPIRED"]},
+    "cum_quantity": {"type": "integer", "minimum": 0},
+    "leaves_quantity": {"type": "integer", "minimum": 0},
+    "average_price": {"type": ["string", "null"], "pattern": "^(?=.*[1-9])(0|[1-9][0-9]{0,17})(\\.[0-9]{1,8})?$"},
+    "broker_sequence": {"type": ["integer", "null"], "minimum": 0},
+    "raw_error_code": {"type": ["string", "null"], "maxLength": 128},
+    "report_time": {"type": "string", "format": "date-time", "pattern": "Z$"},
+    "received_at": {"type": "string", "format": "date-time", "pattern": "Z$"}
+  }
+}

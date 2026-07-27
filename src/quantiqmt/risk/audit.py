@@ -105,8 +105,19 @@ class RiskAuditSemanticValidator:
             )
 
 
+def validate_risk_audit_output(audit: RiskAuditOutputV1) -> None:
+    """Run the shared formal-schema then semantic validation boundary."""
+    registry = SchemaRegistry.runtime_default()
+    registry.validator().validate_with_semantics(
+        "risk.order_evaluated.v2",
+        2,
+        audit.to_primitive(),
+        lambda _payload: RiskAuditSemanticValidator().validate(audit),
+    )
+
+
 def build_risk_v1_payload(audit: RiskAuditOutputV1) -> dict[str, MutableJsonValue]:
-    RiskAuditSemanticValidator().validate(audit)
+    validate_risk_audit_output(audit)
     payload = audit.to_primitive()
     decision = _mapping(payload["decision"], "decision")
     states = _mapping(decision["snapshot_states"], "snapshot_states")
@@ -148,7 +159,7 @@ def build_risk_v2_envelope(
     registry: SchemaRegistry,
     causation_id: str | None,
 ) -> MessageEnvelope:
-    RiskAuditSemanticValidator().validate(audit)
+    validate_risk_audit_output(audit)
     payload = audit.to_primitive()
     decision = _mapping(payload["decision"], "decision")
     input_payload = risk_input.to_primitive()

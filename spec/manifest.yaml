@@ -144,8 +144,8 @@ change:
   affected_tasks: [TASK-005, TASK-006, TASK-015, TASK-022, TASK-025]
   deployment_order:
     - merge_and_independently_review_task_015_specs
-    - implement_and_activate_task_005_against_spec_0_6
-    - enable_spec_0_6_risk_evaluator_and_atomic_v2_authoritative_plus_v1_compatibility_audit_outbox
+    - implement_and_activate_task_005_against_spec_0.6.1
+    - enable_spec_0.6.1_risk_evaluator_and_atomic_v2_authoritative_plus_v1_compatibility_audit_outbox
   migration:
     runtime_data: not_applicable
     public_events: "no backfill; new decisions atomically persist authoritative risk.order_evaluated.v2 plus unchanged lossy risk.order_evaluated.v1 compatibility projection until all v1 consumers migrate"

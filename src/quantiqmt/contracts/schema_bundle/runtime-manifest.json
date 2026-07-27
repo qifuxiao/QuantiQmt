@@ -1,0 +1,10 @@
+{
+  "bundle_id": "quantiqmt-contracts-runtime",
+  "bundle_version": 1,
+  "catalog_id": "CONTRACT-CATALOG",
+  "catalog_version": 3,
+  "required_routes": [
+    "risk.order_evaluated.v1",
+    "risk.order_evaluated.v2"
+  ]
+}

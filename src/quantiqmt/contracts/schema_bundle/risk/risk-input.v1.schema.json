@@ -1,0 +1,177 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:quantiqmt:contract:risk-input:v1",
+  "title": "RiskInputV1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "input_version", "evaluation_time", "valuation_currency", "rule_set_version", "rule_set_hash", "order", "account", "portfolio", "market"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "input_version": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "evaluation_time": {"type": "string", "format": "date-time", "pattern": "Z$"},
+    "valuation_currency": {"$ref": "#/$defs/currency"},
+    "rule_set_version": {"type": "string", "minLength": 1, "maxLength": 64},
+    "rule_set_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "order": {"$ref": "#/$defs/orderSnapshot"},
+    "account": {"$ref": "#/$defs/accountSnapshot"},
+    "portfolio": {"$ref": "#/$defs/portfolioSnapshot"},
+    "market": {"$ref": "#/$defs/marketSnapshot"}
+  },
+  "$defs": {
+    "uuid": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+    },
+    "currency": {
+      "type": "string",
+      "pattern": "^[A-Z]{3}$"
+    },
+    "decimal": {
+      "type": "string",
+      "pattern": "^-?(0|[1-9][0-9]{0,17})(\\.[0-9]{1,8})?$"
+    },
+    "nonNegativeDecimal": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]{0,17})(\\.[0-9]{1,8})?$"
+    },
+    "nullableDecimal": {
+      "type": ["string", "null"],
+      "pattern": "^-?(0|[1-9][0-9]{0,17})(\\.[0-9]{1,8})?$"
+    },
+    "snapshotMetadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source", "snapshot_version", "schema_version", "aggregate_version", "as_of", "trading_day", "quality", "missing_fields", "checksum"],
+      "properties": {
+        "source": {"type": "string", "minLength": 1, "maxLength": 128},
+        "snapshot_version": {"type": "string", "minLength": 1, "maxLength": 128},
+        "schema_version": {"const": 1},
+        "aggregate_version": {"type": ["integer", "null"], "minimum": 1},
+        "as_of": {"type": "string", "format": "date-time", "pattern": "Z$"},
+        "trading_day": {"type": "string", "format": "date"},
+        "quality": {"enum": ["FRESH", "STALE", "PARTIAL", "TIMEOUT", "UNAVAILABLE"]},
+        "missing_fields": {
+          "type": "array",
+          "items": {"type": "string", "minLength": 1, "maxLength": 128},
+          "uniqueItems": true,
+          "maxItems": 64
+        },
+        "checksum": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      },
+      "allOf": [
+        {"if": {"properties": {"quality": {"enum": ["FRESH", "STALE"]}}}, "then": {"properties": {"missing_fields": {"maxItems": 0}}}},
+        {"if": {"properties": {"quality": {"const": "PARTIAL"}}}, "then": {"properties": {"missing_fields": {"minItems": 1}}}}
+      ]
+    },
+    "reductionEvidence": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["classification", "position_snapshot_version", "position_quantity_before", "reserved_reduce_quantity", "max_reducible_quantity", "projected_position_quantity", "would_flip_position"],
+      "properties": {
+        "classification": {"const": "VERIFIED_REDUCE_ONLY"},
+        "position_snapshot_version": {"type": "string", "minLength": 1, "maxLength": 128},
+        "position_quantity_before": {"type": "integer"},
+        "reserved_reduce_quantity": {"type": "integer", "minimum": 0},
+        "max_reducible_quantity": {"type": "integer", "minimum": 0},
+        "projected_position_quantity": {"type": "integer"},
+        "would_flip_position": {"const": false}
+      }
+    },
+    "orderSnapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "checksum", "order_id", "aggregate_version", "intent_id", "account_id", "portfolio_id", "strategy_id", "strategy_version", "instrument_id", "side", "position_effect", "order_type", "quantity", "limit_price", "time_in_force", "registered_at", "market_data_version", "risk_effect", "reduction_evidence"],
+      "properties": {
+        "schema_version": {"const": 1},
+        "checksum": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "order_id": {"$ref": "#/$defs/uuid"},
+        "aggregate_version": {"type": "integer", "minimum": 1},
+        "intent_id": {"$ref": "#/$defs/uuid"},
+        "account_id": {"type": "string", "minLength": 1, "maxLength": 128},
+        "portfolio_id": {"type": "string", "minLength": 1, "maxLength": 128},
+        "strategy_id": {"type": "string", "minLength": 1, "maxLength": 128},
+        "strategy_version": {"type": "string", "minLength": 1, "maxLength": 64},
+        "instrument_id": {"type": "string", "minLength": 1, "maxLength": 64},
+        "side": {"enum": ["BUY", "SELL"]},
+        "position_effect": {"enum": ["OPEN", "CLOSE", "AUTO"]},
+        "order_type": {"enum": ["LIMIT", "MARKET", "BEST"]},
+        "quantity": {"type": "integer", "minimum": 1},
+        "limit_price": {"type": ["string", "null"], "pattern": "^(?=.*[1-9])(0|[1-9][0-9]{0,17})(\\.[0-9]{1,8})?$"},
+        "time_in_force": {"enum": ["DAY", "IOC", "FOK"]},
+        "registered_at": {"type": "string", "format": "date-time", "pattern": "Z$"},
+        "market_data_version": {"type": "string", "minLength": 1, "maxLength": 128},
+        "risk_effect": {"enum": ["INCREASE", "REDUCE", "UNKNOWN"]},
+        "reduction_evidence": {"$ref": "#/$defs/reductionEvidence"}
+      },
+      "allOf": [
+        {"if": {"properties": {"order_type": {"const": "LIMIT"}}}, "then": {"properties": {"limit_price": {"type": "string", "pattern": "^(?=.*[1-9])(0|[1-9][0-9]{0,17})(\\.[0-9]{1,8})?$"}}}},
+        {"if": {"properties": {"risk_effect": {"const": "REDUCE"}}}, "then": {"properties": {"reduction_evidence": {"type": "object"}}}},
+        {"if": {"properties": {"risk_effect": {"enum": ["INCREASE", "UNKNOWN"]}}}, "then": {"properties": {"reduction_evidence": {"type": "null"}}}}
+      ]
+    },
+    "accountSnapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["metadata", "account_id", "currency", "equity", "available_cash", "projected_available_cash", "margin_used", "daily_loss", "open_order_notional"],
+      "properties": {
+        "metadata": {"$ref": "#/$defs/snapshotMetadata"},
+        "account_id": {"type": "string", "minLength": 1, "maxLength": 128},
+        "currency": {"$ref": "#/$defs/currency"},
+        "equity": {"$ref": "#/$defs/nullableDecimal"},
+        "available_cash": {"$ref": "#/$defs/nullableDecimal"},
+        "projected_available_cash": {"$ref": "#/$defs/nullableDecimal"},
+        "margin_used": {"$ref": "#/$defs/nullableDecimal"},
+        "daily_loss": {"$ref": "#/$defs/nullableDecimal"},
+        "open_order_notional": {"$ref": "#/$defs/nullableDecimal"}
+      }
+    },
+    "scopeMetrics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["scope", "scope_id", "enabled", "position_quantity", "projected_position_quantity", "projected_gross_exposure", "projected_net_exposure", "projected_leverage", "activity_window_ms", "order_count_window", "cancel_ratio_bps"],
+      "properties": {
+        "scope": {"enum": ["ACCOUNT", "PORTFOLIO", "STRATEGY", "INSTRUMENT"]},
+        "scope_id": {"type": "string", "minLength": 1, "maxLength": 128},
+        "enabled": {"type": ["boolean", "null"]},
+        "position_quantity": {"type": ["integer", "null"]},
+        "projected_position_quantity": {"type": ["integer", "null"]},
+        "projected_gross_exposure": {"$ref": "#/$defs/nullableDecimal"},
+        "projected_net_exposure": {"$ref": "#/$defs/nullableDecimal"},
+        "projected_leverage": {"$ref": "#/$defs/nullableDecimal"},
+        "activity_window_ms": {"type": "integer", "minimum": 1, "maximum": 86400000},
+        "order_count_window": {"type": ["integer", "null"], "minimum": 0},
+        "cancel_ratio_bps": {"type": ["integer", "null"], "minimum": 0, "maximum": 10000}
+      }
+    },
+    "portfolioSnapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["metadata", "portfolio_id", "account_id", "base_currency", "scope_metrics"],
+      "properties": {
+        "metadata": {"$ref": "#/$defs/snapshotMetadata"},
+        "portfolio_id": {"type": "string", "minLength": 1, "maxLength": 128},
+        "account_id": {"type": "string", "minLength": 1, "maxLength": 128},
+        "base_currency": {"$ref": "#/$defs/currency"},
+        "scope_metrics": {"type": "array", "items": {"$ref": "#/$defs/scopeMetrics"}, "minItems": 4, "maxItems": 4}
+      }
+    },
+    "marketSnapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["metadata", "instrument_id", "trading_status", "currency", "risk_price", "risk_price_source", "reference_price", "price_deviation_bps", "upper_price_limit", "lower_price_limit"],
+      "properties": {
+        "metadata": {"$ref": "#/$defs/snapshotMetadata"},
+        "instrument_id": {"type": "string", "minLength": 1, "maxLength": 64},
+        "trading_status": {"enum": ["TRADING", "HALTED", "SUSPENDED", "CLOSED", "UNKNOWN"]},
+        "currency": {"$ref": "#/$defs/currency"},
+        "risk_price": {"type": ["string", "null"], "pattern": "^(?=.*[1-9])(0|[1-9][0-9]{0,17})(\\.[0-9]{1,8})?$"},
+        "risk_price_source": {"enum": ["LIMIT_PRICE", "MARKET_WORST_CASE", "UNAVAILABLE"]},
+        "reference_price": {"type": ["string", "null"], "pattern": "^(?=.*[1-9])(0|[1-9][0-9]{0,17})(\\.[0-9]{1,8})?$"},
+        "price_deviation_bps": {"type": ["integer", "null"], "minimum": 0},
+        "upper_price_limit": {"type": ["string", "null"], "pattern": "^(?=.*[1-9])(0|[1-9][0-9]{0,17})(\\.[0-9]{1,8})?$"},
+        "lower_price_limit": {"type": ["string", "null"], "pattern": "^(?=.*[1-9])(0|[1-9][0-9]{0,17})(\\.[0-9]{1,8})?$"}
+      }
+    }
+  }
+}

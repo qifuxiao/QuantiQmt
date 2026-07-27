@@ -10,7 +10,7 @@ from typing import Any
 
 from quantiqmt.contracts.errors import ContractValidationError
 from quantiqmt.contracts.registry import SchemaRegistry
-from quantiqmt.contracts.validation import JsonValue, validate
+from quantiqmt.contracts.validation import JsonValue
 
 
 @dataclass(frozen=True, slots=True, init=False)
@@ -32,8 +32,7 @@ class ImmutablePayload(Mapping[str, object]):
         values: Mapping[str, object],
         registry: SchemaRegistry,
     ) -> ImmutablePayload:
-        schema = registry.payload(message_type, schema_version)
-        validate(values, schema, path="$.payload")
+        registry.validator().validate_payload(message_type, schema_version, values)
         instance = object.__new__(cls)
         object.__setattr__(instance, "message_type", message_type)
         object.__setattr__(instance, "schema_version", schema_version)
@@ -65,7 +64,7 @@ class MessageEnvelope:
 
     @classmethod
     def create(cls, values: Mapping[str, object], registry: SchemaRegistry) -> MessageEnvelope:
-        validate(values, registry.envelope)
+        registry.validator().validate_envelope(values)
         message_type = values.get("message_type")
         schema_version = values.get("schema_version")
         payload_value = values.get("payload")
