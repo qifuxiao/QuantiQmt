@@ -1,7 +1,7 @@
 # Active Tasks
 
-当前 active task：无。
+当前 active task：TASK-029
 
-TASK-005 当前为 blocked。TASK-029 因 Risk 生产路径集成授权缺失而暂时 blocked；须先完成 TASK-030 并独立 Review APPROVE。
-
-TASK-029 和 TASK-030 完成前，不得恢复 TASK-005 或继续其 Risk 业务实现。
+- TASK-029 当前 active，仅处理 SchemaValidator 与 Risk 生产路径统一接入。
+- TASK-005 仍为 blocked，未激活；不得开始 TASK-005 业务开发。
+- TASK-029 依赖 TASK-030，必须在其完成并独立 Review APPROVE 后继续推进。
