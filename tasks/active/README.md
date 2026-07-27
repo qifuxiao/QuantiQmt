@@ -1,9 +1,7 @@
 # Active Tasks
 
-当前 active task：`TASK-029`。
+当前 active task：无。
 
-TASK-005 当前为 blocked，文件位于 `tasks/backlog/TASK-005-risk-engine.md`。在 TASK-029 完成独立 Review 并 APPROVE 前，不得恢复 TASK-005 或继续其实现。
+TASK-005 当前为 blocked。TASK-029 因 Risk 生产路径集成授权缺失而暂时 blocked；须先完成 TASK-030 并独立 Review APPROVE。
 
-TASK-029 仅允许修改任务中列出的规范、运行时 Schema Registry、打包配置和契约测试路径；不得开始 TASK-005 Risk 业务实现。
-
-TASK-028 已完成并记录在 `tasks/completed/`。
+TASK-029 和 TASK-030 完成前，不得恢复 TASK-005 或继续其 Risk 业务实现。
