@@ -1,7 +1,7 @@
 ---
 id: TASK-030
 title: Authorize unified Risk SchemaValidator integration scope
-status: ready
+status: completed
 depends_on: [TASK-015]
 spec_refs: [CONTRACT-RISK-DECISION-V1, CONTRACT-RISK-AUDIT-OUTPUT-V1, CONTRACT-RISK-ORDER-EVALUATED-V2, PORTS-RISK, CONTRACT-CATALOG]
 allowed_paths:
