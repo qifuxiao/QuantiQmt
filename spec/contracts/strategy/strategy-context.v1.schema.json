@@ -22,5 +22,9 @@
     "permission_scope": {"type": "array", "items": {"enum": ["READ_MARKET", "READ_ACCOUNT", "READ_PORTFOLIO", "EMIT_TARGET", "EMIT_ORDER_INTENT"]}, "uniqueItems": true},
     "as_of": {"type": "string", "format": "date-time"},
     "backtest_end": {"type": ["string", "null"], "format": "date-time"}
-  }
+  },
+  "allOf": [
+    {"if": {"properties": {"mode": {"const": "BACKTEST"}}}, "then": {"required": ["backtest_end"], "properties": {"backtest_end": {"type": "string", "format": "date-time"}}}},
+    {"if": {"properties": {"mode": {"const": "LIVE"}}}, "then": {"properties": {"backtest_end": {"type": "null"}}}}
+  ]
 }

@@ -15,7 +15,7 @@ messages:
   - {name: strategy.signal_generated.v1, kind: event, publisher: StrategyRuntime, consumers: [Audit, Analytics], status: planned}
   - {name: strategy.target_generated.v1, kind: event, publisher: StrategyRuntime, consumers: [TargetResolver, Audit], status: planned}
   - {name: strategy.target_resolved.v1, kind: event, publisher: TargetResolver, consumers: [OrderApplication, Audit], status: planned}
-  - {name: strategy.state_changed.v1, kind: event, publisher: StrategyRuntime, consumers: [ControlPlane, Alert], status: planned}
+  - {name: strategy.state_changed.v1, kind: event, publisher: StrategyRuntime, consumers: [ControlPlane, Alert], schema: events/strategy.state_changed.v1.schema.json, status: planned}
   - {name: strategy.intent_rejected.v1, kind: event, publisher: OrderApplication, consumers: [StrategyRuntime, Audit], status: planned}
   - {name: risk.order_evaluated.v1, kind: event, publisher: RiskEngine, consumers: [OrderApplication, Audit, Metrics], schema: events/risk.order_evaluated.v1.schema.json, status: active}
   - {name: risk.order_evaluated.v2, kind: event, publisher: RiskEngine, consumers: [OrderApplication, Audit, Metrics], schema: events/risk.order_evaluated.v2.schema.json, status: active}

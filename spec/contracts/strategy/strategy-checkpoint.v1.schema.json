@@ -13,6 +13,9 @@
     "schema_version": {"const": "1.0"},
     "captured_at": {"type": "string", "format": "date-time"},
     "payload": {"type": "object"},
-    "payload_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+    "payload_sha256": {
+      "type": "string", "pattern": "^[0-9a-f]{64}$",
+      "description": "SHA-256 hex digest of the UTF-8 bytes of the payload serialized with RFC 8785 JSON Canonicalization Scheme (JCS): lexicographically sorted object keys, no insignificant whitespace, UTF-8 without BOM, Unicode emitted as scalar values, and RFC 8785 number serialization. Hash input is exactly the payload value, excluding the envelope and payload_sha256 itself."
+    }
   }
 }

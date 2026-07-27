@@ -9,8 +9,8 @@
     "output_id": {"type": "string", "minLength": 16, "maxLength": 64},
     "generation": {"type": "integer", "minimum": 1},
     "output_type": {"enum": ["TARGET", "ORDER_INTENT", "NO_ACTION"]},
-    "target": {"$ref": "strategy.submit_target.v1.schema.json"},
-    "order_intent": {"type": "object"},
+    "target": {"$ref": "urn:quantiqmt:command:strategy.submit_target:v1"},
+    "order_intent": {"$ref": "urn:quantiqmt:command:strategy.submit_order_intent:v1"},
     "emitted_at": {"type": "string", "format": "date-time"},
     "reason_code": {"type": ["string", "null"], "maxLength": 128}
   },

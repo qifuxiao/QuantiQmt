@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:quantiqmt:event:strategy.state_changed:v1",
+  "title": "StrategyStateChangedPayloadV1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["strategy_id", "strategy_version", "generation", "from_state", "to_state", "reason_code", "correlation_id", "occurred_at"],
+  "properties": {
+    "strategy_id": {"type": "string", "minLength": 1, "maxLength": 128},
+    "strategy_version": {"type": "string", "minLength": 1, "maxLength": 64},
+    "generation": {"type": "integer", "minimum": 1},
+    "from_state": {"enum": ["CREATED", "INITIALIZING", "READY", "RUNNING", "PAUSED", "ERROR", "STOPPING"]},
+    "to_state": {"enum": ["CREATED", "INITIALIZING", "READY", "RUNNING", "PAUSED", "ERROR", "STOPPING", "STOPPED"]},
+    "reason_code": {"enum": ["LOADED", "INITIALIZED", "ENABLED", "PAUSED", "RESUMED", "STOP_REQUESTED", "STOPPED", "CALLBACK_TIMEOUT", "CALLBACK_EXCEPTION", "OUTPUT_REJECTED", "STALE_GENERATION", "CHECKPOINT_INVALID", "RESOURCE_LIMIT", "DEPENDENCY_STALE", "SECURITY_FAILURE"]},
+    "correlation_id": {"type": "string", "minLength": 1, "maxLength": 128},
+    "occurred_at": {"type": "string", "format": "date-time"}
+  }
+}

@@ -10,7 +10,7 @@ MUST 提供 load/start/pause/stop/checkpoint。只有 RUNNING generation 能输�
 
 ### Callback 与 deadline (CONTRACT-STRATEGY-CALLBACK-V1)
 
-`initialize`、`on_market`、`on_timer`、`on_order`、`on_trade` 接收带 callback id、generation、context snapshot 和绝对 deadline 的 envelope。Runtime 按策略串行派发，拒绝过期或重复 callback；超时转为有界 Runtime failure。输入不可变，callback 不得修改 OMS 或外部状态。
+`initialize`、`on_market`、`on_timer`、`on_order`、`on_trade` 均使用 CONTRACT-STRATEGY-CALLBACK-V1 envelope，带 callback id、generation、context snapshot 和绝对 deadline。Runtime 按策略串行派发，拒绝过期或重复 callback；超时转为有界 Runtime failure。输入不可变，callback 不得修改 OMS 或外部状态。
 
 ### Output 与 generation fencing (CONTRACT-STRATEGY-OUTPUT-V1)
 
@@ -18,7 +18,7 @@ MUST 提供 load/start/pause/stop/checkpoint。只有 RUNNING generation 能输�
 
 ### Checkpoint (CONTRACT-STRATEGY-CHECKPOINT-V1)
 
-Checkpoint envelope 包含 strategy/version/generation、schema version、captured timestamp、opaque payload 和 canonical payload bytes 的 SHA-256。Restore 对缺失、不支持、格式错误、checksum/version 不匹配或过期 generation 必须 fail-closed；恢复原子失败时保持 PAUSED 或 ERROR，不能恢复输出。重复 checkpoint 与 callback id 必须幂等忽略。
+Checkpoint envelope 包含 strategy/version/generation、schema version、captured timestamp、opaque payload 和 canonical payload bytes 的 SHA-256。Canonicalization 固定采用 RFC 8785 JCS：对象键按 Unicode code point 排序、无空白、UTF-8 无 BOM、Unicode scalar 与 RFC 8785 number serialization；hash 输入只包含 payload 值，不包含 envelope 或 payload_sha256。Restore 对缺失、不支持、格式错误、checksum/version 不匹配或过期 generation 必须 fail-closed；恢复原子失败时保持 PAUSED 或 ERROR，不能恢复输出。重复 checkpoint 与 callback id 必须幂等忽略。
 
 ### Runtime 限制、失败与审计
 

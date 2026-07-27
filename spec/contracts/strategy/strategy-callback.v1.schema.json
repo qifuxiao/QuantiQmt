@@ -7,7 +7,7 @@
   "required": ["callback_id", "callback_type", "generation", "context_snapshot", "deadline_at", "payload"],
   "properties": {
     "callback_id": {"type": "string", "minLength": 16, "maxLength": 64},
-    "callback_type": {"enum": ["on_market", "on_timer", "on_order", "on_trade"]},
+    "callback_type": {"enum": ["initialize", "on_market", "on_timer", "on_order", "on_trade"]},
     "generation": {"type": "integer", "minimum": 1},
     "context_snapshot": {"type": "string", "minLength": 1, "maxLength": 128},
     "deadline_at": {"type": "string", "format": "date-time"},

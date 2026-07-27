@@ -41,6 +41,8 @@ catalogs:
       path: contracts/strategy/strategy-output.v1.schema.json
     - id: CONTRACT-STRATEGY-CHECKPOINT-V1
       path: contracts/strategy/strategy-checkpoint.v1.schema.json
+    - id: CONTRACT-STRATEGY-STATE-CHANGED-V1
+      path: contracts/events/strategy.state_changed.v1.schema.json
     - id: CONTRACT-BROKER-TRADE-V1
       path: contracts/events/broker.trade_reported.v1.schema.json
     - id: CONTRACT-ORDER-STATUS-V1
@@ -143,25 +145,27 @@ change:
   id: SPEC-0.7-STRATEGY-L4-CONTRACTS
   compatibility: backward_compatible_additive_contracts_events_and_errors
   previous_version: 0.6.0
-  public_message_schema_changes: "additive risk.order_evaluated.v2; its standard schema plus mandatory PORTS-RISK semantic validator define audit validity; published risk.order_evaluated.v1 schema and identity remain unchanged as a lossy compatibility projection"
+  public_message_schema_changes: "additive risk.order_evaluated.v2 and strategy.state_changed.v1; existing published identities remain wire-compatible; new strategy contracts are additive and require registry activation before publication"
   storage_schema_changes: none
   error_catalog_change: "catalog v3 adds QQ-RISK-4003 through QQ-RISK-4011; existing meanings unchanged"
   runtime_code_change: none
   strategy_contract_change: "adds versioned read-only StrategyContext, callback/output/checkpoint envelopes, runtime workflow and fail-closed fencing/resource semantics"
   semantic_validation_change: "RiskAuditOutput requires fail-closed cross-field semantic validation before v1 projection, v1/v2 Outbox persistence, or Execution; timeout guard is last and timed but excluded from completed_rule_count"
-  internal_contracts_added: [CONTRACT-RISK-INPUT-V1, CONTRACT-RISK-RULE-SET-V1, CONTRACT-RISK-DECISION-V1, CONTRACT-RISK-AUDIT-OUTPUT-V1, PORTS-RISK]
-  public_contracts_added: [CONTRACT-RISK-ORDER-EVALUATED-V2]
-  task_queue_change: "TASK-016 activated; TASK-008 remains blocked until TASK-016 is independently reviewed and marked completed, after which its frozen strategy contracts are implementation-ready"
-  affected_tasks: [TASK-008, TASK-016, TASK-019, TASK-021]
+  internal_contracts_added: [CONTRACT-RISK-INPUT-V1, CONTRACT-RISK-RULE-SET-V1, CONTRACT-RISK-DECISION-V1, CONTRACT-RISK-AUDIT-OUTPUT-V1, PORTS-RISK, CONTRACT-STRATEGY-CONTEXT-V1, CONTRACT-STRATEGY-CALLBACK-V1, CONTRACT-STRATEGY-OUTPUT-V1, CONTRACT-STRATEGY-CHECKPOINT-V1]
+  public_contracts_added: [CONTRACT-RISK-ORDER-EVALUATED-V2, CONTRACT-STRATEGY-STATE-CHANGED-V1]
+  task_queue_change: "TASK-016 activated; TASK-008 remains blocked until TASK-016 is independently reviewed and marked completed; TASK-005 remains blocked until TASK-029 is independently reviewed and completed"
+  affected_tasks: [TASK-005, TASK-008, TASK-016, TASK-019, TASK-021, TASK-029, TASK-030]
   deployment_order:
     - merge_and_independently_review_task_015_specs
     - independently_review_and_merge_task_016_strategy_contracts
+    - complete_task_030_risk_validator_scope
+    - implement_and_independently_review_task_029_risk_runtime_schema_contract
     - implement_and_activate_task_008_against_spec_0_7
   migration:
     runtime_data: not_applicable
     public_events: "no backfill; new decisions atomically persist authoritative risk.order_evaluated.v2 plus unchanged lossy risk.order_evaluated.v1 compatibility projection until all v1 consumers migrate"
     rule_sets: "validate candidate RuleSet against CONTRACT-RISK-RULE-SET-V1 and content_hash before activation; no legacy implicit rule configuration may be auto-converted"
-    task_queue: "TASK-005 may be activated only after independent Review moves TASK-015 to completed"
+    task_queue: "TASK-005 may be activated only after independent Review moves TASK-029 to completed; TASK-008 may be activated only after independent Review moves TASK-016 to completed"
     destructive_backfill: forbidden
   rollback:
     runtime_data: not_applicable

@@ -4,7 +4,7 @@ workflow:
   steps:
     - {id: verify_artifact, owner: StrategyRuntime, failure: transition_error}
     - {id: load_checkpoint, owner: StrategyRuntime, failure: transition_paused}
-    - {id: initialize_isolated_worker, owner: StrategyRuntime, failure: transition_error}
+    - {id: dispatch_initialize_callback, owner: StrategyRuntime, callback_type: initialize, guard: deadline_and_generation_valid, failure: transition_error}
     - {id: dispatch_serial_callback, owner: StrategyRuntime, guard: deadline_and_generation_valid, failure: transition_paused}
     - {id: validate_output, owner: StrategyRuntime, guard: output_schema_scope_frequency_and_generation_valid, failure: reject_output_and_audit}
     - {id: publish_target_or_intent, owner: StrategyRuntime, guard: running_generation, destination: TargetResolver_or_OMS}
