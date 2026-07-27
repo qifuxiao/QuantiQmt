@@ -32,6 +32,7 @@ verification:
 ## Acceptance criteria
 
 - [ ] TASK-029 allowed_paths 包含 Risk DTO/Audit/Runner/Evaluator 及对应 unit/property tests；
+- [ ] TASK-029 的 forbidden_paths 不再与上述 Risk 路径冲突；
 - [ ] TASK-029 明确 Schema → semantic → freeze 的统一生产调用路径；
 - [ ] 不扩大到其他任务；
 - [ ] 任务依赖无循环，TASK-005 仍为 blocked；

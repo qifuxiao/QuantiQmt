@@ -10,10 +10,16 @@ allowed_paths:
   - spec/contracts/events/risk.order_evaluated.v2.schema.json
   - spec/interfaces/risk-ports.md
   - src/quantiqmt/contracts/**
+  - src/quantiqmt/risk/model.py
+  - src/quantiqmt/risk/audit.py
+  - src/quantiqmt/risk/runner.py
+  - src/quantiqmt/risk/evaluator.py
   - pyproject.toml
   - tests/spec/**
   - tests/contract/messages/**
   - tests/unit/contracts/**
+  - tests/unit/risk/**
+  - tests/property/risk/**
   - tasks/backlog/TASK-005-risk-engine.md
   - tasks/backlog/TASK-029-risk-runtime-schema-contract.md
   - tasks/active/TASK-029-risk-runtime-schema-contract.md
@@ -24,7 +30,6 @@ forbidden_paths:
   - migrations/**
   - src/quantiqmt/order/**
   - src/quantiqmt/broker/**
-  - src/quantiqmt/risk/**
 verification:
   commands:
     - poetry run python scripts/validate_specs.py
