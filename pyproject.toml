@@ -48,6 +48,7 @@ ruff = ">=0.8,<1"
 pyyaml = ">=6,<7"
 types-pyyaml = ">=6,<7"
 pre-commit = ">=3.8,<5"
+types-jsonschema = ">=4.23,<5"
 
 [tool.pytest.ini_options]
 minversion = "8.0"
