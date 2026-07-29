@@ -1,7 +1,7 @@
 ---
 id: TASK-016
 title: Complete Strategy SDK and runtime L4 contracts
-status: active
+status: completed
 depends_on: [TASK-014]
 spec_refs: [INV-TRADING, PORTS-STRATEGY, SM-STRATEGY, CONTRACT-STRATEGY-TARGET-V1, NFR-RELIABILITY, NFR-OBSERVABILITY]
 allowed_paths: [spec/manifest.yaml, spec/contracts/**, spec/interfaces/**, spec/state-machines/**, spec/workflows/**, spec/nfr/**, tasks/backlog/TASK-008-strategy-sdk.md, tasks/backlog/TASK-016-strategy-runtime-contracts.md, tasks/index.yaml]
@@ -39,7 +39,15 @@ verification:
 - TASK-008 now references the frozen contracts and has a direct implementation boundary.
 - Review follow-up: output Target/OrderIntent refs use registered canonical command URNs and reject arbitrary/null typed payloads; `strategy.state_changed.v1` is schema-registered with constrained states/reasons; BACKTEST requires non-null `backtest_end`; `initialize` is a callback type; checkpoint hashing is fixed to RFC 8785 JCS UTF-8 payload-only SHA-256.
 - Latest main synchronization includes TASK-029/TASK-030 governance; manifest 0.7.0 compatibility, migration, affected tasks and deployment order now preserve their blocked/active boundaries.
-- TASK-016 remains `active`; completion still requires independent Review and human governance migration.
+- TASK-016 remained `active` until PR #41 received independent APPROVE and merged; this separate human-authorized governance PR records the completed state.
+
+### Governance completion evidence
+
+- PR #41 Head: `987a5b91d2284fb21017a16070b41a1bfd3cfc18`.
+- PR #41 merge commit / latest `origin/main`: `01d6cd12eb8a682780b58218a91d19adbc8f90fa`.
+- Independent APPROVE was published and bound to the PR #41 Head; CI completed 4/4 successfully.
+- Local gates passed: specification validation, 195 spec/contract tests, 72 risk tests, mypy, ruff, format check, diff check and schema probes.
+- This active-to-completed migration is explicitly authorized by human project members after PR #41 merge; no contract or business implementation is changed here.
 
 ## Review focus
 
