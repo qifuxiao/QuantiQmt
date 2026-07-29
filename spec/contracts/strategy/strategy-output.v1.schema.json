@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:quantiqmt:contract:strategy-output:v1",
+  "title": "StrategyOutputV1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["output_id", "generation", "output_type", "emitted_at"],
+  "properties": {
+    "output_id": {"type": "string", "minLength": 16, "maxLength": 64},
+    "generation": {"type": "integer", "minimum": 1},
+    "output_type": {"enum": ["TARGET", "ORDER_INTENT", "NO_ACTION"]},
+    "target": {"$ref": "urn:quantiqmt:command:strategy.submit_target:v1"},
+    "order_intent": {"$ref": "urn:quantiqmt:command:strategy.submit_order_intent:v1"},
+    "emitted_at": {"type": "string", "format": "date-time"},
+    "reason_code": {"type": ["string", "null"], "maxLength": 128}
+  },
+  "oneOf": [
+    {"properties": {"output_type": {"const": "TARGET"}}, "required": ["output_type", "target"], "not": {"required": ["order_intent"]}},
+    {"properties": {"output_type": {"const": "ORDER_INTENT"}}, "required": ["output_type", "order_intent"], "not": {"required": ["target"]}},
+    {"properties": {"output_type": {"const": "NO_ACTION"}}, "required": ["output_type"], "not": {"anyOf": [{"required": ["target"]}, {"required": ["order_intent"]}]}}
+  ]
+}

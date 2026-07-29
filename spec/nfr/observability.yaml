@@ -101,3 +101,8 @@ nfr:
     - "risk_decisions_total{decision,origin,error_code} counter"
     - "risk_fail_closed_total{reason} counter"
   risk_metric_forbidden_labels: [order_id, account_id, portfolio_id, strategy_id, instrument_id, correlation_id, decision_id, rule_id]
+  strategy_runtime_audit:
+    event: strategy.state_changed.v1
+    required_fields: [strategy_id, strategy_version, generation, from_state, to_state, reason_code, correlation_id, occurred_at]
+    required_reasons: [CALLBACK_TIMEOUT, CALLBACK_EXCEPTION, OUTPUT_REJECTED, STALE_GENERATION, CHECKPOINT_INVALID, RESOURCE_LIMIT, DEPENDENCY_STALE]
+    forbidden_payloads: [broker_credentials, database_credentials, raw_secret, arbitrary_network_target]

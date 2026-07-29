@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:quantiqmt:contract:strategy-context:v1",
+  "title": "StrategyContextV1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["strategy_id", "strategy_version", "generation", "mode", "snapshot_versions", "permission_scope", "as_of"],
+  "properties": {
+    "strategy_id": {"type": "string", "minLength": 1, "maxLength": 128},
+    "strategy_version": {"type": "string", "minLength": 1, "maxLength": 64},
+    "generation": {"type": "integer", "minimum": 1},
+    "mode": {"enum": ["LIVE", "BACKTEST"]},
+    "snapshot_versions": {
+      "type": "object", "additionalProperties": false,
+      "required": ["market", "account", "portfolio"],
+      "properties": {
+        "market": {"type": "string", "minLength": 1, "maxLength": 128},
+        "account": {"type": "string", "minLength": 1, "maxLength": 128},
+        "portfolio": {"type": "string", "minLength": 1, "maxLength": 128}
+      }
+    },
+    "permission_scope": {"type": "array", "items": {"enum": ["READ_MARKET", "READ_ACCOUNT", "READ_PORTFOLIO", "EMIT_TARGET", "EMIT_ORDER_INTENT"]}, "uniqueItems": true},
+    "as_of": {"type": "string", "format": "date-time"},
+    "backtest_end": {"type": ["string", "null"], "format": "date-time"}
+  },
+  "allOf": [
+    {"if": {"properties": {"mode": {"const": "BACKTEST"}}}, "then": {"required": ["backtest_end"], "properties": {"backtest_end": {"type": "string", "format": "date-time"}}}},
+    {"if": {"properties": {"mode": {"const": "LIVE"}}}, "then": {"properties": {"backtest_end": {"type": "null"}}}}
+  ]
+}

@@ -1,7 +1,7 @@
 ---
 id: TASK-016
 title: Complete Strategy SDK and runtime L4 contracts
-status: ready
+status: active
 depends_on: [TASK-014]
 spec_refs: [INV-TRADING, PORTS-STRATEGY, SM-STRATEGY, CONTRACT-STRATEGY-TARGET-V1, NFR-RELIABILITY, NFR-OBSERVABILITY]
 allowed_paths: [spec/manifest.yaml, spec/contracts/**, spec/interfaces/**, spec/state-machines/**, spec/workflows/**, spec/nfr/**, tasks/backlog/TASK-008-strategy-sdk.md, tasks/backlog/TASK-016-strategy-runtime-contracts.md, tasks/index.yaml]
@@ -24,12 +24,22 @@ verification:
 
 ## Acceptance criteria
 
-- [ ] 定义 StrategyContext 只读 DTO、snapshot version、权限 scope 和 Live/Backtest 一致性约束。
-- [ ] 定义 on_market/on_timer/on_order/on_trade callback 输入与 deadline。
-- [ ] 定义 StrategyOutput、Target/OrderIntent 输出校验、频率限制和 generation fencing。
-- [ ] 定义 Checkpoint envelope、schema_version、checksum、restore 失败行为。
-- [ ] 定义 Runtime 资源限制、异常处理、PAUSED/ERROR 转换和审计事件。
-- [ ] 更新 TASK-008，使其可直接实现并验证。
+- [x] 定义 StrategyContext 只读 DTO、snapshot version、权限 scope 和 Live/Backtest 一致性约束。
+- [x] 定义 on_market/on_timer/on_order/on_trade callback 输入与 deadline。
+- [x] 定义 StrategyOutput、Target/OrderIntent 输出校验、频率限制和 generation fencing。
+- [x] 定义 Checkpoint envelope、schema_version、checksum、restore 失败行为。
+- [x] 定义 Runtime 资源限制、异常处理、PAUSED/ERROR 转换和审计事件。
+- [x] 更新 TASK-008，使其可直接实现并验证。
+
+## Evidence
+
+- Added machine-validated Context, Callback, Output and Checkpoint schemas and registered them in `spec/manifest.yaml`.
+- PORTS-STRATEGY now freezes read-only snapshot/version semantics, least-privilege scopes, callback deadlines, schema-first output validation, generation fencing, checkpoint checksum/restore fail-closed behavior, resource limits and audit transitions.
+- SM-STRATEGY and WF-STRATEGY-RUNTIME define PAUSED/ERROR transitions, serial bounded callbacks, immutable verified runtime artifacts and the no-source-checkout-spec rule.
+- TASK-008 now references the frozen contracts and has a direct implementation boundary.
+- Review follow-up: output Target/OrderIntent refs use registered canonical command URNs and reject arbitrary/null typed payloads; `strategy.state_changed.v1` is schema-registered with constrained states/reasons; BACKTEST requires non-null `backtest_end`; `initialize` is a callback type; checkpoint hashing is fixed to RFC 8785 JCS UTF-8 payload-only SHA-256.
+- Latest main synchronization includes TASK-029/TASK-030 governance; manifest 0.7.0 compatibility, migration, affected tasks and deployment order now preserve their blocked/active boundaries.
+- TASK-016 remains `active`; completion still requires independent Review and human governance migration.
 
 ## Review focus
 
