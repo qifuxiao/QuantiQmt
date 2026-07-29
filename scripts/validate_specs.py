@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import re
 import sys
+from datetime import date
 from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
@@ -15,6 +16,16 @@ from jsonschema.validators import Draft202012Validator  # type: ignore[import-un
 ROOT = Path(__file__).resolve().parents[1]
 SPEC_ROOT = ROOT / "spec"
 TASK_ROOT = ROOT / "tasks"
+TASK_STATES = {"blocked", "ready", "active", "completed"}
+DELIVERY_AXES = {
+    "contract_status": {"not_applicable", "draft", "accepted", "superseded"},
+    "implementation_status": {"not_applicable", "not_started", "in_progress", "merged"},
+    "acceptance_status": {"not_run", "partial", "passed", "unverified"},
+    "review_status": {"not_required", "pending", "changes_requested", "approved", "reported_unverified"},
+    "release_status": {"not_applicable", "prohibited", "eligible", "released"},
+}
+SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+GOVERNANCE_TASKS = {"TASK-004", "TASK-005", "TASK-016", "TASK-029", "TASK-030", "TASK-031"}
 
 
 def load_yaml(path: Path) -> Any:
@@ -86,6 +97,88 @@ def task_files() -> Iterable[Path]:
         yield from sorted((TASK_ROOT / state).glob("TASK-*.md"))
 
 
+def validate_delivery(task_id: str, task: dict[str, Any], path: Path, errors: list[str]) -> None:
+    """Validate the independent governance delivery axes and evidence."""
+    delivery = task.get("delivery")
+    if task_id not in GOVERNANCE_TASKS:
+        return
+    if not isinstance(delivery, dict) or delivery.get("schema_version") != 1:
+        errors.append(f"{path.relative_to(ROOT)}: delivery.schema_version must be 1")
+        return
+    for axis, allowed in DELIVERY_AXES.items():
+        if delivery.get(axis) not in allowed:
+            errors.append(f"{path.relative_to(ROOT)}: invalid delivery {axis}")
+    status = task.get("status")
+    review = delivery.get("review_status")
+    release = delivery.get("release_status")
+    if status == "completed" and review != "reported_unverified" and (
+        delivery.get("acceptance_status") != "passed"
+        or delivery.get("review_status") not in {"approved", "not_required"}
+        or delivery.get("implementation_status") not in {"merged", "not_applicable"}
+    ):
+        errors.append(f"{path.relative_to(ROOT)}: completed task has invalid delivery combination")
+    if review == "reported_unverified":
+        if release != "prohibited":
+            errors.append(f"{path.relative_to(ROOT)}: reported_unverified requires prohibited release")
+        if not delivery.get("remediation_task") and not delivery.get("waiver_id"):
+            errors.append(f"{path.relative_to(ROOT)}: reported_unverified requires remediation_task or waiver_id")
+    if release in {"eligible", "released"} and review == "reported_unverified":
+        errors.append(f"{path.relative_to(ROOT)}: unverifiable review cannot unlock or release")
+    if status == "completed":
+        body = path.read_text(encoding="utf-8")
+        if "## Acceptance criteria" not in body:
+            errors.append(f"{path.relative_to(ROOT)}: completed task lacks Acceptance criteria")
+        elif review != "reported_unverified" and "[x]" not in body:
+            errors.append(f"{path.relative_to(ROOT)}: completed task lacks checked acceptance evidence")
+        evidence = delivery.get("completion_evidence")
+        required = {"mode", "change_pr", "reviewed_head_sha", "review_verdict", "reviewer", "evidence_url", "merge_commit_sha", "human_authorization_evidence"}
+        if not isinstance(evidence, dict) or not required.issubset(evidence):
+            errors.append(f"{path.relative_to(ROOT)}: incomplete completion_evidence")
+        elif review != "reported_unverified":
+            for field in ("reviewed_head_sha", "merge_commit_sha"):
+                if not isinstance(evidence.get(field), str) or not SHA_RE.fullmatch(evidence[field]):
+                    errors.append(f"{path.relative_to(ROOT)}: invalid evidence SHA {field}")
+
+
+def validate_waivers(errors: list[str]) -> None:
+    path = TASK_ROOT / "governance-waivers.yaml"
+    if not path.is_file():
+        errors.append("tasks/governance-waivers.yaml: required governance waiver registry missing")
+        return
+    document = load_yaml(path)
+    waivers = document.get("waivers", []) if isinstance(document, dict) else None
+    if not isinstance(waivers, list):
+        errors.append("tasks/governance-waivers.yaml: waivers must be a list")
+        return
+    today = date.today()
+    required = {"task_id", "rule", "reason", "owner", "expires_on", "remediation_task"}
+    for waiver in waivers:
+        if not isinstance(waiver, dict) or not required.issubset(waiver):
+            errors.append("tasks/governance-waivers.yaml: waiver missing required fields")
+            continue
+        try:
+            expires = date.fromisoformat(str(waiver["expires_on"]))
+            if expires < today:
+                errors.append(f"tasks/governance-waivers.yaml: expired waiver for {waiver.get('task_id')}")
+        except ValueError:
+            errors.append(f"tasks/governance-waivers.yaml: invalid expires_on for {waiver.get('task_id')}")
+        if waiver.get("release_status") in {"eligible", "released"}:
+            errors.append("tasks/governance-waivers.yaml: waiver cannot permit release")
+
+
+def validate_active_readme(tasks: dict[str, dict[str, Any]], errors: list[str]) -> None:
+    path = TASK_ROOT / "active" / "README.md"
+    if not path.is_file():
+        errors.append("tasks/active/README.md: missing active projection")
+        return
+    text = path.read_text(encoding="utf-8")
+    listed = set(re.findall(r"当前 active task：\s*(TASK-\d{3})", text))
+    listed.update(re.findall(r"(?m)^\s*[-*]\s*(TASK-\d{3})\b", text))
+    expected = {task_id for task_id, task in tasks.items() if task.get("status") == "active"}
+    if listed != expected:
+        errors.append(f"tasks/active/README.md: active projection mismatch (listed={sorted(listed)}, expected={sorted(expected)})")
+
+
 def validate_json_schemas(errors: list[str]) -> None:
     for path in sorted(SPEC_ROOT.rglob("*.schema.json")):
         try:
@@ -135,6 +228,9 @@ def validate_tasks(specs: dict[str, Path], errors: list[str]) -> None:
             errors.append(f"duplicate task id: {task_id}")
         tasks[task_id] = task
         task_paths[task_id] = path
+        expected_dir = {"blocked": "backlog", "ready": "backlog", "active": "active", "completed": "completed"}.get(task.get("status"))
+        if task.get("status") not in TASK_STATES or expected_dir != path.parent.name:
+            errors.append(f"{path.relative_to(ROOT)}: status must match its queue directory")
         for field in ("status", "depends_on", "spec_refs", "allowed_paths", "forbidden_paths"):
             if field not in task:
                 errors.append(f"{path.relative_to(ROOT)}: missing {field}")
@@ -144,6 +240,7 @@ def validate_tasks(specs: dict[str, Path], errors: list[str]) -> None:
         verification = task.get("verification")
         if not isinstance(verification, dict) or not verification.get("commands"):
             errors.append(f"{path.relative_to(ROOT)}: verification.commands must not be empty")
+        validate_delivery(task_id, task, path, errors)
 
     graph: dict[str, list[str]] = {}
     for task_id, task in tasks.items():
@@ -169,9 +266,13 @@ def validate_tasks(specs: dict[str, Path], errors: list[str]) -> None:
         task_id = entry.get("id")
         indexed_path = entry.get("path")
         if isinstance(task_id, str):
+            if task_id in indexed_ids:
+                errors.append(f"tasks/index.yaml: duplicate task id {task_id}")
             indexed_ids.add(task_id)
         if not isinstance(indexed_path, str) or not (TASK_ROOT / indexed_path).is_file():
             errors.append(f"tasks/index.yaml: missing path for {task_id}: {indexed_path}")
+        if task_id in task_paths and indexed_path != str(task_paths[task_id].relative_to(TASK_ROOT)).replace("\\", "/"):
+            errors.append(f"tasks/index.yaml: path mismatch for {task_id}")
         if task_id in tasks and entry.get("status") != tasks[task_id].get("status"):
             errors.append(f"tasks/index.yaml: status mismatch for {task_id}")
     missing = set(tasks) - indexed_ids
@@ -180,6 +281,11 @@ def validate_tasks(specs: dict[str, Path], errors: list[str]) -> None:
         errors.append(f"tasks/index.yaml: unindexed tasks: {sorted(missing)}")
     if extra:
         errors.append(f"tasks/index.yaml: entries without task files: {sorted(extra)}")
+    for task_id, task in tasks.items():
+        for dependency in task.get("depends_on", []):
+            if task.get("status") == "active" and tasks.get(dependency, {}).get("status") != "completed":
+                errors.append(f"{task_id}: dependency {dependency} is not completed; activation denied")
+    validate_active_readme(tasks, errors)
 
 
 def validate_error_catalog(errors: list[str]) -> None:
@@ -288,6 +394,7 @@ def main() -> int:
     validate_json_schemas(errors)
     specs = validate_manifest(errors)
     validate_tasks(specs, errors)
+    validate_waivers(errors)
     validate_error_catalog(errors)
     validate_message_catalog(errors)
     validate_state_machines(errors)

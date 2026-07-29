@@ -17,6 +17,15 @@ delivery:
   acceptance_status: passed
   review_status: approved
   release_status: prohibited
+  completion_evidence:
+    mode: merged_contract_followup
+    change_pr: https://github.com/qifuxiao/QuantiQmt/pull/41
+    reviewed_head_sha: 987a5b91d2284fb21017a16070b41a1bfd3cfc18
+    review_verdict: APPROVE
+    reviewer: qifuxiao
+    evidence_url: https://github.com/qifuxiao/QuantiQmt/pull/41#pullrequestreview-4803608047
+    merge_commit_sha: 01d6cd12eb8a682780b58218a91d19adbc8f90fa
+    human_authorization_evidence: human-authorized TASK-016 active-to-completed governance closeout after PR #41 merge
 ---
 
 # Objective

@@ -7,6 +7,8 @@
 - `backlog/`：尚未执行；front matter 状态为 blocked 或 ready。
 - `active/`：经过人工选择，允许 Agent 执行；同一 Agent 一次只处理一个。
 - `completed/`：独立 Review 验收完成。
+- Delivery metadata is a separate five-axis record (contract, implementation, acceptance, review, release); it is not a second spelling of queue status.
+- A completed task requires passed acceptance, an independent APPROVE (or not-required review), and merged implementation. Unverifiable history remains prohibited from release and dependency unlock.
 - `templates/`：任务模板。
 
 ## 激活规则
