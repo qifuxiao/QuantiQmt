@@ -1,8 +1,8 @@
 ---
 id: TASK-029
 title: Define deployable Risk output Schema and runtime validation contract
-status: active
-depends_on: [TASK-015, TASK-030]
+status: blocked
+depends_on: [TASK-015, TASK-030, TASK-031]
 spec_refs: [CONTRACT-RISK-DECISION-V1, CONTRACT-RISK-AUDIT-OUTPUT-V1, CONTRACT-RISK-ORDER-EVALUATED-V2, PORTS-RISK, CONTRACT-CATALOG]
 allowed_paths:
   - spec/manifest.yaml
@@ -83,3 +83,9 @@ verification:
 - Schema 加载失败时必须保持 Risk/交易门禁关闭；
 - 若无法在不改变公开契约的前提下完成部署，应保持 TASK-005 blocked，先提交新的 spec-change；
 - 回滚只能回到上一份已接受的 Schema/manifest 版本，不得恢复源码路径隐式加载。
+
+## Governance freeze evidence
+
+- PR #46 was closed; its branch and commits must not be reused as implementation or review evidence.
+- TASK-029 is moved to `backlog/blocked` pending TASK-031 governance recovery and independent Review.
+- TASK-029 MUST NOT be reactivated until TASK-031 is completed and independently reviewed; this freeze does not alter TASK-029 allowed_paths or acceptance criteria.
