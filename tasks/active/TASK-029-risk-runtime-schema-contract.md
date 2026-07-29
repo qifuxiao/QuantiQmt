@@ -16,6 +16,7 @@ allowed_paths:
   - src/quantiqmt/risk/evaluator.py
   - pyproject.toml
   - poetry.lock
+  - scripts/validate_specs.py
   - tests/spec/**
   - tests/contract/messages/**
   - tests/unit/contracts/**
