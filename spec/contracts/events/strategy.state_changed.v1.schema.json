@@ -11,8 +11,20 @@
     "generation": {"type": "integer", "minimum": 1},
     "from_state": {"enum": ["CREATED", "INITIALIZING", "READY", "RUNNING", "PAUSED", "ERROR", "STOPPING"]},
     "to_state": {"enum": ["CREATED", "INITIALIZING", "READY", "RUNNING", "PAUSED", "ERROR", "STOPPING", "STOPPED"]},
-    "reason_code": {"enum": ["LOADED", "INITIALIZED", "ENABLED", "PAUSED", "RESUMED", "STOP_REQUESTED", "STOPPED", "CALLBACK_TIMEOUT", "CALLBACK_EXCEPTION", "OUTPUT_REJECTED", "STALE_GENERATION", "CHECKPOINT_INVALID", "RESOURCE_LIMIT", "DEPENDENCY_STALE", "SECURITY_FAILURE"]},
+    "reason_code": {"enum": ["LOADED", "INITIALIZED", "INITIALIZATION_FAILED", "ENABLED", "PAUSED", "RESUMED", "STOP_REQUESTED", "STOPPED", "CALLBACK_TIMEOUT", "CALLBACK_EXCEPTION", "OUTPUT_REJECTED", "STALE_GENERATION", "CHECKPOINT_INVALID", "RESOURCE_LIMIT", "DEPENDENCY_STALE", "SECURITY_FAILURE", "ARTIFACT_RELOADED"]},
     "correlation_id": {"type": "string", "minLength": 1, "maxLength": 128},
     "occurred_at": {"type": "string", "format": "date-time"}
-  }
+  },
+  "oneOf": [
+    {"properties": {"from_state": {"const": "CREATED"}, "to_state": {"const": "INITIALIZING"}, "reason_code": {"const": "LOADED"}}},
+    {"properties": {"from_state": {"const": "INITIALIZING"}, "to_state": {"const": "READY"}, "reason_code": {"const": "INITIALIZED"}}},
+    {"properties": {"from_state": {"const": "INITIALIZING"}, "to_state": {"const": "ERROR"}, "reason_code": {"const": "INITIALIZATION_FAILED"}}},
+    {"properties": {"from_state": {"const": "READY"}, "to_state": {"const": "RUNNING"}, "reason_code": {"const": "ENABLED"}}},
+    {"properties": {"from_state": {"const": "RUNNING"}, "to_state": {"const": "PAUSED"}, "reason_code": {"enum": ["PAUSED", "CALLBACK_TIMEOUT", "CALLBACK_EXCEPTION", "OUTPUT_REJECTED", "RESOURCE_LIMIT", "DEPENDENCY_STALE", "STALE_GENERATION"]}}},
+    {"properties": {"from_state": {"const": "RUNNING"}, "to_state": {"const": "ERROR"}, "reason_code": {"enum": ["SECURITY_FAILURE", "CHECKPOINT_INVALID"]}}},
+    {"properties": {"from_state": {"const": "PAUSED"}, "to_state": {"const": "RUNNING"}, "reason_code": {"const": "RESUMED"}}},
+    {"properties": {"from_state": {"enum": ["RUNNING", "PAUSED", "ERROR"]}, "to_state": {"const": "STOPPING"}, "reason_code": {"const": "STOP_REQUESTED"}}},
+    {"properties": {"from_state": {"const": "STOPPING"}, "to_state": {"const": "STOPPED"}, "reason_code": {"const": "STOPPED"}}},
+    {"properties": {"from_state": {"const": "ERROR"}, "to_state": {"const": "INITIALIZING"}, "reason_code": {"const": "ARTIFACT_RELOADED"}}}
+  ]
 }

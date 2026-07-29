@@ -14,8 +14,9 @@
     "emitted_at": {"type": "string", "format": "date-time"},
     "reason_code": {"type": ["string", "null"], "maxLength": 128}
   },
-  "allOf": [
-    {"if": {"properties": {"output_type": {"const": "TARGET"}}}, "then": {"required": ["target"]}},
-    {"if": {"properties": {"output_type": {"const": "ORDER_INTENT"}}}, "then": {"required": ["order_intent"]}}
+  "oneOf": [
+    {"properties": {"output_type": {"const": "TARGET"}}, "required": ["output_type", "target"], "not": {"required": ["order_intent"]}},
+    {"properties": {"output_type": {"const": "ORDER_INTENT"}}, "required": ["output_type", "order_intent"], "not": {"required": ["target"]}},
+    {"properties": {"output_type": {"const": "NO_ACTION"}}, "required": ["output_type"], "not": {"anyOf": [{"required": ["target"]}, {"required": ["order_intent"]}]}}
   ]
 }

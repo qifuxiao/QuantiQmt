@@ -158,7 +158,6 @@ change:
   deployment_order:
     - merge_and_independently_review_task_015_specs
     - independently_review_and_merge_task_016_strategy_contracts
-    - complete_task_030_risk_validator_scope
     - implement_and_independently_review_task_029_risk_runtime_schema_contract
     - implement_and_activate_task_008_against_spec_0_7
   migration:

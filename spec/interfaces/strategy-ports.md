@@ -18,7 +18,9 @@ MUST 提供 load/start/pause/stop/checkpoint。只有 RUNNING generation 能输�
 
 ### Checkpoint (CONTRACT-STRATEGY-CHECKPOINT-V1)
 
-Checkpoint envelope 包含 strategy/version/generation、schema version、captured timestamp、opaque payload 和 canonical payload bytes 的 SHA-256。Canonicalization 固定采用 RFC 8785 JCS：对象键按 Unicode code point 排序、无空白、UTF-8 无 BOM、Unicode scalar 与 RFC 8785 number serialization；hash 输入只包含 payload 值，不包含 envelope 或 payload_sha256。Restore 对缺失、不支持、格式错误、checksum/version 不匹配或过期 generation 必须 fail-closed；恢复原子失败时保持 PAUSED 或 ERROR，不能恢复输出。重复 checkpoint 与 callback id 必须幂等忽略。
+Checkpoint envelope 包含 strategy/version/generation、schema version、captured timestamp、opaque payload 和 canonical payload bytes 的 SHA-256。Canonicalization 固定采用 RFC 8785 JCS：对象键按其原始属性名的 UTF-16 code units 排序（不是 Unicode code points）、无空白、UTF-8 无 BOM、Unicode scalar 与 RFC 8785 number serialization；hash 输入只包含 payload 值，不包含 envelope 或 payload_sha256。Restore 对缺失、不支持、格式错误、checksum/version 不匹配或过期 generation 必须 fail-closed；恢复原子失败时保持 PAUSED 或 ERROR，不能恢复输出。重复 checkpoint 与 callback id 必须幂等忽略。
+
+规范向量：payload 属性名 U+10000 `𐀀` 与 U+E000 `` 按 RFC 8785 UTF-16 code-unit 顺序必须先排 U+10000（代理项 D800 DC00）再排 U+E000（E000），即 canonical member order 为 `{"𐀀":2,"":1}`；任何按 Unicode code point 排序的实现均不符合本契约。
 
 ### Runtime 限制、失败与审计
 
