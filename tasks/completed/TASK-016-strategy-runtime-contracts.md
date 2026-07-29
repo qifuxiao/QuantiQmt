@@ -10,6 +10,13 @@ verification:
   commands:
     - poetry run python scripts/validate_specs.py
     - poetry run pytest tests/spec tests/contract
+delivery:
+  schema_version: 1
+  contract_status: accepted
+  implementation_status: not_applicable
+  acceptance_status: passed
+  review_status: approved
+  release_status: prohibited
 ---
 
 # Objective
@@ -45,8 +52,10 @@ verification:
 
 - PR #41 Head: `987a5b91d2284fb21017a16070b41a1bfd3cfc18`.
 - PR #41 merge commit / latest `origin/main`: `01d6cd12eb8a682780b58218a91d19adbc8f90fa`.
-- Independent APPROVE was published and bound to the PR #41 Head; CI completed 4/4 successfully.
+- Independent APPROVE was published by `qifuxiao` with verdict `APPROVE`, review commit `987a5b91d2284fb21017a16070b41a1bfd3cfc18`, bound to the reviewed Head: [PR #41](https://github.com/qifuxiao/QuantiQmt/pull/41), [review](https://github.com/qifuxiao/QuantiQmt/pull/41#pullrequestreview-4803608047).
+- CI completed 4/4 successfully: [quality](https://github.com/qifuxiao/QuantiQmt/actions/runs/30416579583/job/90464297221), [quality](https://github.com/qifuxiao/QuantiQmt/actions/runs/30416577593/job/90464291293), [persistence-postgresql](https://github.com/qifuxiao/QuantiQmt/actions/runs/30416579583/job/90464297257), [persistence-postgresql](https://github.com/qifuxiao/QuantiQmt/actions/runs/30416577593/job/90464291209).
 - Local gates passed: specification validation, 195 spec/contract tests, 72 risk tests, mypy, ruff, format check, diff check and schema probes.
+- TASK-016 closeout does not release or activate TASK-008: `strategy.state_changed.v1` remains planned, TASK-008 lacks Market readiness, and `release_status=prohibited`; follow-up remediation is delegated to TASK-031 deviation work.
 - This active-to-completed migration is explicitly authorized by human project members after PR #41 merge; no contract or business implementation is changed here.
 
 ## Review focus
