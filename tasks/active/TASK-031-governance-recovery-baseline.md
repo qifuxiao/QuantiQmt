@@ -6,8 +6,11 @@ depends_on: [TASK-014]
 spec_refs: [REVIEW-IMPLEMENTATION-READINESS-0.5]
 allowed_paths:
   - tasks/README.md
+  - tasks/AGENTS.md
   - tasks/templates/task-template.md
+  - tasks/completed/README.md
   - tasks/index.yaml
+  - tasks/governance-waivers.yaml
   - tasks/active/README.md
   - tasks/active/TASK-031-governance-recovery-baseline.md
   - tasks/backlog/TASK-005-risk-engine.md
