@@ -263,13 +263,18 @@ def validate_tasks(specs: dict[str, Path], errors: list[str]) -> None:
             errors.append(f"duplicate task id: {task_id}")
         tasks[task_id] = task
         task_paths[task_id] = path
-        expected_dir = {
-            "blocked": "backlog",
-            "ready": "backlog",
-            "active": "active",
-            "completed": "completed",
-        }.get(task.get("status"))
-        if task.get("status") not in TASK_STATES or expected_dir != path.parent.name:
+        status = task.get("status")
+        expected_dir = (
+            {
+                "blocked": "backlog",
+                "ready": "backlog",
+                "active": "active",
+                "completed": "completed",
+            }.get(status)
+            if isinstance(status, str)
+            else None
+        )
+        if status not in TASK_STATES or expected_dir != path.parent.name:
             errors.append(f"{path.relative_to(ROOT)}: status must match its queue directory")
         for field in ("status", "depends_on", "spec_refs", "allowed_paths", "forbidden_paths"):
             if field not in task:
