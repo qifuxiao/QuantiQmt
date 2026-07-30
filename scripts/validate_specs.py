@@ -33,7 +33,16 @@ DELIVERY_AXES = {
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 URL_RE = re.compile(r"^https?://[^\s]+$")
 PR_RE = re.compile(r"^https://github\.com/[^/]+/[^/]+/pull/\d+$")
-GOVERNANCE_TASKS = {"TASK-004", "TASK-005", "TASK-016", "TASK-029", "TASK-030", "TASK-031"}
+COMPLETION_FIELDS = {
+    "mode",
+    "change_pr",
+    "reviewed_head_sha",
+    "review_verdict",
+    "reviewer",
+    "evidence_url",
+    "merge_commit_sha",
+    "human_authorization_evidence",
+}
 
 
 def load_yaml(path: Path) -> Any:
@@ -108,7 +117,7 @@ def task_files() -> Iterable[Path]:
 def validate_delivery(task_id: str, task: dict[str, Any], path: Path, errors: list[str]) -> None:
     """Validate the independent governance delivery axes and evidence."""
     delivery = task.get("delivery")
-    if task_id not in GOVERNANCE_TASKS:
+    if delivery is None:
         return
     if not isinstance(delivery, dict) or delivery.get("schema_version") != 1:
         errors.append(f"{path.relative_to(ROOT)}: delivery.schema_version must be 1")
@@ -150,20 +159,10 @@ def validate_delivery(task_id: str, task: dict[str, Any], path: Path, errors: li
                 f"{path.relative_to(ROOT)}: completed task lacks checked acceptance evidence"
             )
         evidence = delivery.get("completion_evidence")
-        required = {
-            "mode",
-            "change_pr",
-            "reviewed_head_sha",
-            "review_verdict",
-            "reviewer",
-            "evidence_url",
-            "merge_commit_sha",
-            "human_authorization_evidence",
-        }
-        if not isinstance(evidence, dict) or not required.issubset(evidence):
+        if not isinstance(evidence, dict) or not COMPLETION_FIELDS.issubset(evidence):
             errors.append(f"{path.relative_to(ROOT)}: incomplete completion_evidence")
         else:
-            for field in required:
+            for field in COMPLETION_FIELDS:
                 if not isinstance(evidence.get(field), str) or not evidence[field].strip():
                     errors.append(f"{path.relative_to(ROOT)}: empty completion evidence {field}")
             if review == "reported_unverified":
@@ -207,6 +206,23 @@ def validate_waiver_entries(
         "one_time",
         "deny_business_unlock",
     }
+    bootstrap_count = sum(
+        isinstance(waiver, dict) and waiver.get("kind") == "bootstrap_exception"
+        for waiver in waivers
+    )
+    if bootstrap_count != 1:
+        errors.append("tasks/governance-waivers.yaml: exactly one bootstrap_exception is required")
+    expected_bootstrap = {
+        "task_id": "TASK-014",
+        "beneficiary_task": "TASK-031",
+        "kind": "bootstrap_exception",
+        "one_time": True,
+        "deny_business_unlock": True,
+        "owner": "qfxyyy",
+        "expires_on": "2026-08-13",
+        "remediation_task": "TASK-031",
+        "release_status": "prohibited",
+    }
     for waiver in waivers:
         if not isinstance(waiver, dict) or not required.issubset(waiver):
             errors.append("tasks/governance-waivers.yaml: waiver missing required fields")
@@ -246,6 +262,19 @@ def validate_waiver_entries(
             )
         if waiver.get("release_status") in {"eligible", "released"}:
             errors.append("tasks/governance-waivers.yaml: waiver cannot permit release")
+        if waiver.get("kind") == "bootstrap_exception":
+            for field, expected in expected_bootstrap.items():
+                if waiver.get(field) != expected:
+                    errors.append(
+                        "tasks/governance-waivers.yaml: bootstrap field "
+                        f"{field} must equal {expected}"
+                    )
+        elif any(
+            field in waiver for field in ("beneficiary_task", "one_time", "deny_business_unlock")
+        ):
+            errors.append(
+                "tasks/governance-waivers.yaml: ordinary waiver cannot carry bootstrap fields"
+            )
 
 
 def validate_waivers(errors: list[str]) -> None:
@@ -254,7 +283,10 @@ def validate_waivers(errors: list[str]) -> None:
         errors.append("tasks/governance-waivers.yaml: required governance waiver registry missing")
         return
     document = load_yaml(path)
-    waivers = document.get("waivers", []) if isinstance(document, dict) else None
+    if not isinstance(document, dict) or document.get("schema_version") != 1:
+        errors.append("tasks/governance-waivers.yaml: schema_version must be 1")
+        return
+    waivers = document.get("waivers", [])
     if not isinstance(waivers, list):
         errors.append("tasks/governance-waivers.yaml: waivers must be a list")
         return
@@ -290,7 +322,28 @@ def delivery_is_unlockable(task: dict[str, Any]) -> bool:
         and delivery.get("implementation_status") in {"merged", "not_applicable"}
         and delivery.get("acceptance_status") == "passed"
         and delivery.get("review_status") in {"approved", "not_required"}
-        and delivery.get("release_status") not in {"eligible", "released"}
+        and delivery.get("release_status") in {"prohibited", "eligible", "released"}
+        and completion_evidence_is_trusted(delivery)
+    )
+
+
+def completion_evidence_is_trusted(delivery: dict[str, Any]) -> bool:
+    evidence = delivery.get("completion_evidence")
+    if not isinstance(evidence, dict) or not COMPLETION_FIELDS.issubset(evidence):
+        return False
+    if any(
+        not isinstance(evidence.get(field), str) or not evidence[field].strip()
+        for field in COMPLETION_FIELDS
+    ):
+        return False
+    if evidence.get("review_verdict") not in {"APPROVE", "NOT_REQUIRED"}:
+        return False
+    return (
+        SHA_RE.fullmatch(str(evidence.get("reviewed_head_sha"))) is not None
+        and SHA_RE.fullmatch(str(evidence.get("merge_commit_sha"))) is not None
+        and PR_RE.fullmatch(str(evidence.get("change_pr"))) is not None
+        and URL_RE.fullmatch(str(evidence.get("evidence_url"))) is not None
+        and evidence.get("reviewer") not in {"unverifiable", "reported_unverified"}
     )
 
 

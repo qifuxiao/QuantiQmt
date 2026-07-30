@@ -118,12 +118,22 @@ def test_reported_unverified_or_missing_delivery_cannot_unlock() -> None:
 
 
 @pytest.mark.parametrize(
-    "delivery,allowed,bootstrap",
+    "delivery,allowed,bootstrap,ids",
     [
-        ({"review_status": "pending"}, False, False),
-        ({"review_status": "changes_requested"}, False, False),
-        ({"review_status": "approved", "acceptance_status": "unverified"}, False, False),
-        ({"review_status": "reported_unverified", "acceptance_status": "passed"}, False, False),
+        ({"review_status": "pending"}, False, False, ("TASK-100", "TASK-101")),
+        ({"review_status": "changes_requested"}, False, False, ("TASK-100", "TASK-101")),
+        (
+            {"review_status": "approved", "acceptance_status": "unverified"},
+            False,
+            False,
+            ("TASK-100", "TASK-101"),
+        ),
+        (
+            {"review_status": "reported_unverified", "acceptance_status": "passed"},
+            False,
+            False,
+            ("TASK-100", "TASK-101"),
+        ),
         (
             {
                 "implementation_status": "merged",
@@ -133,19 +143,44 @@ def test_reported_unverified_or_missing_delivery_cannot_unlock() -> None:
             },
             True,
             False,
+            ("TASK-100", "TASK-101"),
+        ),
+        (
+            {
+                "implementation_status": "merged",
+                "acceptance_status": "passed",
+                "review_status": "approved",
+                "release_status": "eligible",
+            },
+            True,
+            False,
+            ("TASK-100", "TASK-101"),
+        ),
+        (
+            {
+                "implementation_status": "merged",
+                "acceptance_status": "passed",
+                "review_status": "approved",
+                "release_status": "released",
+            },
+            True,
+            False,
+            ("TASK-100", "TASK-101"),
         ),
         (
             {"review_status": "reported_unverified", "acceptance_status": "unverified"},
             True,
             True,
+            ("TASK-014", "TASK-031"),
         ),
     ],
 )
-def test_validate_tasks_dependency_gate(monkeypatch, delivery, allowed, bootstrap) -> None:
+def test_validate_tasks_dependency_gate(monkeypatch, delivery, allowed, bootstrap, ids) -> None:
     fixture_root = ROOT / "tasks" / ".validator-fixture"
     fixture_root.mkdir(exist_ok=True)
-    dependency = fixture_root / "TASK-014.md"
-    active = fixture_root / "TASK-031.md"
+    dependency_id, active_id = ids
+    dependency = fixture_root / f"{dependency_id}.md"
+    active = fixture_root / f"{active_id}.md"
     base = (
         "status: completed\ndepends_on: []\nspec_refs: []\n"
         "allowed_paths: []\nforbidden_paths: []\n"
@@ -160,14 +195,31 @@ def test_validate_tasks_dependency_gate(monkeypatch, delivery, allowed, bootstra
         "release_status": "prohibited",
     }
     dep_delivery.update(delivery)
+    completion = ""
+    acceptance = "## Acceptance criteria\n- [x] fixture evidence\n"
+    if allowed and not bootstrap:
+        completion = (
+            "  completion_evidence:\n"
+            "    mode: fixture\n"
+            "    change_pr: https://github.com/example/repo/pull/100\n"
+            "    reviewed_head_sha: " + "a" * 40 + "\n"
+            "    review_verdict: APPROVE\n"
+            "    reviewer: reviewer\n"
+            "    evidence_url: https://github.com/example/review\n"
+            "    merge_commit_sha: " + "b" * 40 + "\n"
+            "    human_authorization_evidence: fixture\n"
+        )
     dependency.write_text(
-        f"---\nid: TASK-014\n{base}delivery:\n"
+        f"---\nid: {dependency_id}\n{base}delivery:\n"
         + "\n".join(f"  {k}: {v}" for k, v in dep_delivery.items())
-        + "\n---\n",
+        + "\n"
+        + completion
+        + "---\n\n"
+        + acceptance,
         encoding="utf-8",
     )
     active.write_text(
-        "---\nid: TASK-031\nstatus: active\ndepends_on: [TASK-014]\n"
+        f"---\nid: {active_id}\nstatus: active\ndepends_on: [{dependency_id}]\n"
         "spec_refs: []\nallowed_paths: []\nforbidden_paths: []\n"
         "verification: {commands: [check]}\ndelivery:\n"
         "  schema_version: 1\n  contract_status: not_applicable\n"
@@ -185,8 +237,8 @@ def test_validate_tasks_dependency_gate(monkeypatch, delivery, allowed, bootstra
                 return {
                     "waivers": [
                         {
-                            "task_id": "TASK-014",
-                            "beneficiary_task": "TASK-031",
+                            "task_id": dependency_id,
+                            "beneficiary_task": active_id,
                             "kind": "bootstrap_exception",
                             "one_time": True,
                             "deny_business_unlock": True,
@@ -194,7 +246,7 @@ def test_validate_tasks_dependency_gate(monkeypatch, delivery, allowed, bootstra
                             "reason": "recovery",
                             "owner": "qfxyyy",
                             "expires_on": "2026-08-13",
-                            "remediation_task": "TASK-031",
+                            "remediation_task": active_id,
                             "release_status": "prohibited",
                         }
                     ]
@@ -203,8 +255,8 @@ def test_validate_tasks_dependency_gate(monkeypatch, delivery, allowed, bootstra
         if path == validator.TASK_ROOT / "index.yaml":
             return {
                 "tasks": [
-                    {"id": "TASK-014", "path": "TASK-014.md", "status": "completed"},
-                    {"id": "TASK-031", "path": "TASK-031.md", "status": "active"},
+                    {"id": dependency_id, "path": f"{dependency_id}.md", "status": "completed"},
+                    {"id": active_id, "path": f"{active_id}.md", "status": "active"},
                 ]
             }
         return original_load_yaml(path)
@@ -242,3 +294,13 @@ def test_waiver_semantics_reject_empty_unknown_expired_and_release() -> None:
         errors: list[str] = []
         validate_waiver_entries([invalid], {"TASK-014", "TASK-031"}, errors)
         assert errors
+    errors = []
+    validate_waiver_entries([valid, valid], {"TASK-014", "TASK-031"}, errors)
+    assert any("exactly one bootstrap_exception" in error for error in errors)
+    errors = []
+    validate_waiver_entries(
+        [{**valid, "beneficiary_task": "TASK-005"}],
+        {"TASK-005", "TASK-014", "TASK-031"},
+        errors,
+    )
+    assert any("bootstrap field beneficiary_task" in error for error in errors)
