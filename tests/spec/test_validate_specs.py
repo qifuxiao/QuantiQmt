@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import pytest
+import scripts.validate_specs as validator
 from scripts.validate_specs import (
     ROOT,
     bootstrap_allows_dependency,
@@ -8,6 +10,7 @@ from scripts.validate_specs import (
     main,
     manifest_entries,
     validate_delivery,
+    validate_tasks,
     validate_waiver_entries,
 )
 
@@ -112,6 +115,107 @@ def test_reported_unverified_or_missing_delivery_cannot_unlock() -> None:
             }
         }
     )
+
+
+@pytest.mark.parametrize(
+    "delivery,allowed,bootstrap",
+    [
+        ({"review_status": "pending"}, False, False),
+        ({"review_status": "changes_requested"}, False, False),
+        ({"review_status": "approved", "acceptance_status": "unverified"}, False, False),
+        ({"review_status": "reported_unverified", "acceptance_status": "passed"}, False, False),
+        (
+            {
+                "implementation_status": "merged",
+                "acceptance_status": "passed",
+                "review_status": "approved",
+                "release_status": "prohibited",
+            },
+            True,
+            False,
+        ),
+        (
+            {"review_status": "reported_unverified", "acceptance_status": "unverified"},
+            True,
+            True,
+        ),
+    ],
+)
+def test_validate_tasks_dependency_gate(monkeypatch, delivery, allowed, bootstrap) -> None:
+    fixture_root = ROOT / "tasks" / ".validator-fixture"
+    fixture_root.mkdir(exist_ok=True)
+    dependency = fixture_root / "TASK-014.md"
+    active = fixture_root / "TASK-031.md"
+    base = (
+        "status: completed\ndepends_on: []\nspec_refs: []\n"
+        "allowed_paths: []\nforbidden_paths: []\n"
+        "verification: {commands: [check]}\n"
+    )
+    dep_delivery = {
+        "schema_version": 1,
+        "contract_status": "accepted",
+        "implementation_status": "not_applicable",
+        "acceptance_status": "unverified",
+        "review_status": "reported_unverified",
+        "release_status": "prohibited",
+    }
+    dep_delivery.update(delivery)
+    dependency.write_text(
+        f"---\nid: TASK-014\n{base}delivery:\n"
+        + "\n".join(f"  {k}: {v}" for k, v in dep_delivery.items())
+        + "\n---\n",
+        encoding="utf-8",
+    )
+    active.write_text(
+        "---\nid: TASK-031\nstatus: active\ndepends_on: [TASK-014]\n"
+        "spec_refs: []\nallowed_paths: []\nforbidden_paths: []\n"
+        "verification: {commands: [check]}\ndelivery:\n"
+        "  schema_version: 1\n  contract_status: not_applicable\n"
+        "  implementation_status: in_progress\n  acceptance_status: not_run\n"
+        "  review_status: pending\n  release_status: prohibited\n---\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(validator, "task_files", lambda: [dependency, active])
+    monkeypatch.setattr(validator, "validate_active_readme", lambda tasks, errors: None)
+    original_load_yaml = validator.load_yaml
+
+    def fake_load_yaml(path):
+        if path == validator.TASK_ROOT / "governance-waivers.yaml":
+            if bootstrap:
+                return {
+                    "waivers": [
+                        {
+                            "task_id": "TASK-014",
+                            "beneficiary_task": "TASK-031",
+                            "kind": "bootstrap_exception",
+                            "one_time": True,
+                            "deny_business_unlock": True,
+                            "rule": "bootstrap",
+                            "reason": "recovery",
+                            "owner": "qfxyyy",
+                            "expires_on": "2026-08-13",
+                            "remediation_task": "TASK-031",
+                            "release_status": "prohibited",
+                        }
+                    ]
+                }
+            return {"waivers": []}
+        if path == validator.TASK_ROOT / "index.yaml":
+            return {
+                "tasks": [
+                    {"id": "TASK-014", "path": "TASK-014.md", "status": "completed"},
+                    {"id": "TASK-031", "path": "TASK-031.md", "status": "active"},
+                ]
+            }
+        return original_load_yaml(path)
+
+    monkeypatch.setattr(validator, "load_yaml", fake_load_yaml)
+    errors: list[str] = []
+    validate_tasks({}, errors)
+    assert (not any("trusted completed delivery" in error for error in errors)) is allowed
+    dependency.unlink(missing_ok=True)
+    active.unlink(missing_ok=True)
+    fixture_root.rmdir()
 
 
 def test_waiver_semantics_reject_empty_unknown_expired_and_release() -> None:

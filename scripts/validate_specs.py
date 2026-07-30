@@ -287,9 +287,10 @@ def delivery_is_unlockable(task: dict[str, Any]) -> bool:
     return (
         isinstance(delivery, dict)
         and delivery.get("schema_version") == 1
-        and delivery.get("review_status") != "reported_unverified"
+        and delivery.get("implementation_status") in {"merged", "not_applicable"}
+        and delivery.get("acceptance_status") == "passed"
+        and delivery.get("review_status") in {"approved", "not_required"}
         and delivery.get("release_status") not in {"eligible", "released"}
-        and delivery.get("acceptance_status") in {"passed", "unverified"}
     )
 
 
