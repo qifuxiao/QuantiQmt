@@ -1,6 +1,15 @@
 from pathlib import Path
 
-from scripts.validate_specs import ROOT, has_cycle, main, manifest_entries, validate_delivery
+from scripts.validate_specs import (
+    ROOT,
+    bootstrap_allows_dependency,
+    delivery_is_unlockable,
+    has_cycle,
+    main,
+    manifest_entries,
+    validate_delivery,
+    validate_waiver_entries,
+)
 
 import quantiqmt
 
@@ -68,3 +77,64 @@ def test_completed_delivery_requires_completion_evidence() -> None:
         errors,
     )
     assert any("completion_evidence" in error for error in errors)
+
+
+def test_only_bootstrap_waiver_allows_task031_dependency() -> None:
+    waiver = {
+        "task_id": "TASK-014",
+        "beneficiary_task": "TASK-031",
+        "kind": "bootstrap_exception",
+        "one_time": True,
+        "deny_business_unlock": True,
+        "rule": "bootstrap",
+        "reason": "recovery",
+        "owner": "qfxyyy",
+        "expires_on": "2026-08-13",
+        "remediation_task": "TASK-031",
+        "release_status": "prohibited",
+    }
+    assert bootstrap_allows_dependency("TASK-014", "TASK-031", [waiver])
+    assert not bootstrap_allows_dependency("TASK-014", "TASK-005", [waiver])
+    assert not bootstrap_allows_dependency("TASK-016", "TASK-031", [waiver])
+    expired = {**waiver, "expires_on": "2020-01-01"}
+    assert not bootstrap_allows_dependency("TASK-014", "TASK-031", [expired])
+
+
+def test_reported_unverified_or_missing_delivery_cannot_unlock() -> None:
+    assert not delivery_is_unlockable({})
+    assert not delivery_is_unlockable(
+        {
+            "delivery": {
+                "schema_version": 1,
+                "acceptance_status": "passed",
+                "review_status": "reported_unverified",
+                "release_status": "prohibited",
+            }
+        }
+    )
+
+
+def test_waiver_semantics_reject_empty_unknown_expired_and_release() -> None:
+    valid = {
+        "task_id": "TASK-014",
+        "beneficiary_task": "TASK-031",
+        "kind": "bootstrap_exception",
+        "one_time": True,
+        "deny_business_unlock": True,
+        "rule": "bootstrap",
+        "reason": "recovery",
+        "owner": "qfxyyy",
+        "expires_on": "2026-08-13",
+        "remediation_task": "TASK-031",
+        "release_status": "prohibited",
+    }
+    for invalid in (
+        {**valid, "owner": ""},
+        {**valid, "remediation_task": "TASK-999"},
+        {**valid, "expires_on": "2020-01-01"},
+        {**valid, "release_status": "released"},
+        {key: value for key, value in valid.items() if key != "reason"},
+    ):
+        errors: list[str] = []
+        validate_waiver_entries([invalid], {"TASK-014", "TASK-031"}, errors)
+        assert errors

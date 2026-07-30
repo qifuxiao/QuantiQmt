@@ -78,6 +78,7 @@ delivery:
 - Human members explicitly authorized this governance freeze, unified task-state recovery, TASK-016 completion migration, TASK-029 blocking, and creation of this recovery task.
 - PR #46 was closed before this task; its branch and commits are not reused and are not evidence.
 - TASK-016 completion evidence is retained in its completed task file; TASK-029 is frozen until TASK-031 completion and independent Review.
+- Human bootstrap authorization: owner `qfxyyy`, expires `2026-08-13`; the sole exception is `TASK-014 → TASK-031` for TASK-031 state recovery only. It has `one_time: true`, `deny_business_unlock: true`, and `release_status: prohibited`; it cannot unlock business work or authorize release. TASK-014 PR21 facts: head `29ab5b4457861bea0a4116c878b19987118bd9c4`, merge `96b5e5960f498da726b678ff6b0f0885b4ecdafd`, CI [run 29063208943/job/86269287092](https://github.com/qifuxiao/QuantiQmt/actions/runs/29063208943/job/86269287092) and [run 29063168140/job/86269165408](https://github.com/qifuxiao/QuantiQmt/actions/runs/29063168140/job/86269165408); GitHub review is unavailable, therefore review status is `reported_unverified` and these facts are not release evidence.
 
 ## Required evidence
 

@@ -1,2 +1,13 @@
 schema_version: 1
-waivers: []
+waivers:
+  - task_id: TASK-014
+    beneficiary_task: TASK-031
+    kind: bootstrap_exception
+    one_time: true
+    deny_business_unlock: true
+    rule: TASK031-only governance bootstrap for legacy dependency delivery
+    reason: Human-authorized state recovery; TASK-014 evidence is reported_unverified and this exception cannot unlock business work or release.
+    owner: qfxyyy
+    expires_on: "2026-08-13"
+    remediation_task: TASK-031
+    release_status: prohibited
