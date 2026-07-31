@@ -6,6 +6,7 @@ import json
 import re
 import sys
 from collections.abc import Iterable
+from datetime import date
 from pathlib import Path
 from typing import Any
 
@@ -15,6 +16,33 @@ from jsonschema.validators import Draft202012Validator  # type: ignore[import-un
 ROOT = Path(__file__).resolve().parents[1]
 SPEC_ROOT = ROOT / "spec"
 TASK_ROOT = ROOT / "tasks"
+TASK_STATES = {"blocked", "ready", "active", "completed"}
+DELIVERY_AXES = {
+    "contract_status": {"not_applicable", "draft", "accepted", "superseded"},
+    "implementation_status": {"not_applicable", "not_started", "in_progress", "merged"},
+    "acceptance_status": {"not_run", "partial", "passed", "unverified"},
+    "review_status": {
+        "not_required",
+        "pending",
+        "changes_requested",
+        "approved",
+        "reported_unverified",
+    },
+    "release_status": {"not_applicable", "prohibited", "eligible", "released"},
+}
+SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+URL_RE = re.compile(r"^https?://[^\s]+$")
+PR_RE = re.compile(r"^https://github\.com/[^/]+/[^/]+/pull/\d+$")
+COMPLETION_FIELDS = {
+    "mode",
+    "change_pr",
+    "reviewed_head_sha",
+    "review_verdict",
+    "reviewer",
+    "evidence_url",
+    "merge_commit_sha",
+    "human_authorization_evidence",
+}
 
 
 def load_yaml(path: Path) -> Any:
@@ -86,6 +114,269 @@ def task_files() -> Iterable[Path]:
         yield from sorted((TASK_ROOT / state).glob("TASK-*.md"))
 
 
+def validate_delivery(task_id: str, task: dict[str, Any], path: Path, errors: list[str]) -> None:
+    """Validate the independent governance delivery axes and evidence."""
+    delivery = task.get("delivery")
+    if delivery is None:
+        if task.get("status") == "completed":
+            errors.append(f"{path.relative_to(ROOT)}: completed task requires delivery metadata")
+        return
+    if not isinstance(delivery, dict) or delivery.get("schema_version") != 1:
+        errors.append(f"{path.relative_to(ROOT)}: delivery.schema_version must be 1")
+        return
+    for axis, allowed in DELIVERY_AXES.items():
+        if delivery.get(axis) not in allowed:
+            errors.append(f"{path.relative_to(ROOT)}: invalid delivery {axis}")
+    status = task.get("status")
+    review = delivery.get("review_status")
+    release = delivery.get("release_status")
+    if (
+        status == "completed"
+        and review != "reported_unverified"
+        and (
+            delivery.get("acceptance_status") != "passed"
+            or delivery.get("review_status") not in {"approved", "not_required"}
+            or delivery.get("implementation_status") not in {"merged", "not_applicable"}
+        )
+    ):
+        errors.append(f"{path.relative_to(ROOT)}: completed task has invalid delivery combination")
+    if review == "reported_unverified":
+        if release != "prohibited":
+            errors.append(
+                f"{path.relative_to(ROOT)}: reported_unverified requires prohibited release"
+            )
+        if not delivery.get("remediation_task") and not delivery.get("waiver_id"):
+            errors.append(
+                f"{path.relative_to(ROOT)}: reported_unverified requires remediation_task "
+                "or waiver_id"
+            )
+    if release in {"eligible", "released"} and review == "reported_unverified":
+        errors.append(f"{path.relative_to(ROOT)}: unverifiable review cannot unlock or release")
+    if status == "completed":
+        body = path.read_text(encoding="utf-8")
+        if "## Acceptance criteria" not in body:
+            errors.append(f"{path.relative_to(ROOT)}: completed task lacks Acceptance criteria")
+        elif review != "reported_unverified" and "[x]" not in body:
+            errors.append(
+                f"{path.relative_to(ROOT)}: completed task lacks checked acceptance evidence"
+            )
+        evidence = delivery.get("completion_evidence")
+        if not isinstance(evidence, dict) or not COMPLETION_FIELDS.issubset(evidence):
+            errors.append(f"{path.relative_to(ROOT)}: incomplete completion_evidence")
+        else:
+            for field in COMPLETION_FIELDS:
+                if not isinstance(evidence.get(field), str) or not evidence[field].strip():
+                    errors.append(f"{path.relative_to(ROOT)}: empty completion evidence {field}")
+            if review == "reported_unverified":
+                if evidence.get("review_verdict") != "reported_unverified":
+                    errors.append(
+                        f"{path.relative_to(ROOT)}: unverified evidence requires "
+                        "reported_unverified verdict"
+                    )
+            else:
+                if evidence.get("review_verdict") not in {"APPROVE", "NOT_REQUIRED"}:
+                    errors.append(
+                        f"{path.relative_to(ROOT)}: review_verdict must be APPROVE or NOT_REQUIRED"
+                    )
+                for field in ("reviewed_head_sha", "merge_commit_sha"):
+                    if not SHA_RE.fullmatch(str(evidence.get(field))):
+                        errors.append(f"{path.relative_to(ROOT)}: invalid evidence SHA {field}")
+                if not PR_RE.fullmatch(str(evidence.get("change_pr"))):
+                    errors.append(f"{path.relative_to(ROOT)}: change_pr must be a GitHub PR URL")
+                if not URL_RE.fullmatch(str(evidence.get("evidence_url"))):
+                    errors.append(f"{path.relative_to(ROOT)}: evidence_url must be an HTTP(S) URL")
+                if evidence.get("reviewer") in {"unverifiable", "reported_unverified"}:
+                    errors.append(
+                        f"{path.relative_to(ROOT)}: approved evidence requires a reviewer"
+                    )
+
+
+def validate_waiver_entries(
+    waivers: list[Any], known_task_ids: set[str], errors: list[str], today: date | None = None
+) -> None:
+    today = today or date.today()
+    required = {
+        "task_id",
+        "beneficiary_task",
+        "rule",
+        "reason",
+        "owner",
+        "expires_on",
+        "remediation_task",
+        "release_status",
+        "kind",
+        "one_time",
+        "deny_business_unlock",
+    }
+    bootstrap_count = sum(
+        isinstance(waiver, dict) and waiver.get("kind") == "bootstrap_exception"
+        for waiver in waivers
+    )
+    if bootstrap_count != 1:
+        errors.append("tasks/governance-waivers.yaml: exactly one bootstrap_exception is required")
+    expected_bootstrap = {
+        "task_id": "TASK-014",
+        "beneficiary_task": "TASK-031",
+        "kind": "bootstrap_exception",
+        "one_time": True,
+        "deny_business_unlock": True,
+        "owner": "qfxyyy",
+        "expires_on": "2026-08-13",
+        "remediation_task": "TASK-031",
+        "release_status": "prohibited",
+    }
+    for waiver in waivers:
+        if not isinstance(waiver, dict) or not required.issubset(waiver):
+            errors.append("tasks/governance-waivers.yaml: waiver missing required fields")
+            continue
+        for field in required - {"one_time", "deny_business_unlock"}:
+            if not isinstance(waiver.get(field), str) or not waiver[field].strip():
+                errors.append(
+                    f"tasks/governance-waivers.yaml: waiver field {field} must be non-empty"
+                )
+        if waiver.get("task_id") not in known_task_ids:
+            errors.append(f"tasks/governance-waivers.yaml: unknown task_id {waiver.get('task_id')}")
+        if waiver.get("remediation_task") not in known_task_ids:
+            errors.append(
+                "tasks/governance-waivers.yaml: unknown remediation_task "
+                f"{waiver.get('remediation_task')}"
+            )
+        if waiver.get("beneficiary_task") not in known_task_ids:
+            errors.append(
+                "tasks/governance-waivers.yaml: unknown beneficiary_task "
+                f"{waiver.get('beneficiary_task')}"
+            )
+        if not isinstance(waiver.get("one_time"), bool) or not isinstance(
+            waiver.get("deny_business_unlock"), bool
+        ):
+            errors.append("tasks/governance-waivers.yaml: bootstrap flags must be boolean")
+        if waiver.get("release_status") != "prohibited":
+            errors.append("tasks/governance-waivers.yaml: waiver release_status must be prohibited")
+        try:
+            expires = date.fromisoformat(str(waiver["expires_on"]))
+            if expires < today:
+                errors.append(
+                    f"tasks/governance-waivers.yaml: expired waiver for {waiver.get('task_id')}"
+                )
+        except ValueError:
+            errors.append(
+                f"tasks/governance-waivers.yaml: invalid expires_on for {waiver.get('task_id')}"
+            )
+        if waiver.get("release_status") in {"eligible", "released"}:
+            errors.append("tasks/governance-waivers.yaml: waiver cannot permit release")
+        if waiver.get("kind") == "bootstrap_exception":
+            for field, expected in expected_bootstrap.items():
+                if waiver.get(field) != expected:
+                    errors.append(
+                        "tasks/governance-waivers.yaml: bootstrap field "
+                        f"{field} must equal {expected}"
+                    )
+        elif any(
+            field in waiver for field in ("beneficiary_task", "one_time", "deny_business_unlock")
+        ):
+            errors.append(
+                "tasks/governance-waivers.yaml: ordinary waiver cannot carry bootstrap fields"
+            )
+
+
+def validate_waivers(errors: list[str]) -> None:
+    path = TASK_ROOT / "governance-waivers.yaml"
+    if not path.is_file():
+        errors.append("tasks/governance-waivers.yaml: required governance waiver registry missing")
+        return
+    document = load_yaml(path)
+    if not isinstance(document, dict) or document.get("schema_version") != 1:
+        errors.append("tasks/governance-waivers.yaml: schema_version must be 1")
+        return
+    waivers = document.get("waivers", [])
+    if not isinstance(waivers, list):
+        errors.append("tasks/governance-waivers.yaml: waivers must be a list")
+        return
+    known_task_ids: set[str] = set()
+    for task_path in task_files():
+        task_id = extract_front_matter(task_path).get("id")
+        if isinstance(task_id, str):
+            known_task_ids.add(task_id)
+    validate_waiver_entries(waivers, known_task_ids, errors)
+
+
+def validate_active_readme(tasks: dict[str, dict[str, Any]], errors: list[str]) -> None:
+    path = TASK_ROOT / "active" / "README.md"
+    if not path.is_file():
+        errors.append("tasks/active/README.md: missing active projection")
+        return
+    text = path.read_text(encoding="utf-8")
+    listed = set(re.findall(r"当前 active task.\s*(TASK-\d{3})", text))
+    listed.update(re.findall(r"(?m)^\s*[-*]\s*(TASK-\d{3})\b", text))
+    expected = {task_id for task_id, task in tasks.items() if task.get("status") == "active"}
+    if listed != expected:
+        errors.append(
+            "tasks/active/README.md: active projection mismatch "
+            f"(listed={sorted(listed)}, expected={sorted(expected)})"
+        )
+
+
+def delivery_is_unlockable(task: dict[str, Any]) -> bool:
+    delivery = task.get("delivery")
+    return (
+        isinstance(delivery, dict)
+        and delivery.get("schema_version") == 1
+        and delivery.get("implementation_status") in {"merged", "not_applicable"}
+        and delivery.get("acceptance_status") == "passed"
+        and delivery.get("review_status") in {"approved", "not_required"}
+        and delivery.get("release_status") in {"prohibited", "eligible", "released"}
+        and completion_evidence_is_trusted(delivery)
+    )
+
+
+def completion_evidence_is_trusted(delivery: dict[str, Any]) -> bool:
+    evidence = delivery.get("completion_evidence")
+    if not isinstance(evidence, dict) or not COMPLETION_FIELDS.issubset(evidence):
+        return False
+    if any(
+        not isinstance(evidence.get(field), str) or not evidence[field].strip()
+        for field in COMPLETION_FIELDS
+    ):
+        return False
+    if evidence.get("review_verdict") not in {"APPROVE", "NOT_REQUIRED"}:
+        return False
+    return (
+        SHA_RE.fullmatch(str(evidence.get("reviewed_head_sha"))) is not None
+        and SHA_RE.fullmatch(str(evidence.get("merge_commit_sha"))) is not None
+        and PR_RE.fullmatch(str(evidence.get("change_pr"))) is not None
+        and URL_RE.fullmatch(str(evidence.get("evidence_url"))) is not None
+        and evidence.get("reviewer") not in {"unverifiable", "reported_unverified"}
+    )
+
+
+def bootstrap_allows_dependency(
+    dependency: str, beneficiary: str, waivers: list[dict[str, Any]]
+) -> bool:
+    today = date.today()
+    for waiver in waivers:
+        try:
+            expires = date.fromisoformat(str(waiver.get("expires_on")))
+        except (TypeError, ValueError):
+            continue
+        if (
+            waiver.get("kind") == "bootstrap_exception"
+            and waiver.get("one_time") is True
+            and waiver.get("deny_business_unlock") is True
+            and waiver.get("task_id") == dependency == "TASK-014"
+            and waiver.get("beneficiary_task") == beneficiary == "TASK-031"
+            and isinstance(waiver.get("rule"), str)
+            and bool(waiver["rule"].strip())
+            and isinstance(waiver.get("reason"), str)
+            and bool(waiver["reason"].strip())
+            and waiver.get("owner") == "qfxyyy"
+            and expires >= today
+            and waiver.get("remediation_task") == "TASK-031"
+            and waiver.get("release_status") == "prohibited"
+        ):
+            return True
+    return False
+
+
 def validate_json_schemas(errors: list[str]) -> None:
     for path in sorted(SPEC_ROOT.rglob("*.schema.json")):
         try:
@@ -121,6 +412,10 @@ def validate_manifest(errors: list[str]) -> dict[str, Path]:
 def validate_tasks(specs: dict[str, Path], errors: list[str]) -> None:
     tasks: dict[str, dict[str, Any]] = {}
     task_paths: dict[str, Path] = {}
+    waiver_document = load_yaml(TASK_ROOT / "governance-waivers.yaml")
+    waivers = waiver_document.get("waivers", []) if isinstance(waiver_document, dict) else []
+    if not isinstance(waivers, list):
+        waivers = []
     for path in task_files():
         try:
             task = extract_front_matter(path)
@@ -135,6 +430,19 @@ def validate_tasks(specs: dict[str, Path], errors: list[str]) -> None:
             errors.append(f"duplicate task id: {task_id}")
         tasks[task_id] = task
         task_paths[task_id] = path
+        status = task.get("status")
+        expected_dir = (
+            {
+                "blocked": "backlog",
+                "ready": "backlog",
+                "active": "active",
+                "completed": "completed",
+            }.get(status)
+            if isinstance(status, str)
+            else None
+        )
+        if status not in TASK_STATES or expected_dir != path.parent.name:
+            errors.append(f"{path.relative_to(ROOT)}: status must match its queue directory")
         for field in ("status", "depends_on", "spec_refs", "allowed_paths", "forbidden_paths"):
             if field not in task:
                 errors.append(f"{path.relative_to(ROOT)}: missing {field}")
@@ -144,6 +452,7 @@ def validate_tasks(specs: dict[str, Path], errors: list[str]) -> None:
         verification = task.get("verification")
         if not isinstance(verification, dict) or not verification.get("commands"):
             errors.append(f"{path.relative_to(ROOT)}: verification.commands must not be empty")
+        validate_delivery(task_id, task, path, errors)
 
     graph: dict[str, list[str]] = {}
     for task_id, task in tasks.items():
@@ -169,9 +478,15 @@ def validate_tasks(specs: dict[str, Path], errors: list[str]) -> None:
         task_id = entry.get("id")
         indexed_path = entry.get("path")
         if isinstance(task_id, str):
+            if task_id in indexed_ids:
+                errors.append(f"tasks/index.yaml: duplicate task id {task_id}")
             indexed_ids.add(task_id)
         if not isinstance(indexed_path, str) or not (TASK_ROOT / indexed_path).is_file():
             errors.append(f"tasks/index.yaml: missing path for {task_id}: {indexed_path}")
+        if task_id in task_paths and indexed_path != str(
+            task_paths[task_id].relative_to(TASK_ROOT)
+        ).replace("\\", "/"):
+            errors.append(f"tasks/index.yaml: path mismatch for {task_id}")
         if task_id in tasks and entry.get("status") != tasks[task_id].get("status"):
             errors.append(f"tasks/index.yaml: status mismatch for {task_id}")
     missing = set(tasks) - indexed_ids
@@ -180,6 +495,22 @@ def validate_tasks(specs: dict[str, Path], errors: list[str]) -> None:
         errors.append(f"tasks/index.yaml: unindexed tasks: {sorted(missing)}")
     if extra:
         errors.append(f"tasks/index.yaml: entries without task files: {sorted(extra)}")
+    for task_id, task in tasks.items():
+        for dependency in task.get("depends_on", []):
+            dependency_task = tasks.get(dependency)
+            if task.get("status") == "active" and (
+                not isinstance(dependency_task, dict)
+                or dependency_task.get("status") != "completed"
+                or (
+                    not delivery_is_unlockable(dependency_task)
+                    and not bootstrap_allows_dependency(dependency, task_id, waivers)
+                )
+            ):
+                errors.append(
+                    f"{task_id}: dependency {dependency} lacks trusted completed delivery; "
+                    "activation denied"
+                )
+    validate_active_readme(tasks, errors)
 
 
 def validate_error_catalog(errors: list[str]) -> None:
@@ -288,6 +619,7 @@ def main() -> int:
     validate_json_schemas(errors)
     specs = validate_manifest(errors)
     validate_tasks(specs, errors)
+    validate_waivers(errors)
     validate_error_catalog(errors)
     validate_message_catalog(errors)
     validate_state_machines(errors)

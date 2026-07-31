@@ -8,6 +8,15 @@ allowed_paths: [src/quantiqmt/shared/**, tests/unit/shared/**]
 forbidden_paths: [src/quantiqmt/broker/**, src/quantiqmt/oms/**]
 verification:
   commands: ["poetry run pytest tests/unit/shared", "poetry run mypy src/quantiqmt/shared"]
+delivery:
+  schema_version: 1
+  contract_status: accepted
+  implementation_status: merged
+  acceptance_status: unverified
+  review_status: reported_unverified
+  release_status: prohibited
+  remediation_task: TASK-031
+  completion_evidence: {mode: historical_evidence_unverifiable, change_pr: unverifiable, reviewed_head_sha: unverifiable, review_verdict: reported_unverified, reviewer: unverifiable, evidence_url: unverifiable, merge_commit_sha: unverifiable, human_authorization_evidence: TASK-031 governance recovery authorization}
 ---
 
 # Objective

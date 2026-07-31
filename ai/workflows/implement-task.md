@@ -29,6 +29,8 @@ Risks/limitations:
 Spec deviations: none | details
 ```
 
+Record delivery schema version 1 and all five independent status axes. Capture exact PR/head/review/merge URLs and human authorization; write `reported_unverified` plus remediation or waiver when historical evidence cannot be reproduced. The implementing agent cannot self-approve, merge, release, or move a task to completed.
+
 ## 6. Handoff
 
 不得自行标记 completed。请求独立 Review，并保持变更可审查、无无关格式化。

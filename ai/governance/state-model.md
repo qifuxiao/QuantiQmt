@@ -1,0 +1,9 @@
+# Governance state model
+
+TASK-031 defines a machine-checked delivery record with independent axes. `status` is the queue state (`blocked|ready|active|completed`) and must agree with the backlog/active/completed directory. Delivery uses schema version 1 and does not reuse task status: contract (`not_applicable|draft|accepted|superseded`), implementation (`not_applicable|not_started|in_progress|merged`), acceptance (`not_run|partial|passed|unverified`), review (`not_required|pending|changes_requested|approved|reported_unverified`) and release (`not_applicable|prohibited|eligible|released`).
+
+Completed work requires passed acceptance, approved/not-required review and merged/not-applicable implementation. Historical claims that cannot be independently proved are recorded as `reported_unverified`, remain `release_status: prohibited`, and name a remediation task or a time-limited waiver. Such records cannot activate dependencies or serve as release evidence. Completion evidence carries the change PR, reviewed head, verdict/reviewer/link, merge commit, and human authorization; unknown values are written as `unverifiable`, never fabricated.
+
+`scripts/validate_specs.py` is the fail-closed gate for directory/front matter/index consistency, the active README projection, dependency activation, delivery combinations, completion evidence, and waiver expiry/release restrictions. Human members authorize activation and merge; an independent reviewer supplies review evidence; implementation agents do not self-complete tasks.
+
+The sole bootstrap exception is the human-authorized, one-time `TASK-014 → TASK-031` waiver owned by `qfxyyy`, expiring `2026-08-13`. It exists only to bootstrap TASK-031 state recovery while TASK-014 lacks delivery metadata; it has `deny_business_unlock: true` and `release_status: prohibited`. It is not a routine waiver or a task-lifecycle escape hatch, and cannot activate any business task or authorize release.

@@ -85,3 +85,6 @@
 - 发现另一个成员正在修改同一 allowed_paths 时，暂停并由协调会话重新分配。
 - 发现 Review 结论冲突时，以更严格的阻断 finding 为准，直到可复现证据消除分歧。
 - 不用临时重构、全仓库格式化或依赖升级来“顺手”解决任务外问题。
+# Governance handoff
+
+The coordinator records task queue state; the implementation agent records delivery evidence; an independent reviewer records the verdict against a concrete head; and a human member authorizes merge/release and any status transition. These roles are intentionally separate. Unverifiable history is never filled with guessed approvals.

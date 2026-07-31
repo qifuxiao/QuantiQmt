@@ -38,6 +38,23 @@ verification:
     - poetry run mypy src/quantiqmt/contracts
     - poetry run ruff check .
     - poetry run ruff format --check .
+delivery:
+  schema_version: 1
+  contract_status: accepted
+  implementation_status: not_started
+  acceptance_status: unverified
+  review_status: reported_unverified
+  release_status: prohibited
+  remediation_task: TASK-031
+  completion_evidence:
+    mode: historical_evidence_unverifiable
+    change_pr: unverifiable
+    reviewed_head_sha: unverifiable
+    review_verdict: reported_unverified
+    reviewer: unverifiable
+    evidence_url: unverifiable
+    merge_commit_sha: unverifiable
+    human_authorization_evidence: governance recovery authorization recorded in TASK-031
 ---
 
 # Objective
