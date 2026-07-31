@@ -47,9 +47,6 @@ delivery:
   completion_evidence: {mode: historical_evidence_unverifiable, change_pr: unverifiable, reviewed_head_sha: unverifiable, review_verdict: reported_unverified, reviewer: unverifiable, evidence_url: unverifiable, merge_commit_sha: unverifiable, human_authorization_evidence: TASK-031 governance recovery authorization}
 ---
 
-### Governance delivery evidence
-
-PR21 head/merge and CI facts are recorded in TASK-031, but GitHub review is unavailable; this remains reported_unverified and cannot unlock ordinary work.
 
 # Objective
 

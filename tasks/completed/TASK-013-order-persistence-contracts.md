@@ -30,9 +30,6 @@ delivery:
   completion_evidence: {mode: historical_evidence_unverifiable, change_pr: unverifiable, reviewed_head_sha: unverifiable, review_verdict: reported_unverified, reviewer: unverifiable, evidence_url: unverifiable, merge_commit_sha: unverifiable, human_authorization_evidence: TASK-031 governance recovery authorization}
 ---
 
-### Governance delivery evidence
-
-Historical Review/CI/merge evidence is not independently verifiable; no approval is inferred.
 
 # Objective
 
