@@ -13,6 +13,7 @@ allowed_paths:
   - tasks/governance-waivers.yaml
   - tasks/active/README.md
   - tasks/active/TASK-031-governance-recovery-baseline.md
+  - tasks/completed/TASK-031-governance-recovery-baseline.md
   - tasks/backlog/TASK-005-risk-engine.md
   - tasks/backlog/TASK-016-strategy-runtime-contracts.md
   - tasks/completed/TASK-016-strategy-runtime-contracts.md
