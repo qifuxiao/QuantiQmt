@@ -47,7 +47,6 @@ delivery:
   completion_evidence: {mode: historical_evidence_unverifiable, change_pr: unverifiable, reviewed_head_sha: unverifiable, review_verdict: reported_unverified, reviewer: unverifiable, evidence_url: unverifiable, merge_commit_sha: unverifiable, human_authorization_evidence: TASK-031 governance recovery authorization}
 ---
 
-
 # Objective
 
 在恢复 TASK-004 或启动 TASK-005/TASK-008 之前，系统性审计并优化规范与任务队列，使后续实现任务达到可由多人和 Codex/Claude/Gemini/Cursor 等 AI Agent 独立执行、独立 Review、独立验收的 L4 Implementation Specification 水平。

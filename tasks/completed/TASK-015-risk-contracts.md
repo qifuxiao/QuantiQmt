@@ -34,7 +34,6 @@ delivery:
   completion_evidence: {mode: historical_evidence_unverifiable, change_pr: unverifiable, reviewed_head_sha: unverifiable, review_verdict: reported_unverified, reviewer: unverifiable, evidence_url: unverifiable, merge_commit_sha: unverifiable, human_authorization_evidence: TASK-031 governance recovery authorization}
 ---
 
-
 # Objective
 
 冻结 RiskInput、Snapshot、RuleSet、逐规则结果、fail-closed taxonomy 和 RiskDecision 审计契约，使 TASK-005 可以无歧义实现纯 RiskEvaluator。

@@ -30,7 +30,6 @@ delivery:
   completion_evidence: {mode: historical_evidence_unverifiable, change_pr: unverifiable, reviewed_head_sha: unverifiable, review_verdict: reported_unverified, reviewer: unverifiable, evidence_url: unverifiable, merge_commit_sha: unverifiable, human_authorization_evidence: TASK-031 governance recovery authorization}
 ---
 
-
 # Objective
 
 冻结 Order 持久化身份、Repository、Journal、Snapshot 和事务 Outbox 的实施契约，消除 TASK-004 需要自行发明字段、DTO、恢复语义和并发行为的空间。

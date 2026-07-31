@@ -19,7 +19,6 @@ delivery:
   completion_evidence: {mode: historical_evidence_unverifiable, change_pr: unverifiable, reviewed_head_sha: unverifiable, review_verdict: reported_unverified, reviewer: unverifiable, evidence_url: unverifiable, merge_commit_sha: unverifiable, human_authorization_evidence: TASK-031 governance recovery authorization}
 ---
 
-
 # Objective
 
 实现不可变 ID、Money、Price、Quantity、InstrumentId、UTC 时间辅助类型和 Clock Protocol。

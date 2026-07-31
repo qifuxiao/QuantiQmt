@@ -19,7 +19,6 @@ delivery:
   completion_evidence: {mode: historical_evidence_unverifiable, change_pr: unverifiable, reviewed_head_sha: unverifiable, review_verdict: reported_unverified, reviewer: unverifiable, evidence_url: unverifiable, merge_commit_sha: unverifiable, human_authorization_evidence: TASK-031 governance recovery authorization}
 ---
 
-
 # Objective
 
 在实现消息 DTO 前补齐并评审 Order/Risk/Execution/Broker 的 active JSON Schema，将相关消息从 planned 转为 active。

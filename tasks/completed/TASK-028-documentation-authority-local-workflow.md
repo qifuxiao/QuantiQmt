@@ -44,7 +44,6 @@ delivery:
   completion_evidence: {mode: historical_evidence_unverifiable, change_pr: unverifiable, reviewed_head_sha: unverifiable, review_verdict: reported_unverified, reviewer: unverifiable, evidence_url: unverifiable, merge_commit_sha: unverifiable, human_authorization_evidence: TASK-031 governance recovery authorization}
 ---
 
-
 # Objective
 
 收敛第一优先级文档治理问题：更新根入口、明确 `docs/` 与 `spec/` 的权威边界、补齐本地 PostgreSQL/Poetry/Docker 环境说明，并把多成员三会话协作模式沉淀为工具无关流程。

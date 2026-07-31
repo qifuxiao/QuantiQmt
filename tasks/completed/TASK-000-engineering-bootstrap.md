@@ -19,7 +19,6 @@ delivery:
   completion_evidence: {mode: historical_evidence_unverifiable, change_pr: unverifiable, reviewed_head_sha: unverifiable, review_verdict: reported_unverified, reviewer: unverifiable, evidence_url: unverifiable, merge_commit_sha: unverifiable, human_authorization_evidence: TASK-031 governance recovery authorization}
 ---
 
-
 # Objective
 
 建立 Python 3.12、开发依赖、CI、Lint/Type/Test 配置和可执行的 spec/task 验证器，使后续任务的验证命令真实可运行。

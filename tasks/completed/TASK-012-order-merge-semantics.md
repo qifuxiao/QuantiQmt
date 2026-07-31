@@ -19,7 +19,6 @@ delivery:
   completion_evidence: {mode: historical_evidence_unverifiable, change_pr: unverifiable, reviewed_head_sha: unverifiable, review_verdict: reported_unverified, reviewer: unverifiable, evidence_url: unverifiable, merge_commit_sha: unverifiable, human_authorization_evidence: TASK-031 governance recovery authorization}
 ---
 
-
 # Objective
 
 补全 Order 在多笔部分成交、撤单竞态、重复及乱序 Broker/Trade 事实下的规范语义，使 TASK-003 可以无歧义实现。
