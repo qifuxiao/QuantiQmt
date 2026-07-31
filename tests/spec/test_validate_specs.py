@@ -270,6 +270,72 @@ def test_validate_tasks_dependency_gate(monkeypatch, delivery, allowed, bootstra
     fixture_root.rmdir()
 
 
+@pytest.mark.parametrize(
+    "delivery_block",
+    [
+        "",
+        (
+            "delivery:\n  schema_version: 1\n  contract_status: accepted\n"
+            "  implementation_status: merged\n  acceptance_status: partial\n"
+            "  review_status: approved\n  release_status: prohibited\n"
+        ),
+        (
+            "delivery:\n  schema_version: 1\n  contract_status: accepted\n"
+            "  implementation_status: merged\n  acceptance_status: passed\n"
+            "  review_status: approved\n  release_status: prohibited\n"
+            "  completion_evidence: {review_verdict: BOGUS}\n"
+        ),
+    ],
+)
+def test_validate_tasks_rejects_non_governance_completed_delivery(
+    monkeypatch, delivery_block
+) -> None:
+    fixture_root = ROOT / "tasks" / ".validator-fixture"
+    fixture_root.mkdir(exist_ok=True)
+    completed = fixture_root / "TASK-100.md"
+    active = fixture_root / "TASK-101.md"
+    try:
+        completed.write_text(
+            "---\nid: TASK-100\nstatus: completed\ndepends_on: []\n"
+            "spec_refs: []\nallowed_paths: []\nforbidden_paths: []\n"
+            "verification: {commands: [check]}\n"
+            + delivery_block
+            + "---\n\n## Acceptance criteria\n- [x] fixture\n",
+            encoding="utf-8",
+        )
+        active.write_text(
+            "---\nid: TASK-101\nstatus: active\ndepends_on: [TASK-100]\n"
+            "spec_refs: []\nallowed_paths: []\nforbidden_paths: []\n"
+            "verification: {commands: [check]}\n---\n",
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(validator, "task_files", lambda: [completed, active])
+        monkeypatch.setattr(validator, "validate_active_readme", lambda tasks, errors: None)
+        original_load_yaml = validator.load_yaml
+
+        def fake_load_yaml(path):
+            if path == validator.TASK_ROOT / "governance-waivers.yaml":
+                return {"waivers": []}
+            if path == validator.TASK_ROOT / "index.yaml":
+                return {
+                    "tasks": [
+                        {"id": "TASK-100", "path": "TASK-100.md", "status": "completed"},
+                        {"id": "TASK-101", "path": "TASK-101.md", "status": "active"},
+                    ]
+                }
+            return original_load_yaml(path)
+
+        monkeypatch.setattr(validator, "load_yaml", fake_load_yaml)
+        errors: list[str] = []
+        validate_tasks({}, errors)
+        assert errors
+        assert any("TASK-100" in error for error in errors)
+    finally:
+        completed.unlink(missing_ok=True)
+        active.unlink(missing_ok=True)
+        fixture_root.rmdir()
+
+
 def test_waiver_semantics_reject_empty_unknown_expired_and_release() -> None:
     valid = {
         "task_id": "TASK-014",

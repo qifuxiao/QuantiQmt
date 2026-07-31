@@ -118,6 +118,8 @@ def validate_delivery(task_id: str, task: dict[str, Any], path: Path, errors: li
     """Validate the independent governance delivery axes and evidence."""
     delivery = task.get("delivery")
     if delivery is None:
+        if task.get("status") == "completed":
+            errors.append(f"{path.relative_to(ROOT)}: completed task requires delivery metadata")
         return
     if not isinstance(delivery, dict) or delivery.get("schema_version") != 1:
         errors.append(f"{path.relative_to(ROOT)}: delivery.schema_version must be 1")
