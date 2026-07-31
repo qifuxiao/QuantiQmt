@@ -30,4 +30,4 @@ tasks:
   - {id: TASK-028, path: completed/TASK-028-documentation-authority-local-workflow.md, status: completed, depends_on: [TASK-014]}
   - {id: TASK-029, path: backlog/TASK-029-risk-runtime-schema-contract.md, status: blocked, depends_on: [TASK-015, TASK-030, TASK-031]}
   - {id: TASK-030, path: completed/TASK-030-risk-validator-integration-scope.md, status: completed, depends_on: [TASK-015]}
-  - {id: TASK-031, path: active/TASK-031-governance-recovery-baseline.md, status: active, depends_on: [TASK-014]}
+  - {id: TASK-031, path: completed/TASK-031-governance-recovery-baseline.md, status: completed, depends_on: [TASK-014]}
