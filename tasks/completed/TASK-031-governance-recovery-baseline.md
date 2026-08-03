@@ -66,7 +66,7 @@ delivery:
     reviewed_head_sha: 1ea81c50df7f0e0daffa60d06faa3f054a2472c8
     review_verdict: APPROVE
     reviewer: qifuxiao
-    evidence_url: https://github.com/qifuxiao/QuantiQmt/pull/48#pullrequestreview-4819870092
+    evidence_url: https://github.com/qifuxiao/QuantiQmt/pull/48#pullrequestreview-4825290403
     merge_commit_sha: 838c77442b72056dc095ccc5c7063722ddb7dbc5
     human_authorization_evidence: Human-authorized TASK-031 active-to-completed closeout after PR #48 merge.
 ---
