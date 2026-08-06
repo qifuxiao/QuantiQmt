@@ -96,14 +96,16 @@ delivery:
 - [x] 没有业务 Event、Command、DTO、错误码、状态机、Workflow、Repository 契约、运行时代码或业务发布能力发生变化。
 - [x] TASK-046 的实现结果已经独立 Review；实现 Agent 未自行批准、补写完成证据或执行 active-to-completed 状态迁移。
 
-## Implementation evidence pending independent Review
+## Implementation and independent Review evidence
 
-- Audited base is `f50d471530fe355e17e7ce82a33a24b8c1b2c01f`; the implementation branch is `codex/task-046-readiness-revalidation`. The exact pushed PR head is reported at handoff and must be the SHA bound by independent Review.
-- `REVIEW-IMPLEMENTATION-READINESS-0.7` and `ai/governance/l4-readiness-revalidation-task-046.yaml` record the accepted spec/ADR inventory, implementation baseline, seven decisions, dependency before/after matrix and remaining blockers.
-- TASK-017/018/020/022 remain backlog/ready and now depend on TASK-046. TASK-019/021 remain backlog/blocked with all other direct dependencies retained. TASK-029 remains backlog/blocked on TASK-030 and does not depend on TASK-046.
-- Validator integration covers TASK-046 active/in-progress, completed/reported-unverified, completed/missing evidence and completed/trusted evidence; only the last satisfies the dependency gate and none auto-activates a task.
-- `poetry run python scripts/validate_specs.py` passed. `poetry run pytest tests/spec tests/contract` passed with 229 tests; the only warning is inability to create `.pytest_cache` under workspace permissions.
-- No completion evidence, approval, merge claim, release eligibility or active-to-completed transition is recorded by the implementing Agent. The final acceptance item remains open for independent Review and human-authorized closeout.
+- Audited base was `f50d471530fe355e17e7ce82a33a24b8c1b2c01f`; implementation was delivered by PR #60.
+- Implementation PR #60 was independently reviewed on exact head `047012c458e04cc36c8fc5c7e97ba265a43e1a72`.
+- Formal Review verdict was `APPROVE` by `qifuxiao`: https://github.com/qifuxiao/QuantiQmt/pull/60#pullrequestreview-4875351978
+- PR #60 was merged as `342f48d1c39214e9f5af7f642adc1c67e27e84f3`.
+- `REVIEW-IMPLEMENTATION-READINESS-0.7` and `ai/governance/l4-readiness-revalidation-task-046.yaml` record the accepted spec/ADR inventory, implementation baseline, seven readiness decisions, dependency migration, validator evidence and remaining blockers.
+- TASK-017/018/020/022 remain backlog/ready and unactivated. TASK-019/021/029 remain backlog/blocked.
+- `poetry run python scripts/validate_specs.py` passed; `poetry run pytest tests/spec tests/contract` passed with 229 tests.
+- TASK-046 is completed with trusted delivery evidence. Release remains prohibited, and this closeout does not activate any successor task.
 
 ## Required evidence
 
