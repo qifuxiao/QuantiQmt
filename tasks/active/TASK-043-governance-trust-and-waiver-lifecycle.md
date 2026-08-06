@@ -88,6 +88,14 @@ Restore a machine-verifiable governance baseline so historical delivery evidence
 - PR #50 completed 4/4 CI checks. The implementation's local gates passed: specification validation; 32 spec tests; 191 contract tests; mypy over `src scripts`; Ruff check and format check over `scripts tests/spec`; and `git diff --check`.
 - An independent Review session reached final verdict APPROVE, but it could not publish a formal GitHub Review and PR #50's GitHub reviews list is empty. This session result is not substituted for auditable GitHub Review evidence: `review_status` remains `pending`, no `completion_evidence` is added, release remains prohibited, and TASK-043 remains active pending third-party Review evidence.
 
+## Closeout Review Gate
+
+- Post-merge evidence sync [PR #51](https://github.com/qifuxiao/QuantiQmt/pull/51), head `26882647f523a345eed86adfde3d93445c990a1d`, merged as `da377c9e910676d5c04b55fd053396c7cc7be7c2` with 4/4 CI checks successful.
+- The qifuxiao Review on PR #51 has GitHub state `COMMENTED`, not `APPROVED`. Its comment text must not be treated as formal approval or completion evidence.
+- This new PR exists only to obtain an independent, auditable Closeout Review for TASK-043 preparation. The reviewer must use **Review changes → Approve** so GitHub records an `APPROVED` verdict on this PR's exact head.
+- TASK-043 remains `active` with `implementation_status: merged`, `acceptance_status: passed`, `review_status: pending`, and `release_status: prohibited`.
+- TASK-005 and TASK-029 remain blocked. This gate does not complete TASK-043, add inferred or fabricated `completion_evidence`, activate a business task, or authorize release.
+
 ## Risks and rollback
 
 - 若 waiver 生命周期或历史证据无法安全解释，保持所有业务任务 blocked，不能延长例外或绕过依赖门禁。
