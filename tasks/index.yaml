@@ -35,3 +35,4 @@ tasks:
   - {id: TASK-044, path: completed/TASK-044-historical-delivery-evidence-remediation.md, status: completed, depends_on: []}
   - {id: TASK-045, path: completed/TASK-045-risk-runner-saturation-stability.md, status: completed, depends_on: [TASK-015]}
   - {id: TASK-046, path: completed/TASK-046-l4-contract-queue-readiness-revalidation.md, status: completed, depends_on: []}
+  - {id: TASK-047, path: active/TASK-047-l4-successor-test-location-awareness.md, status: active, depends_on: [TASK-046]}
