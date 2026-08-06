@@ -6,7 +6,7 @@ import concurrent.futures
 import hashlib
 import threading
 from collections.abc import Mapping
-from typing import Literal, Protocol
+from typing import Any, Literal, Protocol
 
 from quantiqmt.risk.audit import RiskAuditSemanticValidator
 from quantiqmt.risk.evaluator import DeterministicRiskEvaluator, timeout_decision, timeout_result
@@ -72,86 +72,85 @@ class RiskEvaluationRunner:
                 self._saturation_audit(risk_input, rule_set),
                 reason="RISK_EVALUATION_TIMEOUT",
             )
-        input_version = risk_input.to_primitive()["input_version"]
-        if not isinstance(input_version, str) or self._seen_filter.contains(input_version):
-            self._admission.release()
+        ownership = _AdmissionOwnership(self._admission)
+        try:
+            input_version = risk_input.to_primitive()["input_version"]
+            if not isinstance(input_version, str) or self._seen_filter.contains(input_version):
+                return self._validate_and_record(
+                    self._saturation_audit(risk_input, rule_set),
+                    reason="RISK_EVALUATION_TIMEOUT",
+                )
+            self._seen_filter.add(input_version)
+            self._attempt += 1
+            attempt = self._attempt
+            timeout_us = _timeout_us(rule_set)
+            start_ns = self._clock.monotonic_ns()
+            deadline_ns = start_ns + timeout_us * 1000
+            results: list[RuleResult] = []
+            timings: list[RuleTiming] = []
+            iterator = self._evaluator.iter_rule_results(risk_input, rule_set)
+            while True:
+                before_ns = self._clock.monotonic_ns()
+                remaining_ns = deadline_ns - before_ns
+                if remaining_ns <= 0:
+                    return self._validate_and_record(
+                        self._timeout_audit(
+                            risk_input, rule_set, results, timings, start_ns, timeout_us, attempt
+                        ),
+                        reason="RISK_EVALUATION_TIMEOUT",
+                    )
+                future = self._executor.submit(next, iterator, None)
+                try:
+                    result = future.result(timeout=remaining_ns / 1_000_000_000)
+                except concurrent.futures.TimeoutError:
+                    ownership.transfer_to_future(future)
+                    return self._validate_and_record(
+                        self._timeout_audit(
+                            risk_input, rule_set, results, timings, start_ns, timeout_us, attempt
+                        ),
+                        reason="RISK_EVALUATION_TIMEOUT",
+                    )
+                after_ns = self._clock.monotonic_ns()
+                if attempt != self._attempt:
+                    return self._validate_and_record(
+                        self._timeout_audit(
+                            risk_input, rule_set, results, timings, start_ns, timeout_us, attempt
+                        ),
+                        reason="RISK_EVALUATION_TIMEOUT",
+                    )
+                if result is None:
+                    break
+                results.append(result)
+                timings.append(
+                    RuleTiming._validated(
+                        result.evaluation_index,
+                        result.rule_id,
+                        max(1, ceil_div_us(after_ns - before_ns)),
+                    )
+                )
+                if after_ns >= deadline_ns:
+                    return self._validate_and_record(
+                        self._timeout_audit(
+                            risk_input, rule_set, results, timings, start_ns, timeout_us, attempt
+                        ),
+                        reason="RISK_EVALUATION_TIMEOUT",
+                    )
+            end_ns = self._clock.monotonic_ns()
+            decision = self._evaluator.decide(risk_input, rule_set, tuple(results))
             return self._validate_and_record(
-                self._saturation_audit(risk_input, rule_set),
-                reason="RISK_EVALUATION_TIMEOUT",
-            )
-        self._seen_filter.add(input_version)
-        self._attempt += 1
-        attempt = self._attempt
-        timeout_us = _timeout_us(rule_set)
-        start_ns = self._clock.monotonic_ns()
-        deadline_ns = start_ns + timeout_us * 1000
-        results: list[RuleResult] = []
-        timings: list[RuleTiming] = []
-        iterator = self._evaluator.iter_rule_results(risk_input, rule_set)
-        while True:
-            before_ns = self._clock.monotonic_ns()
-            remaining_ns = deadline_ns - before_ns
-            if remaining_ns <= 0:
-                self._admission.release()
-                return self._validate_and_record(
-                    self._timeout_audit(
-                        risk_input, rule_set, results, timings, start_ns, timeout_us, attempt
+                RiskAuditOutputV1._validated(
+                    decision=decision,
+                    evaluated_at=rfc3339_z(self._clock.utc_now()),  # type: ignore[arg-type]
+                    total_latency_us=max(
+                        sum(t.latency_us for t in timings), ceil_div_us(end_ns - start_ns)
                     ),
-                    reason="RISK_EVALUATION_TIMEOUT",
-                )
-            future = self._executor.submit(next, iterator, None)
-            try:
-                result = future.result(timeout=remaining_ns / 1_000_000_000)
-            except concurrent.futures.TimeoutError:
-                future.add_done_callback(lambda _future: _release_admission(self._admission))
-                return self._validate_and_record(
-                    self._timeout_audit(
-                        risk_input, rule_set, results, timings, start_ns, timeout_us, attempt
-                    ),
-                    reason="RISK_EVALUATION_TIMEOUT",
-                )
-            after_ns = self._clock.monotonic_ns()
-            if attempt != self._attempt:
-                self._admission.release()
-                return self._validate_and_record(
-                    self._timeout_audit(
-                        risk_input, rule_set, results, timings, start_ns, timeout_us, attempt
-                    ),
-                    reason="RISK_EVALUATION_TIMEOUT",
-                )
-            if result is None:
-                break
-            results.append(result)
-            timings.append(
-                RuleTiming._validated(
-                    result.evaluation_index,
-                    result.rule_id,
-                    max(1, ceil_div_us(after_ns - before_ns)),
+                    evaluation_timeout_us=timeout_us,
+                    completed_rule_count=len(results),
+                    rule_timings=tuple(timings),
                 )
             )
-            if after_ns >= deadline_ns:
-                self._admission.release()
-                return self._validate_and_record(
-                    self._timeout_audit(
-                        risk_input, rule_set, results, timings, start_ns, timeout_us, attempt
-                    ),
-                    reason="RISK_EVALUATION_TIMEOUT",
-                )
-        end_ns = self._clock.monotonic_ns()
-        decision = self._evaluator.decide(risk_input, rule_set, tuple(results))
-        self._admission.release()
-        return self._validate_and_record(
-            RiskAuditOutputV1._validated(
-                decision=decision,
-                evaluated_at=rfc3339_z(self._clock.utc_now()),  # type: ignore[arg-type]
-                total_latency_us=max(
-                    sum(t.latency_us for t in timings), ceil_div_us(end_ns - start_ns)
-                ),
-                evaluation_timeout_us=timeout_us,
-                completed_rule_count=len(results),
-                rule_timings=tuple(timings),
-            )
-        )
+        finally:
+            ownership.release_from_caller()
 
     def _timeout_audit(
         self,
@@ -227,8 +226,43 @@ def _timeout_us(rule_set: RiskRuleSetV1) -> int:
     return value
 
 
-def _release_admission(admission: threading.BoundedSemaphore) -> None:
-    admission.release()
+class _AdmissionOwnership:
+    """Release one admitted permit exactly once across caller/future handoff races."""
+
+    def __init__(self, admission: threading.BoundedSemaphore) -> None:
+        self._admission = admission
+        self._lock = threading.Lock()
+        self._state: Literal["caller", "registering", "callback", "released"] = "caller"
+
+    def transfer_to_future(self, future: concurrent.futures.Future[Any]) -> None:
+        with self._lock:
+            if self._state != "caller":
+                raise RuntimeError("admission ownership can only be transferred by its caller")
+            self._state = "registering"
+        try:
+            future.add_done_callback(self._release_from_callback)
+        except BaseException:
+            with self._lock:
+                if self._state == "registering":
+                    self._state = "caller"
+            raise
+        with self._lock:
+            if self._state == "registering":
+                self._state = "callback"
+
+    def release_from_caller(self) -> None:
+        with self._lock:
+            if self._state == "caller":
+                self._release_locked()
+
+    def _release_from_callback(self, _future: concurrent.futures.Future[Any]) -> None:
+        with self._lock:
+            if self._state in {"registering", "callback"}:
+                self._release_locked()
+
+    def _release_locked(self) -> None:
+        self._admission.release()
+        self._state = "released"
 
 
 class _InputVersionFilter:

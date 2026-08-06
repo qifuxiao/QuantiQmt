@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
-from threading import Event
 
 import pytest
 from hypothesis import given
@@ -10,6 +8,7 @@ from hypothesis import strategies as st
 from tests.unit.risk.test_risk_engine import (
     FakeClock,
     GateEvaluator,
+    TrackingAdmission,
     rule_set_dto,
     scoped_rule,
     valid_input,
@@ -254,24 +253,26 @@ def test_generated_input_version_filter_remains_bounded(index: int) -> None:
     assert runner._seen_filter.storage_bit_length <= runner._seen_filter.bounded_bit_count
 
 
-@given(st.booleans())
-def test_generated_timeout_saturation_does_not_invalidate_admitted_result(_: bool) -> None:
+def test_generated_timeout_saturation_does_not_invalidate_admitted_result() -> None:
     rule_set = valid_rule_set()
-    release = Event()
-    entered = Event()
-    runner = RiskEvaluationRunner(GateEvaluator(entered, release), FakeClock([0] * 100))
     first = RiskInputV1.create(with_input_hash(valid_input(rule_set), rule_set))
     second_payload = valid_input(rule_set)
     second_payload["order"]["order_id"] = "550e8400-e29b-41d4-a716-446655450999"
     second = RiskInputV1.create(with_input_hash(second_payload, rule_set))
-    with ThreadPoolExecutor(max_workers=1) as executor:
-        future = executor.submit(runner.run, first, rule_set_dto(rule_set))
-        assert entered.wait(timeout=1)
-        saturated = runner.run(second, rule_set_dto(rule_set))
-        release.set()
-        audit = future.result(timeout=1)
+    evaluator = GateEvaluator(second, rule_set_dto(rule_set))
+    runner = RiskEvaluationRunner(evaluator, FakeClock([0] * 100))
+    admission = TrackingAdmission()
+    runner._admission = admission
+    evaluator.bind(runner)
+
+    audit = runner.run(first, rule_set_dto(rule_set))
+
+    assert evaluator.saturated_audit is not None
+    saturated = evaluator.saturated_audit
     assert saturated.decision.decision_origin == "TIMEOUT_GUARD"
     assert audit.decision.decision_origin == "EVALUATOR"
+    assert evaluator.entry_count == 1
+    assert admission.release_count == 1
 
 
 @given(st.integers(min_value=-3, max_value=3), st.sampled_from(["PASS", "REJECT", "BAD"]))
