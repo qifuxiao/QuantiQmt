@@ -1,12 +1,13 @@
 ---
 id: TASK-043
 title: Restore governance trust and waiver lifecycle
-status: active
+status: completed
 depends_on: []
 spec_refs: [REVIEW-IMPLEMENTATION-READINESS-0.5]
 allowed_paths:
   - tasks/active/README.md
   - tasks/active/TASK-043-governance-trust-and-waiver-lifecycle.md
+  - tasks/completed/TASK-043-governance-trust-and-waiver-lifecycle.md
   - tasks/backlog/TASK-005-risk-engine.md
   - tasks/backlog/TASK-029-risk-runtime-schema-contract.md
   - tasks/completed/TASK-014-implementation-readiness.md
@@ -41,8 +42,17 @@ delivery:
   contract_status: not_applicable
   implementation_status: merged
   acceptance_status: passed
-  review_status: pending
+  review_status: approved
   release_status: prohibited
+  completion_evidence:
+    mode: governance_closeout_after_review_gate
+    change_pr: https://github.com/qifuxiao/QuantiQmt/pull/52
+    reviewed_head_sha: 1cb427cc6c1fed66a2808387471995d108bed305
+    review_verdict: APPROVE
+    reviewer: qifuxiao
+    evidence_url: https://github.com/qifuxiao/QuantiQmt/pull/52#pullrequestreview-4871949281
+    merge_commit_sha: 2e4ff814e8e67d5850dc1ab5f0e51622d6dfc8c4
+    human_authorization_evidence: 2026-08-06 human authorization to add the completed TASK-043 path and execute final closeout
 ---
 
 # Objective
@@ -66,12 +76,12 @@ Restore a machine-verifiable governance baseline so historical delivery evidence
 
 ## Acceptance criteria
 
-- [ ] waiver 在有效期内、到期后、退休后和重复登记时均有明确且机器可验证的结果；不会因历史 bootstrap 例外导致规范门禁永久失败或允许业务解锁。
-- [ ] `ready` 任务的依赖可信度有明确语义；任何 `reported_unverified` 或缺失 delivery 的依赖都不能激活下游任务。
-- [ ] TASK-014、TASK-015、TASK-030 的 evidence 只接受可追溯 PR/head/review/merge/human authorization；未知事实仍写作 `unverifiable`。
-- [ ] 负例通过真实 `validate_tasks()` 路径覆盖：过期 waiver、重复 waiver、错误 beneficiary、缺失 evidence、reported_unverified 依赖和伪 ready 任务。
-- [ ] TASK-005、TASK-029 仍保持 blocked；本任务不解锁、不发布任何业务能力。
-- [ ] 所有 verification.commands 通过，且 allowed/forbidden path 审计无越权。
+- [x] waiver 在有效期内、到期后、退休后和重复登记时均有明确且机器可验证的结果；不会因历史 bootstrap 例外导致规范门禁永久失败或允许业务解锁。
+- [x] `ready` 任务的依赖可信度有明确语义；任何 `reported_unverified` 或缺失 delivery 的依赖都不能激活下游任务。
+- [x] TASK-014、TASK-015、TASK-030 的 evidence 只接受可追溯 PR/head/review/merge/human authorization；未知事实仍写作 `unverifiable`。
+- [x] 负例通过真实 `validate_tasks()` 路径覆盖：过期 waiver、重复 waiver、错误 beneficiary、缺失 evidence、reported_unverified 依赖和伪 ready 任务。
+- [x] TASK-005、TASK-029 仍保持 blocked；本任务不解锁、不发布任何业务能力。
+- [x] 所有 verification.commands 通过，且 allowed/forbidden path 审计无越权。
 
 ## Required evidence
 
@@ -92,9 +102,18 @@ Restore a machine-verifiable governance baseline so historical delivery evidence
 
 - Post-merge evidence sync [PR #51](https://github.com/qifuxiao/QuantiQmt/pull/51), head `26882647f523a345eed86adfde3d93445c990a1d`, merged as `da377c9e910676d5c04b55fd053396c7cc7be7c2` with 4/4 CI checks successful.
 - The qifuxiao Review on PR #51 has GitHub state `COMMENTED`, not `APPROVED`. Its comment text must not be treated as formal approval or completion evidence.
-- This new PR exists only to obtain an independent, auditable Closeout Review for TASK-043 preparation. The reviewer must use **Review changes → Approve** so GitHub records an `APPROVED` verdict on this PR's exact head.
-- TASK-043 remains `active` with `implementation_status: merged`, `acceptance_status: passed`, `review_status: pending`, and `release_status: prohibited`.
-- TASK-005 and TASK-029 remain blocked. This gate does not complete TASK-043, add inferred or fabricated `completion_evidence`, activate a business task, or authorize release.
+- Closeout Review Gate PR #52 obtained an independent, auditable GitHub `APPROVED` Review from qifuxiao on exact head `1cb427cc6c1fed66a2808387471995d108bed305`, then merged as `2e4ff814e8e67d5850dc1ab5f0e51622d6dfc8c4`.
+- Human authorization for this final closeout adds the exact completed TASK-043 path to `allowed_paths`; TASK-043 is now `completed` with `implementation_status: merged`, `acceptance_status: passed`, `review_status: approved`, and `release_status: prohibited`.
+- TASK-005 and TASK-029 remain blocked. This final closeout uses only the formally approved evidence above; it does not add inferred or fabricated evidence, activate a business task, or authorize release.
+
+## Final acceptance evidence
+
+- Waiver lifecycle: `tests/spec/test_validate_specs.py` exercises active, expired, retired, duplicate, wrong-beneficiary, completed-remediation, and non-business-unlock behavior through the governance validator; the retired registry remains unchanged and release-prohibited.
+- Dependency trust: real `validate_tasks()` fixtures reject missing or `reported_unverified` delivery and prove a textual `ready` state cannot unlock an active dependent.
+- Historical evidence: TASK-014, TASK-015, and TASK-030 retain only Git-verifiable PR/head/merge facts; unavailable Review, CI, or authorization remains `unverifiable` and cannot unlock dependencies.
+- Verification: specification validation, 32 spec tests, mypy, Ruff check, Ruff format check, and diff/path audits passed for the implementation and are rerun for this final closeout.
+- Isolation: TASK-005 and TASK-029 remain blocked with zero task-body diff; no business capability is activated or released, and `release_status` remains `prohibited`.
+- Review and authorization: PR #52 has formal `APPROVED` evidence at the exact reviewed head and was merged; a human explicitly authorized the completed path addition and final active-to-completed transition.
 
 ## Risks and rollback
 
