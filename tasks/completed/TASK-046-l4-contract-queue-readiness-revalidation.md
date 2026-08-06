@@ -1,7 +1,7 @@
 ---
 id: TASK-046
 title: Revalidate implementation readiness for the L4 contract queue
-status: active
+status: completed
 depends_on: []
 spec_refs:
   - REVIEW-IMPLEMENTATION-READINESS-0.5
@@ -41,10 +41,19 @@ verification:
 delivery:
   schema_version: 1
   contract_status: not_applicable
-  implementation_status: in_progress
-  acceptance_status: partial
-  review_status: pending
+  implementation_status: merged
+  acceptance_status: passed
+  review_status: approved
   release_status: prohibited
+  completion_evidence:
+    mode: governance_closeout_after_independent_review
+    change_pr: https://github.com/qifuxiao/QuantiQmt/pull/60
+    reviewed_head_sha: 047012c458e04cc36c8fc5c7e97ba265a43e1a72
+    review_verdict: APPROVE
+    reviewer: qifuxiao
+    evidence_url: https://github.com/qifuxiao/QuantiQmt/pull/60#pullrequestreview-4875351978
+    merge_commit_sha: 342f48d1c39214e9f5af7f642adc1c67e27e84f3
+    human_authorization_evidence: Human-authorized TASK-046 active-to-completed closeout after independently reviewed PR #60 merge.
 ---
 
 # Objective
@@ -85,7 +94,7 @@ delivery:
 - [x] validator 与 `tests/spec/**` 的正反例证明：`reported_unverified`/缺失可信 delivery evidence 的依赖拒绝激活；active/in-progress 的 TASK-046 也不能解锁对应任务；只有 completed TASK-046 的可信 delivery/completion evidence 才能满足 successor 门禁。
 - [x] `poetry run python scripts/validate_specs.py` 与 `poetry run pytest tests/spec tests/contract` 全部通过，且变更路径审计未超出 allowed paths、未触及 forbidden paths。
 - [x] 没有业务 Event、Command、DTO、错误码、状态机、Workflow、Repository 契约、运行时代码或业务发布能力发生变化。
-- [ ] TASK-046 的实现结果已经独立 Review；实现 Agent 未自行批准、补写完成证据或执行 active-to-completed 状态迁移。
+- [x] TASK-046 的实现结果已经独立 Review；实现 Agent 未自行批准、补写完成证据或执行 active-to-completed 状态迁移。
 
 ## Implementation evidence pending independent Review
 
