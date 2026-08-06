@@ -39,8 +39,8 @@ verification:
 delivery:
   schema_version: 1
   contract_status: not_applicable
-  implementation_status: in_progress
-  acceptance_status: not_run
+  implementation_status: merged
+  acceptance_status: passed
   review_status: pending
   release_status: prohibited
 ---
@@ -84,6 +84,9 @@ Restore a machine-verifiable governance baseline so historical delivery evidence
 - `ready` is a backlog candidate label only. Actual activation requires every dependency to have trusted completed delivery; neither `ready` nor `blocked` bypasses that machine gate.
 - TASK-014, TASK-015, and TASK-030 PR/head/merge facts were reconstructed from local Git objects on 2026-08-06. GitHub Review/CI queries could not be authenticated or reached, so unknown Review, CI, and human-authorization facts remain `reported_unverified` / `unverifiable` and release remains prohibited.
 - TASK-005 and TASK-029 remain blocked. This task authorizes no business activation or release.
+- Implementation was delivered by [PR #50](https://github.com/qifuxiao/QuantiQmt/pull/50) at head `b0c93bd44934b59a6b4febff0117266d85ccffb5` and merged as `a58f1cf64b680d612e96cec0b683b926a7beb6d5`; the merge parentage is reproducible from `origin/main`.
+- PR #50 completed 4/4 CI checks. The implementation's local gates passed: specification validation; 32 spec tests; 191 contract tests; mypy over `src scripts`; Ruff check and format check over `scripts tests/spec`; and `git diff --check`.
+- An independent Review session reached final verdict APPROVE, but it could not publish a formal GitHub Review and PR #50's GitHub reviews list is empty. This session result is not substituted for auditable GitHub Review evidence: `review_status` remains `pending`, no `completion_evidence` is added, release remains prohibited, and TASK-043 remains active pending third-party Review evidence.
 
 ## Risks and rollback
 
