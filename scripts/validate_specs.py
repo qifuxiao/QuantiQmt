@@ -43,6 +43,7 @@ COMPLETION_FIELDS = {
     "merge_commit_sha",
     "human_authorization_evidence",
 }
+WAIVER_LIFECYCLE_STATES = {"active", "retired", "expired"}
 
 
 def load_yaml(path: Path) -> Any:
@@ -192,7 +193,11 @@ def validate_delivery(task_id: str, task: dict[str, Any], path: Path, errors: li
 
 
 def validate_waiver_entries(
-    waivers: list[Any], known_task_ids: set[str], errors: list[str], today: date | None = None
+    waivers: list[Any],
+    known_task_ids: set[str],
+    errors: list[str],
+    today: date | None = None,
+    task_statuses: dict[str, str] | None = None,
 ) -> None:
     today = today or date.today()
     required = {
@@ -207,6 +212,7 @@ def validate_waiver_entries(
         "kind",
         "one_time",
         "deny_business_unlock",
+        "lifecycle_status",
     }
     bootstrap_count = sum(
         isinstance(waiver, dict) and waiver.get("kind") == "bootstrap_exception"
@@ -254,14 +260,66 @@ def validate_waiver_entries(
             errors.append("tasks/governance-waivers.yaml: waiver release_status must be prohibited")
         try:
             expires = date.fromisoformat(str(waiver["expires_on"]))
-            if expires < today:
-                errors.append(
-                    f"tasks/governance-waivers.yaml: expired waiver for {waiver.get('task_id')}"
-                )
         except ValueError:
             errors.append(
                 f"tasks/governance-waivers.yaml: invalid expires_on for {waiver.get('task_id')}"
             )
+            expires = None
+        lifecycle = waiver.get("lifecycle_status")
+        if lifecycle not in WAIVER_LIFECYCLE_STATES:
+            errors.append(
+                "tasks/governance-waivers.yaml: lifecycle_status must be active, retired, "
+                "or expired"
+            )
+        elif lifecycle == "active":
+            if expires is not None and expires < today:
+                errors.append(
+                    "tasks/governance-waivers.yaml: active waiver is past expires_on and "
+                    "must transition to expired"
+                )
+            if "retired_on" in waiver or "expired_on" in waiver:
+                errors.append(
+                    "tasks/governance-waivers.yaml: active waiver cannot have terminal dates"
+                )
+            if task_statuses is not None and any(
+                task_statuses.get(str(waiver.get(field))) == "completed"
+                for field in ("beneficiary_task", "remediation_task")
+            ):
+                errors.append(
+                    "tasks/governance-waivers.yaml: completed remediation requires retired "
+                    "waiver lifecycle"
+                )
+        elif lifecycle == "retired":
+            retired_on = parse_waiver_transition_date(waiver, "retired_on", errors)
+            if retired_on is not None and retired_on > today:
+                errors.append("tasks/governance-waivers.yaml: retired_on cannot be in the future")
+            if "expired_on" in waiver:
+                errors.append(
+                    "tasks/governance-waivers.yaml: retired waiver cannot have expired_on"
+                )
+            if (
+                task_statuses is not None
+                and task_statuses.get(str(waiver.get("remediation_task"))) != "completed"
+            ):
+                errors.append(
+                    "tasks/governance-waivers.yaml: retired waiver remediation_task must be "
+                    "completed"
+                )
+        elif lifecycle == "expired":
+            expired_on = parse_waiver_transition_date(waiver, "expired_on", errors)
+            if expired_on is not None:
+                if expires is not None and expired_on <= expires:
+                    errors.append(
+                        "tasks/governance-waivers.yaml: expired_on must be after expires_on"
+                    )
+                if expired_on > today:
+                    errors.append(
+                        "tasks/governance-waivers.yaml: expired_on cannot be in the future"
+                    )
+            if "retired_on" in waiver:
+                errors.append(
+                    "tasks/governance-waivers.yaml: expired waiver cannot have retired_on"
+                )
         if waiver.get("release_status") in {"eligible", "released"}:
             errors.append("tasks/governance-waivers.yaml: waiver cannot permit release")
         if waiver.get("kind") == "bootstrap_exception":
@@ -279,6 +337,21 @@ def validate_waiver_entries(
             )
 
 
+def parse_waiver_transition_date(
+    waiver: dict[str, Any], field: str, errors: list[str]
+) -> date | None:
+    """Parse a required terminal waiver date without accepting empty or invalid values."""
+    value = waiver.get(field)
+    if not isinstance(value, str) or not value.strip():
+        errors.append(f"tasks/governance-waivers.yaml: {field} is required")
+        return None
+    try:
+        return date.fromisoformat(value)
+    except ValueError:
+        errors.append(f"tasks/governance-waivers.yaml: invalid {field}")
+        return None
+
+
 def validate_waivers(errors: list[str]) -> None:
     path = TASK_ROOT / "governance-waivers.yaml"
     if not path.is_file():
@@ -292,12 +365,14 @@ def validate_waivers(errors: list[str]) -> None:
     if not isinstance(waivers, list):
         errors.append("tasks/governance-waivers.yaml: waivers must be a list")
         return
-    known_task_ids: set[str] = set()
+    task_statuses: dict[str, str] = {}
     for task_path in task_files():
-        task_id = extract_front_matter(task_path).get("id")
-        if isinstance(task_id, str):
-            known_task_ids.add(task_id)
-    validate_waiver_entries(waivers, known_task_ids, errors)
+        task = extract_front_matter(task_path)
+        task_id = task.get("id")
+        status = task.get("status")
+        if isinstance(task_id, str) and isinstance(status, str):
+            task_statuses[task_id] = status
+    validate_waiver_entries(waivers, set(task_statuses), errors, task_statuses=task_statuses)
 
 
 def validate_active_readme(tasks: dict[str, dict[str, Any]], errors: list[str]) -> None:
@@ -360,6 +435,7 @@ def bootstrap_allows_dependency(
             continue
         if (
             waiver.get("kind") == "bootstrap_exception"
+            and waiver.get("lifecycle_status") == "active"
             and waiver.get("one_time") is True
             and waiver.get("deny_business_unlock") is True
             and waiver.get("task_id") == dependency == "TASK-014"
@@ -468,6 +544,24 @@ def validate_tasks(specs: dict[str, Path], errors: list[str]) -> None:
     if has_cycle(graph):
         errors.append("tasks: dependency graph contains a cycle")
 
+    bootstrap_entries = [
+        waiver
+        for waiver in waivers
+        if isinstance(waiver, dict) and waiver.get("kind") == "bootstrap_exception"
+    ]
+    trusted_bootstrap_waivers: list[dict[str, Any]] = []
+    if bootstrap_entries:
+        waiver_errors: list[str] = []
+        validate_waiver_entries(
+            waivers,
+            set(tasks),
+            waiver_errors,
+            task_statuses={task_id: str(task.get("status")) for task_id, task in tasks.items()},
+        )
+        errors.extend(waiver_errors)
+        if not waiver_errors:
+            trusted_bootstrap_waivers = bootstrap_entries
+
     index = load_yaml(TASK_ROOT / "index.yaml")
     indexed = index.get("tasks", []) if isinstance(index, dict) else []
     indexed_ids: set[str] = set()
@@ -503,7 +597,9 @@ def validate_tasks(specs: dict[str, Path], errors: list[str]) -> None:
                 or dependency_task.get("status") != "completed"
                 or (
                     not delivery_is_unlockable(dependency_task)
-                    and not bootstrap_allows_dependency(dependency, task_id, waivers)
+                    and not bootstrap_allows_dependency(
+                        dependency, task_id, trusted_bootstrap_waivers
+                    )
                 )
             ):
                 errors.append(

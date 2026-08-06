@@ -11,3 +11,5 @@ waivers:
     expires_on: "2026-08-13"
     remediation_task: TASK-031
     release_status: prohibited
+    lifecycle_status: retired
+    retired_on: "2026-08-05"
