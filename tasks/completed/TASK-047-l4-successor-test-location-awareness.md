@@ -1,7 +1,7 @@
 ---
 id: TASK-047
 title: Make the L4 successor dependency spec test location-aware
-status: active
+status: completed
 depends_on: [TASK-046]
 spec_refs: [REVIEW-IMPLEMENTATION-READINESS-0.7]
 allowed_paths:
@@ -32,10 +32,22 @@ verification:
 delivery:
   schema_version: 1
   contract_status: not_applicable
-  implementation_status: in_progress
+  implementation_status: merged
   acceptance_status: passed
-  review_status: pending
+  review_status: approved
   release_status: prohibited
+  completion_evidence:
+    mode: governance_closeout_after_independent_review
+    change_pr: https://github.com/qifuxiao/QuantiQmt/pull/63
+    reviewed_head_sha: b4484e52bd6b5c4c340eea779c47c689ff1515b7
+    review_verdict: APPROVE
+    reviewer: qifuxiao
+    evidence_url: https://github.com/qifuxiao/QuantiQmt/pull/63#pullrequestreview-4876260438
+    merge_commit_sha: 5dd1745b44c82968f6e88da37ba44013f32ba21f
+    human_authorization_evidence: >-
+      2026-08-06 human authorization: 授权创建并激活 TASK-047，仅修复 L4
+      successor spec test 的 backlog 路径硬编码，不修改业务代码或 L4
+      契约；按独立 Review、合并、收尾流程推进。
 ---
 
 # Objective
@@ -65,15 +77,17 @@ delivery:
 - [x] `poetry run python scripts/validate_specs.py` 与 `poetry run pytest tests/spec tests/contract` 全部通过。
 - [x] changed-path 审计仅包含 TASK-047 allowed paths，且未触及任何 forbidden path。
 
-## Implementation evidence pending independent Review
+## Implementation and independent Review evidence
 
 - Implementation base is `main@e27df973fd512540a7a4a0885a661d71591f0180`; branch is `codex/task-047-implementation`.
 - The real-repository successor dependency test resolves TASK-017/018/019/020/021/022 and TASK-029 through each unique `tasks/index.yaml` path instead of assuming `tasks/backlog/`.
 - A minimal synthetic fixture proves `active/TASK-017.md` resolution without copying the real TASK-017 file.
 - Missing index entries, duplicate index entries, missing indexed files and mismatched task IDs each fail with `AssertionError`; no test is skipped and no exception is swallowed.
 - `poetry run python scripts/validate_specs.py` passed; `poetry run pytest tests/spec tests/contract` passed with 234 tests.
-- Only this active TASK-047 record and `tests/spec/test_validate_specs.py` changed. TASK-017 remains backlog/ready; no specification, validator, runtime, completed-history or waiver file changed.
-- No approval, merge, completion evidence, release eligibility or active-to-completed transition is claimed by the implementing Agent.
+- Implementation PR #63 changed only the then-active TASK-047 record and `tests/spec/test_validate_specs.py`. TASK-017 remains backlog/ready; no specification, validator, runtime, completed-history or waiver file changed by the implementation.
+- PR #63 was independently reviewed by `qifuxiao` on exact head `b4484e52bd6b5c4c340eea779c47c689ff1515b7` with formal `APPROVE`: https://github.com/qifuxiao/QuantiQmt/pull/63#pullrequestreview-4876260438
+- PR #63 merged as `5dd1745b44c82968f6e88da37ba44013f32ba21f`; this separate human-authorized governance closeout records the resulting completed state.
+- TASK-047 remains release-prohibited. This closeout does not activate TASK-017 or any other task.
 
 ## Independent Review focus
 
