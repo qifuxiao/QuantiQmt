@@ -2,6 +2,7 @@ from pathlib import Path
 
 import pytest
 import scripts.validate_specs as validator
+import yaml
 from scripts.validate_specs import (
     ROOT,
     bootstrap_allows_dependency,
@@ -18,6 +19,54 @@ from scripts.validate_specs import (
 
 import quantiqmt
 
+TASK047_FIXTURE_ROOT = ROOT / "tests" / ".task047-index-fixture"
+
+
+def indexed_task_path(task_id: str, *, root: Path = ROOT) -> Path:
+    index = validator.load_yaml(root / "tasks" / "index.yaml")
+    entries = index.get("tasks") if isinstance(index, dict) else None
+    assert isinstance(entries, list), "tasks/index.yaml must contain a tasks list"
+    matches = [entry for entry in entries if entry.get("id") == task_id]
+    assert len(matches) == 1, f"{task_id} must have exactly one index entry"
+    relative_path = matches[0].get("path")
+    assert isinstance(relative_path, str) and relative_path, (
+        f"{task_id} index path must be a non-empty string"
+    )
+    task_path = root / "tasks" / relative_path
+    assert task_path.is_file(), f"{task_id} indexed task file is missing: {relative_path}"
+    task = extract_front_matter(task_path)
+    assert task.get("id") == task_id, f"{task_id} index path resolves to task {task.get('id')}"
+    return task_path
+
+
+def write_task047_index_fixture(
+    entries: list[dict[str, str]], *, task_id: str | None = None
+) -> Path | None:
+    task_root = TASK047_FIXTURE_ROOT / "tasks"
+    task_root.mkdir(parents=True)
+    task_path = None
+    if task_id is not None:
+        task_path = task_root / "active" / "TASK-017.md"
+        task_path.parent.mkdir()
+        task_path.write_text(f"---\nid: {task_id}\n---\n", encoding="utf-8")
+    (task_root / "index.yaml").write_text(
+        yaml.safe_dump({"tasks": entries}, sort_keys=False), encoding="utf-8"
+    )
+    return task_path
+
+
+def remove_task047_index_fixture() -> None:
+    task_root = TASK047_FIXTURE_ROOT / "tasks"
+    task_path = task_root / "active" / "TASK-017.md"
+    task_path.unlink(missing_ok=True)
+    if task_path.parent.is_dir():
+        task_path.parent.rmdir()
+    (task_root / "index.yaml").unlink(missing_ok=True)
+    if task_root.is_dir():
+        task_root.rmdir()
+    if TASK047_FIXTURE_ROOT.is_dir():
+        TASK047_FIXTURE_ROOT.rmdir()
+
 
 def test_package_is_importable() -> None:
     assert quantiqmt.__name__ == "quantiqmt"
@@ -33,8 +82,6 @@ def test_cycle_detection() -> None:
 
 
 def test_manifest_paths_are_inside_spec() -> None:
-    import yaml
-
     manifest_path = ROOT / "spec" / "manifest.yaml"
     manifest = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
     for path in manifest_entries(manifest).values():
@@ -127,25 +174,46 @@ def test_reported_unverified_or_missing_delivery_cannot_unlock() -> None:
 
 
 def test_l4_queue_uses_task046_successor_without_rewriting_task029_gate() -> None:
-    successor_tasks = {
-        "TASK-017": "TASK-017-execution-broker-contracts.md",
-        "TASK-018": "TASK-018-ledger-portfolio-contracts.md",
-        "TASK-019": "TASK-019-target-resolver-contracts.md",
-        "TASK-020": "TASK-020-market-data-contracts.md",
-        "TASK-021": "TASK-021-backtest-live-parity-contracts.md",
-        "TASK-022": "TASK-022-observability-control-contracts.md",
-    }
-    for task_id, filename in successor_tasks.items():
-        task = extract_front_matter(ROOT / "tasks" / "backlog" / filename)
-        assert task["id"] == task_id
+    successor_task_ids = (
+        "TASK-017",
+        "TASK-018",
+        "TASK-019",
+        "TASK-020",
+        "TASK-021",
+        "TASK-022",
+    )
+    for task_id in successor_task_ids:
+        task = extract_front_matter(indexed_task_path(task_id))
         assert "TASK-046" in task["depends_on"]
         assert "TASK-014" not in task["depends_on"]
 
-    task029 = extract_front_matter(
-        ROOT / "tasks" / "backlog" / "TASK-029-risk-runtime-schema-contract.md"
-    )
+    task029 = extract_front_matter(indexed_task_path("TASK-029"))
     assert "TASK-030" in task029["depends_on"]
     assert "TASK-046" not in task029["depends_on"]
+
+
+def test_indexed_task_path_supports_active_successor() -> None:
+    entry = {"id": "TASK-017", "path": "active/TASK-017.md", "status": "active"}
+    try:
+        active_task = write_task047_index_fixture([entry], task_id="TASK-017")
+        assert indexed_task_path("TASK-017", root=TASK047_FIXTURE_ROOT) == active_task
+    finally:
+        remove_task047_index_fixture()
+
+
+@pytest.mark.parametrize("case", ["missing", "duplicate", "missing_file", "wrong_id"])
+def test_indexed_task_path_fails_closed(case: str) -> None:
+    entry = {"id": "TASK-017", "path": "active/TASK-017.md", "status": "active"}
+    entries = [] if case == "missing" else [entry]
+    if case == "duplicate":
+        entries.append(entry.copy())
+    fixture_task_id = "TASK-018" if case == "wrong_id" else None
+    try:
+        write_task047_index_fixture(entries, task_id=fixture_task_id)
+        with pytest.raises(AssertionError):
+            indexed_task_path("TASK-017", root=TASK047_FIXTURE_ROOT)
+    finally:
+        remove_task047_index_fixture()
 
 
 def test_l4_successor_policy_rejects_historical_and_risk_substitution_edges() -> None:
