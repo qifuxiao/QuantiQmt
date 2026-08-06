@@ -1,5 +1,5 @@
 # Active Tasks
 
-当前 active task：TASK-044。
+当前没有 active task。
 
-TASK-044 仅处理 TASK-014、TASK-015、TASK-030 的历史交付证据可信度与依赖门禁；TASK-005 与 TASK-029 仍为 blocked，不解除业务依赖或发布能力。
+TASK-044 已通过 PR #54 的正式独立 APPROVED Review、合并并由人类授权完成治理收尾。TASK-005 与 TASK-029 仍为 blocked；TASK-017、TASK-018、TASK-020、TASK-022 仍仅为 backlog/ready，不解除业务依赖或发布能力。

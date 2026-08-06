@@ -1,12 +1,13 @@
 ---
 id: TASK-044
 title: Remediate historical delivery evidence trust
-status: active
+status: completed
 depends_on: []
 spec_refs: [REVIEW-IMPLEMENTATION-READINESS-0.5]
 allowed_paths:
   - tasks/active/README.md
   - tasks/active/TASK-044-historical-delivery-evidence-remediation.md
+  - tasks/completed/TASK-044-historical-delivery-evidence-remediation.md
   - tasks/completed/TASK-014-implementation-readiness.md
   - tasks/completed/TASK-015-risk-contracts.md
   - tasks/completed/TASK-030-risk-validator-integration-scope.md
@@ -29,10 +30,22 @@ verification:
 delivery:
   schema_version: 1
   contract_status: not_applicable
-  implementation_status: in_progress
-  acceptance_status: not_run
-  review_status: pending
+  implementation_status: merged
+  acceptance_status: passed
+  review_status: approved
   release_status: prohibited
+  completion_evidence:
+    mode: governance_closeout_after_independent_review
+    change_pr: https://github.com/qifuxiao/QuantiQmt/pull/54
+    reviewed_head_sha: 655d142bca62a175f42232963ab6b62cf6d5265d
+    review_verdict: APPROVE
+    reviewer: qifuxiao
+    evidence_url: https://github.com/qifuxiao/QuantiQmt/pull/54#pullrequestreview-4872411250
+    merge_commit_sha: a7f4cf21c738a1190a3ba9014b48c7c41ab08cbe
+    human_authorization_evidence: >-
+      授权将 tasks/completed/TASK-044-historical-delivery-evidence-remediation.md
+      精确加入 TASK-044 allowed_paths，仅用于 TASK-044 active→completed 收尾迁移、
+      记录 PR #54 的 Review/merge/CI 证据；不得激活或解锁业务任务。
 ---
 
 # Objective
@@ -54,12 +67,12 @@ Restore machine-trusted delivery evidence for the historical prerequisite tasks 
 
 ## Acceptance criteria
 
-- [ ] TASK-014, TASK-015, and TASK-030 each have an auditable evidence assessment tied to exact PR/head/merge/review facts.
-- [ ] Unknown historical facts remain explicitly unverified; no historical approval or CI result is fabricated.
-- [ ] Any evidence promoted to trusted completed delivery has a valid reviewer, review URL, exact reviewed head, merge commit, and human authorization.
-- [ ] The validator and governance evidence demonstrate that ready candidates cannot activate through missing or reported-unverified dependencies.
-- [ ] TASK-005 and TASK-029 remain blocked; no business task is activated or released.
-- [ ] All verification commands pass and the final diff stays within the allowed paths.
+- [x] TASK-014, TASK-015, and TASK-030 each have an auditable evidence assessment tied to exact PR/head/merge/review facts.
+- [x] Unknown historical facts remain explicitly unverified; no historical approval or CI result is fabricated.
+- [x] Any evidence promoted to trusted completed delivery has a valid reviewer, review URL, exact reviewed head, merge commit, and human authorization.
+- [x] The validator and governance evidence demonstrate that ready candidates cannot activate through missing or reported-unverified dependencies.
+- [x] TASK-005 and TASK-029 remain blocked; no business task is activated or released.
+- [x] All verification commands pass and the final diff stays within the allowed paths.
 
 ## Required evidence
 
@@ -76,6 +89,9 @@ Restore machine-trusted delivery evidence for the historical prerequisite tasks 
 - TASK-030 remains `reported_unverified` / `prohibited`: scope PR #42 and closeout PR #44 both have empty GitHub Review lists, and PR #44 does not provide independently auditable human closeout authorization.
 - Existing validator integration tests reject ready dependencies, missing delivery, `reported_unverified` delivery, terminal/invalid bootstrap waivers, and wrong beneficiaries. The retired TASK-014 waiver is unchanged and cannot unlock business activation.
 - TASK-005 and TASK-029 remain blocked. TASK-017, TASK-018, TASK-020, and TASK-022 remain backlog/ready candidates only and are not active; TASK-014 remains untrusted, so their activation gate stays fail-closed.
+- Implementation PR #54 was formally `APPROVED` by qifuxiao on exact head `655d142bca62a175f42232963ab6b62cf6d5265d` at `2026-08-06T08:04:37Z`; the auditable Review is https://github.com/qifuxiao/QuantiQmt/pull/54#pullrequestreview-4872411250.
+- PR #54 completed 4/4 CI checks successfully (`quality` ×2 and `persistence-postgresql` ×2) and merged as `a7f4cf21c738a1190a3ba9014b48c7c41ab08cbe`.
+- Human authorization adds only the exact completed TASK-044 path for this active-to-completed closeout and evidence recording. It does not activate, unlock, or release any business task; `release_status` remains `prohibited`.
 
 ## Risks and rollback
 
