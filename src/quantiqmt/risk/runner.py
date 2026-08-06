@@ -72,86 +72,87 @@ class RiskEvaluationRunner:
                 self._saturation_audit(risk_input, rule_set),
                 reason="RISK_EVALUATION_TIMEOUT",
             )
-        input_version = risk_input.to_primitive()["input_version"]
-        if not isinstance(input_version, str) or self._seen_filter.contains(input_version):
-            self._admission.release()
+        release_on_exit = True
+        try:
+            input_version = risk_input.to_primitive()["input_version"]
+            if not isinstance(input_version, str) or self._seen_filter.contains(input_version):
+                return self._validate_and_record(
+                    self._saturation_audit(risk_input, rule_set),
+                    reason="RISK_EVALUATION_TIMEOUT",
+                )
+            self._seen_filter.add(input_version)
+            self._attempt += 1
+            attempt = self._attempt
+            timeout_us = _timeout_us(rule_set)
+            start_ns = self._clock.monotonic_ns()
+            deadline_ns = start_ns + timeout_us * 1000
+            results: list[RuleResult] = []
+            timings: list[RuleTiming] = []
+            iterator = self._evaluator.iter_rule_results(risk_input, rule_set)
+            while True:
+                before_ns = self._clock.monotonic_ns()
+                remaining_ns = deadline_ns - before_ns
+                if remaining_ns <= 0:
+                    return self._validate_and_record(
+                        self._timeout_audit(
+                            risk_input, rule_set, results, timings, start_ns, timeout_us, attempt
+                        ),
+                        reason="RISK_EVALUATION_TIMEOUT",
+                    )
+                future = self._executor.submit(next, iterator, None)
+                try:
+                    result = future.result(timeout=remaining_ns / 1_000_000_000)
+                except concurrent.futures.TimeoutError:
+                    release_on_exit = False
+                    future.add_done_callback(lambda _future: _release_admission(self._admission))
+                    return self._validate_and_record(
+                        self._timeout_audit(
+                            risk_input, rule_set, results, timings, start_ns, timeout_us, attempt
+                        ),
+                        reason="RISK_EVALUATION_TIMEOUT",
+                    )
+                after_ns = self._clock.monotonic_ns()
+                if attempt != self._attempt:
+                    return self._validate_and_record(
+                        self._timeout_audit(
+                            risk_input, rule_set, results, timings, start_ns, timeout_us, attempt
+                        ),
+                        reason="RISK_EVALUATION_TIMEOUT",
+                    )
+                if result is None:
+                    break
+                results.append(result)
+                timings.append(
+                    RuleTiming._validated(
+                        result.evaluation_index,
+                        result.rule_id,
+                        max(1, ceil_div_us(after_ns - before_ns)),
+                    )
+                )
+                if after_ns >= deadline_ns:
+                    return self._validate_and_record(
+                        self._timeout_audit(
+                            risk_input, rule_set, results, timings, start_ns, timeout_us, attempt
+                        ),
+                        reason="RISK_EVALUATION_TIMEOUT",
+                    )
+            end_ns = self._clock.monotonic_ns()
+            decision = self._evaluator.decide(risk_input, rule_set, tuple(results))
             return self._validate_and_record(
-                self._saturation_audit(risk_input, rule_set),
-                reason="RISK_EVALUATION_TIMEOUT",
-            )
-        self._seen_filter.add(input_version)
-        self._attempt += 1
-        attempt = self._attempt
-        timeout_us = _timeout_us(rule_set)
-        start_ns = self._clock.monotonic_ns()
-        deadline_ns = start_ns + timeout_us * 1000
-        results: list[RuleResult] = []
-        timings: list[RuleTiming] = []
-        iterator = self._evaluator.iter_rule_results(risk_input, rule_set)
-        while True:
-            before_ns = self._clock.monotonic_ns()
-            remaining_ns = deadline_ns - before_ns
-            if remaining_ns <= 0:
-                self._admission.release()
-                return self._validate_and_record(
-                    self._timeout_audit(
-                        risk_input, rule_set, results, timings, start_ns, timeout_us, attempt
+                RiskAuditOutputV1._validated(
+                    decision=decision,
+                    evaluated_at=rfc3339_z(self._clock.utc_now()),  # type: ignore[arg-type]
+                    total_latency_us=max(
+                        sum(t.latency_us for t in timings), ceil_div_us(end_ns - start_ns)
                     ),
-                    reason="RISK_EVALUATION_TIMEOUT",
-                )
-            future = self._executor.submit(next, iterator, None)
-            try:
-                result = future.result(timeout=remaining_ns / 1_000_000_000)
-            except concurrent.futures.TimeoutError:
-                future.add_done_callback(lambda _future: _release_admission(self._admission))
-                return self._validate_and_record(
-                    self._timeout_audit(
-                        risk_input, rule_set, results, timings, start_ns, timeout_us, attempt
-                    ),
-                    reason="RISK_EVALUATION_TIMEOUT",
-                )
-            after_ns = self._clock.monotonic_ns()
-            if attempt != self._attempt:
-                self._admission.release()
-                return self._validate_and_record(
-                    self._timeout_audit(
-                        risk_input, rule_set, results, timings, start_ns, timeout_us, attempt
-                    ),
-                    reason="RISK_EVALUATION_TIMEOUT",
-                )
-            if result is None:
-                break
-            results.append(result)
-            timings.append(
-                RuleTiming._validated(
-                    result.evaluation_index,
-                    result.rule_id,
-                    max(1, ceil_div_us(after_ns - before_ns)),
+                    evaluation_timeout_us=timeout_us,
+                    completed_rule_count=len(results),
+                    rule_timings=tuple(timings),
                 )
             )
-            if after_ns >= deadline_ns:
+        finally:
+            if release_on_exit:
                 self._admission.release()
-                return self._validate_and_record(
-                    self._timeout_audit(
-                        risk_input, rule_set, results, timings, start_ns, timeout_us, attempt
-                    ),
-                    reason="RISK_EVALUATION_TIMEOUT",
-                )
-        end_ns = self._clock.monotonic_ns()
-        decision = self._evaluator.decide(risk_input, rule_set, tuple(results))
-        self._admission.release()
-        return self._validate_and_record(
-            RiskAuditOutputV1._validated(
-                decision=decision,
-                evaluated_at=rfc3339_z(self._clock.utc_now()),  # type: ignore[arg-type]
-                total_latency_us=max(
-                    sum(t.latency_us for t in timings), ceil_div_us(end_ns - start_ns)
-                ),
-                evaluation_timeout_us=timeout_us,
-                completed_rule_count=len(results),
-                rule_timings=tuple(timings),
-            )
-        )
 
     def _timeout_audit(
         self,

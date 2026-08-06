@@ -39,7 +39,7 @@ delivery:
   schema_version: 1
   contract_status: accepted
   implementation_status: in_progress
-  acceptance_status: not_run
+  acceptance_status: passed
   review_status: pending
   release_status: prohibited
 ---
@@ -70,13 +70,64 @@ Eliminate the reproducible CI flakiness in `RiskEvaluationRunner` saturation han
 
 ## Acceptance criteria
 
-- [ ] The failure mechanism is reproduced and explained with an execution timeline showing admission, worker execution, saturation response, timeout fencing, and release ownership.
-- [ ] Deterministic tests prove that a saturated second request returns `TIMEOUT_GUARD` without changing the already admitted request's final `EVALUATOR` result.
-- [ ] Tests use explicit synchronization and bounded deadlines rather than scheduler-dependent sleeps or Hypothesis retries.
-- [ ] Success, timeout, evaluator exception, saturation, and late-completion paths prove exactly-once admission release with no semaphore over-release or permit leak.
-- [ ] Existing fail-closed timeout, semantic audit validation, metrics, bounded-state, and duplicate-input behavior remain unchanged and pass regression tests.
-- [ ] The full CI-equivalent unit/property/spec/contract suite passes without rerunning a failed job.
-- [ ] All modifications stay within `allowed_paths`; TASK-005 and TASK-029 remain blocked and no other task is activated.
+- [x] The failure mechanism is reproduced and explained with an execution timeline showing admission, worker execution, saturation response, timeout fencing, and release ownership.
+- [x] Deterministic tests prove that a saturated second request returns `TIMEOUT_GUARD` without changing the already admitted request's final `EVALUATOR` result.
+- [x] Tests use explicit synchronization and bounded deadlines rather than scheduler-dependent sleeps or Hypothesis retries.
+- [x] Success, timeout, evaluator exception, saturation, and late-completion paths prove exactly-once admission release with no semaphore over-release or permit leak.
+- [x] Existing fail-closed timeout, semantic audit validation, metrics, bounded-state, and duplicate-input behavior remain unchanged and pass regression tests.
+- [x] The full CI-equivalent unit/property/spec/contract suite passes without rerunning a failed job.
+- [x] All modifications stay within `allowed_paths`; TASK-005 and TASK-029 remain blocked and no other task is activated.
+
+## Implementation evidence
+
+### Root cause and execution timeline
+
+- The production ownership defect was an exception-path permit leak. After admission, the
+  runner released the bounded semaphore only in selected return branches; a non-timeout
+  exception from `iterator`, `future.result()`, `decide()`, semantic validation, or metrics
+  escaped without releasing the permit. The implementation now has one local owner and one
+  `finally` release path. Only a real worker timeout transfers ownership to the future's
+  completion callback, before the timeout audit is returned.
+- The historical flaky property test also coupled the maximum 4,000 microsecond business
+  evaluation deadline to two OS-thread scheduling round trips. A busy runner could therefore
+  correctly time out the admitted request even though the saturated request never changed its
+  attempt. The replacement GateEvaluator performs the saturated re-entrant call from the
+  already admitted internal worker, making the ordering deterministic without widening the
+  business timeout, sleeping, retrying, or suppressing Hypothesis health checks.
+- Deterministic success timeline: first request acquires admission -> internal worker enters
+  GateEvaluator -> GateEvaluator invokes the second request -> second request cannot acquire
+  admission, emits validated `TIMEOUT_GUARD`, and never enters the evaluator -> GateEvaluator
+  records the release signal and yields the admitted results -> first request returns the
+  `EVALUATOR` audit -> the first request's `finally` releases admission exactly once.
+- Deterministic timeout timeline: first request acquires admission -> internal worker blocks ->
+  bounded `future.result()` expires -> ownership transfers to the future callback and the
+  timeout audit returns -> a second request remains saturated -> the explicit worker release
+  signal allows late completion -> the callback discards the late output and releases admission
+  exactly once.
+
+### Acceptance evidence
+
+- `test_saturation_does_not_invalidate_admitted_attempt` and
+  `test_generated_timeout_saturation_does_not_invalidate_admitted_result` assert the second
+  request's `TIMEOUT_GUARD`, the first request's `EVALUATOR` result, a single evaluator entry,
+  and a single admission release.
+- `test_evaluator_exception_releases_admission_exactly_once` fails against the previous runner:
+  after the first evaluator exception the leaked permit makes the next unique request saturate.
+  It now proves the exception still propagates fail-closed and the next request is admitted.
+- `test_timeout_late_completion_owns_admission_until_worker_exits` proves timeout ownership is
+  not released early, saturation cannot steal it, late output is fenced, and callback release is
+  exactly once. The immediate-timeout and invalid-audit tests separately assert exactly-once
+  release from synchronous timeout and semantic-validator exception paths.
+- `poetry run pytest tests/unit/risk tests/property/risk`: 74 passed in one run.
+- `poetry run pytest tests/unit tests/property tests/spec tests/contract --cov
+  --cov-report=term-missing`: 404 passed in one run; total coverage 85%.
+- A bounded 100-iteration subprocess stress loop ran four targeted concurrency tests per
+  iteration: 400/400 targeted executions passed with no retry of a failed iteration.
+- `poetry run mypy src/quantiqmt/risk`, targeted Ruff check/format, and
+  `poetry run python scripts/validate_specs.py` all exited 0; `git diff --check` passed.
+- Diff and task-state audits show only TASK-045 allowed paths changed; TASK-005 and TASK-029
+  remain `blocked`, TASK-045 remains the sole `active` task, Review remains `pending`, and release
+  remains `prohibited`.
 
 ## Review focus
 
