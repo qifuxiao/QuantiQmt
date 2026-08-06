@@ -2,10 +2,10 @@
 id: TASK-020
 title: Complete Market data and MarketGateway L4 contracts
 status: ready
-depends_on: [TASK-014]
+depends_on: [TASK-046]
 spec_refs: [PORTS-CORE, CONTRACT-CATALOG, NFR-PERFORMANCE, NFR-RELIABILITY, NFR-OBSERVABILITY]
-allowed_paths: [spec/manifest.yaml, spec/contracts/**, spec/interfaces/**, spec/workflows/**, spec/storage/**, spec/nfr/**, tasks/backlog/TASK-020-market-data-contracts.md, tasks/index.yaml]
-forbidden_paths: [src/**, tests/**, migrations/**]
+allowed_paths: [spec/manifest.yaml, spec/contracts/**, spec/interfaces/**, spec/workflows/**, spec/storage/**, spec/nfr/**, tests/contract/messages/**, tasks/backlog/TASK-020-market-data-contracts.md, tasks/backlog/TASK-023-market-gateway.md, tasks/index.yaml]
+forbidden_paths: [src/**, tests/unit/**, tests/property/**, tests/integration/**, migrations/**]
 verification:
   commands:
     - poetry run python scripts/validate_specs.py

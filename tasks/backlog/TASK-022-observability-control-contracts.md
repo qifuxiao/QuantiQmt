@@ -2,10 +2,10 @@
 id: TASK-022
 title: Complete Observability, Config, and Control L4 contracts
 status: ready
-depends_on: [TASK-014]
+depends_on: [TASK-046]
 spec_refs: [INV-TRADING, INV-CONSISTENCY, INV-RISK, WF-CONFIG-ACTIVATION, NFR-OBSERVABILITY, NFR-RELIABILITY]
-allowed_paths: [spec/manifest.yaml, spec/contracts/**, spec/interfaces/**, spec/workflows/**, spec/state-machines/**, spec/nfr/**, tasks/backlog/TASK-022-observability-control-contracts.md, tasks/index.yaml]
-forbidden_paths: [src/**, tests/**, migrations/**]
+allowed_paths: [spec/manifest.yaml, spec/contracts/**, spec/interfaces/**, spec/workflows/**, spec/state-machines/**, spec/nfr/**, tests/contract/messages/**, tasks/backlog/TASK-022-observability-control-contracts.md, tasks/backlog/TASK-025-control-observability.md, tasks/index.yaml]
+forbidden_paths: [src/**, tests/unit/**, tests/property/**, tests/integration/**, migrations/**]
 verification:
   commands:
     - poetry run python scripts/validate_specs.py

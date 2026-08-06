@@ -44,6 +44,10 @@ COMPLETION_FIELDS = {
     "human_authorization_evidence",
 }
 WAIVER_LIFECYCLE_STATES = {"active", "retired", "expired"}
+L4_READINESS_SUCCESSOR = "TASK-046"
+L4_SUCCESSOR_TASKS = frozenset(
+    {"TASK-017", "TASK-018", "TASK-019", "TASK-020", "TASK-021", "TASK-022"}
+)
 
 
 def load_yaml(path: Path) -> Any:
@@ -453,6 +457,39 @@ def bootstrap_allows_dependency(
     return False
 
 
+def validate_l4_successor_dependencies(tasks: dict[str, dict[str, Any]], errors: list[str]) -> None:
+    """Keep the L4 queue on the fresh readiness gate without rewriting Risk history."""
+    present_successors = L4_SUCCESSOR_TASKS.intersection(tasks)
+    if present_successors and L4_READINESS_SUCCESSOR not in tasks:
+        errors.append(
+            f"tasks: {L4_READINESS_SUCCESSOR} successor gate missing for L4 contract queue"
+        )
+    for task_id in sorted(present_successors):
+        dependencies = tasks[task_id].get("depends_on")
+        if not isinstance(dependencies, list):
+            continue
+        if "TASK-014" in dependencies:
+            errors.append(
+                f"{task_id}: historical TASK-014 readiness dependency must not remain; "
+                f"use {L4_READINESS_SUCCESSOR}"
+            )
+        if L4_READINESS_SUCCESSOR not in dependencies:
+            errors.append(
+                f"{task_id}: missing {L4_READINESS_SUCCESSOR} readiness successor dependency"
+            )
+
+    task029 = tasks.get("TASK-029")
+    if isinstance(task029, dict):
+        dependencies = task029.get("depends_on")
+        if isinstance(dependencies, list):
+            if "TASK-030" not in dependencies:
+                errors.append("TASK-029: TASK-030 evidence dependency must remain explicit")
+            if L4_READINESS_SUCCESSOR in dependencies:
+                errors.append(
+                    "TASK-029: TASK-046 cannot replace or bypass TASK-030 evidence remediation"
+                )
+
+
 def validate_json_schemas(errors: list[str]) -> None:
     for path in sorted(SPEC_ROOT.rglob("*.schema.json")):
         try:
@@ -543,6 +580,7 @@ def validate_tasks(specs: dict[str, Path], errors: list[str]) -> None:
                 errors.append(f"{unknown_dep_path}: unknown dependency {dependency}")
     if has_cycle(graph):
         errors.append("tasks: dependency graph contains a cycle")
+    validate_l4_successor_dependencies(tasks, errors)
 
     bootstrap_entries = [
         waiver

@@ -1,0 +1,146 @@
+schema_version: 1
+audit_task: TASK-046
+record_status: implementation_complete_pending_independent_review
+audited_on: "2026-08-06"
+repository:
+  base_branch: main
+  base_sha: f50d471530fe355e17e7ce82a33a24b8c1b2c01f
+  implementation_branch: codex/task-046-readiness-revalidation
+  head_binding: exact PR head reported at handoff and required for independent Review
+authority:
+  precedence: [safety_invariants, accepted_adr, normative_spec, active_task, agent_instructions, explanatory_docs]
+  accepted_spec_baseline:
+    version: 0.7.0
+    status: accepted
+    all_manifest_entries_read: true
+    catalogs:
+      invariants: [INV-TRADING, INV-CONSISTENCY, INV-RISK]
+      interfaces: [PORTS-CORE, PORTS-STRATEGY, PORTS-ORDER-PERSISTENCE, PORTS-RISK]
+      state_machines: [SM-ORDER, SM-STRATEGY, SM-SYSTEM-MODE, SM-CONNECTION, SM-ACCOUNT, SM-PORTFOLIO, SM-RECONCILIATION-CASE]
+      workflows: [WF-SUBMIT-ORDER, WF-RECOVERY, WF-CANCEL-ORDER, WF-TRADE-ACCOUNTING, WF-BROKER-RECONNECT, WF-CONFIG-ACTIVATION, WF-STRATEGY-RUNTIME, WF-ORDER-COMMIT, WF-OUTBOX-PUBLICATION]
+      repositories: [REPO-ORDER]
+      storage: [STORAGE-SOT, STORAGE-ORDER-PERSISTENCE, STORAGE-OUTBOX]
+      nfr: [NFR-PERFORMANCE, NFR-RELIABILITY, NFR-OBSERVABILITY]
+      reviews: [REVIEW-BASELINE-0.1, REVIEW-IMPLEMENTATION-READINESS-0.5]
+      contracts_source: spec/manifest.yaml catalogs.contracts
+      contracts_all_read: true
+  accepted_adrs:
+    - {id: ADR-0001, decision: DDD bounded contexts and contract-first boundaries}
+    - {id: ADR-0004, decision: interface-first replaceable Gateway isolation}
+    - {id: ADR-0005, decision: guarded explicit state machines and recovery}
+    - {id: ADR-0008, decision: CPython 3.12 immutable types Decimal JSON Schema baseline}
+  non_accepted_adrs_not_promoted: [ADR-0002, ADR-0003, ADR-0006, ADR-0007]
+historical_evidence_boundaries:
+  TASK-014:
+    review_status: reported_unverified
+    release_status: prohibited
+    changed_by_task046: false
+  TASK-030:
+    review_status: reported_unverified
+    release_status: prohibited
+    replaced_by_task046: false
+  retired_waiver:
+    task_id: TASK-014
+    beneficiary_task: TASK-031
+    lifecycle_status: retired
+    registry_changed_by_task046: false
+    usable_for_unlock: false
+implementation_baseline:
+  present:
+    - shared value types and injected clocks
+    - immutable message contracts and source-root SchemaRegistry
+    - Order domain state machine
+    - Order persistence Journal Snapshot and transactional Outbox
+    - Risk model evaluator semantic audit projection and bounded runner
+    - Outbox lag safety policy
+  absent:
+    - Execution engine and Broker adapters or simulator
+    - Ledger Portfolio and Reconciliation contexts
+    - TargetResolver
+    - MarketGateway BarAggregator and market quality runtime
+    - Backtest engine and parity adapters
+    - Strategy runtime implementation
+    - ControlPlane and observability runtime
+  risk_runtime_gap:
+    schema_registry_project_default_reads_source_checkout: true
+    task: TASK-029
+    evidence_dependency: TASK-030
+readiness_decisions:
+  - task_id: TASK-017
+    decision: ready
+    active: false
+    successor_dependency: TASK-046
+    unblock: trusted completed TASK-046 delivery plus separate human activation
+  - task_id: TASK-018
+    decision: ready
+    active: false
+    successor_dependency: TASK-046
+    unblock: trusted completed TASK-046 delivery plus separate human activation
+  - task_id: TASK-019
+    decision: blocked
+    active: false
+    dependencies: [TASK-046, TASK-016, TASK-018]
+    unblock: every direct dependency has trusted completed delivery; TASK-018 is incomplete
+  - task_id: TASK-020
+    decision: ready
+    active: false
+    successor_dependency: TASK-046
+    unblock: trusted completed TASK-046 delivery plus separate human activation
+  - task_id: TASK-021
+    decision: blocked
+    active: false
+    dependencies: [TASK-046, TASK-016, TASK-017, TASK-020]
+    unblock: every direct dependency has trusted completed delivery; TASK-017 and TASK-020 are incomplete
+  - task_id: TASK-022
+    decision: ready
+    active: false
+    successor_dependency: TASK-046
+    unblock: trusted completed TASK-046 delivery plus separate human activation
+  - task_id: TASK-029
+    decision: blocked
+    active: false
+    dependencies: [TASK-015, TASK-030, TASK-031]
+    successor_dependency: forbidden
+    unblock: independently remediate TASK-030 evidence then satisfy normal dependency gate
+dependency_migrations:
+  - {task_id: TASK-017, before: [TASK-014], after: [TASK-046]}
+  - {task_id: TASK-018, before: [TASK-014], after: [TASK-046]}
+  - {task_id: TASK-019, before: [TASK-014, TASK-016, TASK-018], after: [TASK-046, TASK-016, TASK-018]}
+  - {task_id: TASK-020, before: [TASK-014], after: [TASK-046]}
+  - {task_id: TASK-021, before: [TASK-014, TASK-016, TASK-017, TASK-020], after: [TASK-046, TASK-016, TASK-017, TASK-020]}
+  - {task_id: TASK-022, before: [TASK-014], after: [TASK-046]}
+  - {task_id: TASK-029, before: [TASK-015, TASK-030, TASK-031], after: [TASK-015, TASK-030, TASK-031]}
+validator_evidence:
+  structural_policy:
+    successor_tasks: [TASK-017, TASK-018, TASK-019, TASK-020, TASK-021, TASK-022]
+    require_dependency: TASK-046
+    reject_dependency: TASK-014
+    task029_requires: TASK-030
+    task029_rejects: TASK-046
+  activation_matrix:
+    TASK046_active_in_progress: denied
+    TASK046_completed_reported_unverified: denied
+    TASK046_completed_missing_completion_evidence: denied
+    TASK046_completed_trusted_delivery: dependency_gate_satisfied_but_no_auto_activation
+scope:
+  business_contract_change: none
+  runtime_code_change: none
+  public_event_command_dto_change: none
+  state_machine_workflow_repository_change: none
+  migration_change: none
+  dependency_or_lockfile_change: none
+  activated_reviewed_tasks: []
+  release_status: prohibited
+verification:
+  commands:
+    - poetry run python scripts/validate_specs.py
+    - poetry run pytest tests/spec tests/contract
+  results:
+    specification_validation: {exit_code: 0, result: passed}
+    spec_and_contract_tests: {exit_code: 0, result: passed, collected: 229, passed: 229}
+    warning: pytest cache path could not be created because of workspace permissions; no test failed
+independent_review:
+  required: true
+  implementing_agent_may_approve: false
+  implementing_agent_may_merge: false
+  implementing_agent_may_move_task_to_completed: false
