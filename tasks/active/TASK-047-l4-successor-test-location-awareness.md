@@ -33,7 +33,7 @@ delivery:
   schema_version: 1
   contract_status: not_applicable
   implementation_status: in_progress
-  acceptance_status: not_run
+  acceptance_status: passed
   review_status: pending
   release_status: prohibited
 ---
@@ -57,13 +57,23 @@ delivery:
 
 ## Acceptance criteria
 
-- [ ] `test_l4_queue_uses_task046_successor_without_rewriting_task029_gate` 不再将 TASK-017/018/019/020/021/022 硬编码到 `tasks/backlog/`。
-- [ ] 测试从权威队列元数据解析任务路径，并继续断言六个 successor task 依赖 TASK-046 且不依赖 TASK-014。
-- [ ] TASK-029 仍必须依赖 TASK-030，且不得以 TASK-046 替代。
-- [ ] 测试覆盖至少一个 successor task 位于 `tasks/active/` 时的路径解析，证明合法激活不会导致 `FileNotFoundError`。
-- [ ] 不得通过跳过测试、吞掉路径解析异常或复制任务文件制造通过；缺失、重复或不一致的任务路径仍须 fail-closed。
-- [ ] `poetry run python scripts/validate_specs.py` 与 `poetry run pytest tests/spec tests/contract` 全部通过。
-- [ ] changed-path 审计仅包含 TASK-047 allowed paths，且未触及任何 forbidden path。
+- [x] `test_l4_queue_uses_task046_successor_without_rewriting_task029_gate` 不再将 TASK-017/018/019/020/021/022 硬编码到 `tasks/backlog/`。
+- [x] 测试从权威队列元数据解析任务路径，并继续断言六个 successor task 依赖 TASK-046 且不依赖 TASK-014。
+- [x] TASK-029 仍必须依赖 TASK-030，且不得以 TASK-046 替代。
+- [x] 测试覆盖至少一个 successor task 位于 `tasks/active/` 时的路径解析，证明合法激活不会导致 `FileNotFoundError`。
+- [x] 不得通过跳过测试、吞掉路径解析异常或复制任务文件制造通过；缺失、重复或不一致的任务路径仍须 fail-closed。
+- [x] `poetry run python scripts/validate_specs.py` 与 `poetry run pytest tests/spec tests/contract` 全部通过。
+- [x] changed-path 审计仅包含 TASK-047 allowed paths，且未触及任何 forbidden path。
+
+## Implementation evidence pending independent Review
+
+- Implementation base is `main@e27df973fd512540a7a4a0885a661d71591f0180`; branch is `codex/task-047-implementation`.
+- The real-repository successor dependency test resolves TASK-017/018/019/020/021/022 and TASK-029 through each unique `tasks/index.yaml` path instead of assuming `tasks/backlog/`.
+- A minimal synthetic fixture proves `active/TASK-017.md` resolution without copying the real TASK-017 file.
+- Missing index entries, duplicate index entries, missing indexed files and mismatched task IDs each fail with `AssertionError`; no test is skipped and no exception is swallowed.
+- `poetry run python scripts/validate_specs.py` passed; `poetry run pytest tests/spec tests/contract` passed with 234 tests.
+- Only this active TASK-047 record and `tests/spec/test_validate_specs.py` changed. TASK-017 remains backlog/ready; no specification, validator, runtime, completed-history or waiver file changed.
+- No approval, merge, completion evidence, release eligibility or active-to-completed transition is claimed by the implementing Agent.
 
 ## Independent Review focus
 
