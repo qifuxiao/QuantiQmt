@@ -61,6 +61,7 @@ delivery:
 - [ ] 测试从权威队列元数据解析任务路径，并继续断言六个 successor task 依赖 TASK-046 且不依赖 TASK-014。
 - [ ] TASK-029 仍必须依赖 TASK-030，且不得以 TASK-046 替代。
 - [ ] 测试覆盖至少一个 successor task 位于 `tasks/active/` 时的路径解析，证明合法激活不会导致 `FileNotFoundError`。
+- [ ] 不得通过跳过测试、吞掉路径解析异常或复制任务文件制造通过；缺失、重复或不一致的任务路径仍须 fail-closed。
 - [ ] `poetry run python scripts/validate_specs.py` 与 `poetry run pytest tests/spec tests/contract` 全部通过。
 - [ ] changed-path 审计仅包含 TASK-047 allowed paths，且未触及任何 forbidden path。
 
