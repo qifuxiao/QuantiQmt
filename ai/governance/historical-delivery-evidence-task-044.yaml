@@ -1,0 +1,82 @@
+schema_version: 1
+audit_task: TASK-044
+audited_on: "2026-08-06"
+policy:
+  trusted_requires: [change_pr, reviewed_head_sha, approved_review, reviewer, evidence_url, merge_commit_sha, human_authorization_evidence]
+  unknown_action: preserve_reported_unverified_and_prohibited
+  business_unlock_from_waiver: forbidden
+assessments:
+  - task_id: TASK-014
+    decision: reported_unverified
+    release_status: prohibited
+    implementation:
+      change_pr: https://github.com/qifuxiao/QuantiQmt/pull/21
+      head_sha: 29ab5b4457861bea0a4116c878b19987118bd9c4
+      merge_commit_sha: 96b5e5960f498da726b678ff6b0f0885b4ecdafd
+      reviews: []
+      ci:
+        - https://github.com/qifuxiao/QuantiQmt/actions/runs/29063208943/job/86269287092
+        - https://github.com/qifuxiao/QuantiQmt/actions/runs/29063168140/job/86269165408
+    closeout:
+      change_pr: https://github.com/qifuxiao/QuantiQmt/pull/22
+      head_sha: a69c2360a58fac7a9608fc04b69765d00c1e0b10
+      merge_commit_sha: 308d4bf0306ef12bd12834bceeeb45251d52824d
+      reviews: []
+      ci:
+        - https://github.com/qifuxiao/QuantiQmt/actions/runs/29066738503/job/86279774548
+        - https://github.com/qifuxiao/QuantiQmt/actions/runs/29065383738/job/86275669649
+      human_authorization_evidence: unverifiable
+    blockers:
+      - no formal GitHub Review exists on implementation PR 21
+      - no formal GitHub Review exists on closeout PR 22
+      - closeout human authorization is not independently auditable
+  - task_id: TASK-015
+    decision: trusted_completed_delivery
+    release_status: prohibited
+    implementation:
+      change_pr: https://github.com/qifuxiao/QuantiQmt/pull/24
+      head_sha: e8c3aa4454f001f2d1d53ee9ad448979b8475b2b
+      merge_commit_sha: 26640e109a5d7808b8bddfcfb9b0379c4df05883
+      approved_review: https://github.com/qifuxiao/QuantiQmt/pull/24#pullrequestreview-4704901648
+    closeout:
+      change_pr: https://github.com/qifuxiao/QuantiQmt/pull/27
+      head_sha: 1ab0baf11c8514736249200214fcaf79c9fec3ad
+      merge_commit_sha: 7ae7e8a4f780b32d72f5a24a42d240f417f1e460
+      approved_review: https://github.com/qifuxiao/QuantiQmt/pull/27#pullrequestreview-4709936693
+      reviewer: qifuxiao
+      review_verdict: APPROVE
+      human_authorization_evidence: https://github.com/qifuxiao/QuantiQmt/pull/27
+      ci:
+        - https://github.com/qifuxiao/QuantiQmt/actions/runs/29465307264/job/87517103885
+        - https://github.com/qifuxiao/QuantiQmt/actions/runs/29465305178/job/87517098185
+        - https://github.com/qifuxiao/QuantiQmt/actions/runs/29465307264/job/87517103854
+        - https://github.com/qifuxiao/QuantiQmt/actions/runs/29465305178/job/87517098246
+    blockers: []
+  - task_id: TASK-030
+    decision: reported_unverified
+    release_status: prohibited
+    implementation:
+      change_pr: https://github.com/qifuxiao/QuantiQmt/pull/42
+      head_sha: c9b2ce5895a7ffce109ee3e391fc633304415f0f
+      merge_commit_sha: 03cdc5b816e1b5ec7c40a63929ed35f486abe9dd
+      reviews: []
+      ci:
+        - https://github.com/qifuxiao/QuantiQmt/actions/runs/30267068641/job/89980204831
+        - https://github.com/qifuxiao/QuantiQmt/actions/runs/30267066237/job/89980197009
+        - https://github.com/qifuxiao/QuantiQmt/actions/runs/30267068641/job/89980204808
+        - https://github.com/qifuxiao/QuantiQmt/actions/runs/30267066237/job/89980196931
+    closeout:
+      change_pr: https://github.com/qifuxiao/QuantiQmt/pull/44
+      head_sha: e7c087fc1292f1c57d8352112802ed60f99e9466
+      merge_commit_sha: 238b0ac2c3c82de88c59a900feca8cbb71d38863
+      reviews: []
+      ci:
+        - https://github.com/qifuxiao/QuantiQmt/actions/runs/30268732265/job/89985688095
+        - https://github.com/qifuxiao/QuantiQmt/actions/runs/30268716060/job/89985636600
+        - https://github.com/qifuxiao/QuantiQmt/actions/runs/30268732265/job/89985688172
+        - https://github.com/qifuxiao/QuantiQmt/actions/runs/30268716060/job/89985636630
+      human_authorization_evidence: unverifiable
+    blockers:
+      - no formal GitHub Review exists on scope PR 42
+      - no formal GitHub Review exists on closeout PR 44
+      - closeout human authorization is not independently auditable

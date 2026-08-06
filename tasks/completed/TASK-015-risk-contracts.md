@@ -27,11 +27,18 @@ delivery:
   schema_version: 1
   contract_status: accepted
   implementation_status: merged
-  acceptance_status: unverified
-  review_status: reported_unverified
+  acceptance_status: passed
+  review_status: approved
   release_status: prohibited
-  remediation_task: TASK-031
-  completion_evidence: {mode: historical_git_verified_review_unavailable, change_pr: https://github.com/qifuxiao/QuantiQmt/pull/27, reviewed_head_sha: 1ab0baf11c8514736249200214fcaf79c9fec3ad, review_verdict: reported_unverified, reviewer: unverifiable, evidence_url: unverifiable, merge_commit_sha: 7ae7e8a4f780b32d72f5a24a42d240f417f1e460, human_authorization_evidence: unverifiable}
+  completion_evidence:
+    mode: historical_evidence_remediated_from_github
+    change_pr: https://github.com/qifuxiao/QuantiQmt/pull/27
+    reviewed_head_sha: 1ab0baf11c8514736249200214fcaf79c9fec3ad
+    review_verdict: APPROVE
+    reviewer: qifuxiao
+    evidence_url: https://github.com/qifuxiao/QuantiQmt/pull/27#pullrequestreview-4709936693
+    merge_commit_sha: 7ae7e8a4f780b32d72f5a24a42d240f417f1e460
+    human_authorization_evidence: https://github.com/qifuxiao/QuantiQmt/pull/27
 ---
 
 # Objective
