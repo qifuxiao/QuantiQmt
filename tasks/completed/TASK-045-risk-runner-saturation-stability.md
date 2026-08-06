@@ -1,7 +1,7 @@
 ---
 id: TASK-045
 title: Stabilize RiskEvaluationRunner saturation concurrency
-status: active
+status: completed
 depends_on: [TASK-015]
 spec_refs:
   - INV-RISK
@@ -13,6 +13,7 @@ allowed_paths:
   - tests/unit/risk/test_risk_engine.py
   - tests/property/risk/test_risk_properties.py
   - tasks/active/TASK-045-risk-runner-saturation-stability.md
+  - tasks/completed/TASK-045-risk-runner-saturation-stability.md
   - tasks/active/README.md
   - tasks/index.yaml
 forbidden_paths:
@@ -38,10 +39,27 @@ verification:
 delivery:
   schema_version: 1
   contract_status: accepted
-  implementation_status: in_progress
+  implementation_status: merged
   acceptance_status: passed
-  review_status: pending
+  review_status: approved
   release_status: prohibited
+  completion_evidence:
+    mode: governance_closeout_after_independent_review
+    change_pr: https://github.com/qifuxiao/QuantiQmt/pull/57
+    reviewed_head_sha: 4b252aae29f120611b9b9773e8e8ef3935c85218
+    review_verdict: APPROVE
+    reviewer: qifuxiao
+    evidence_url: https://github.com/qifuxiao/QuantiQmt/pull/57#pullrequestreview-4873377772
+    merge_commit_sha: 7a39d1a0cad5455b2df0043a9449d4c4da2c36b5
+    ci_evidence: >-
+      Reviewed Head 4b252aae29f120611b9b9773e8e8ef3935c85218 passed 4/4 GitHub CI:
+      quality jobs 92577541060 and 92577528619; persistence-postgresql jobs 92577541110
+      and 92577528618.
+    human_authorization_evidence: >-
+      2026-08-06 human authorization: 授权将
+      tasks/completed/TASK-045-risk-runner-saturation-stability.md 精确加入 TASK-045
+      allowed_paths；仅用于记录 PR #57 的正式 Review、CI 与 merge evidence，并执行
+      TASK-045 active→completed 收尾迁移。不得激活或解锁其他业务任务。
 ---
 
 # Objective
@@ -126,9 +144,10 @@ Eliminate the reproducible CI flakiness in `RiskEvaluationRunner` saturation han
   iteration: 400/400 targeted executions passed with no retry of a failed iteration.
 - `poetry run mypy src/quantiqmt/risk`, targeted Ruff check/format, and
   `poetry run python scripts/validate_specs.py` all exited 0; `git diff --check` passed.
-- Diff and task-state audits show only TASK-045 allowed paths changed; TASK-005 and TASK-029
-  remain `blocked`, TASK-045 remains the sole `active` task, Review remains `pending`, and release
-  remains `prohibited`.
+- Implementation-PR diff and task-state audits showed only TASK-045 allowed paths changed;
+  before independent Review, TASK-045 remained the sole `active` task with Review `pending`.
+  The completion evidence below records the later approved/merged closeout transition;
+  TASK-005 and TASK-029 remain `blocked`, and release remains `prohibited`.
 
 ### PR #57 P1 ownership-handoff remediation
 
@@ -148,6 +167,22 @@ Eliminate the reproducible CI flakiness in `RiskEvaluationRunner` saturation han
   and proves exactly one release.
 - A separate bounded 100-iteration subprocess stress loop ran these three callback-handoff tests:
   300/300 executions passed without retrying a failed iteration.
+
+### Completion evidence
+
+- PR #57 was independently reviewed at Head
+  `4b252aae29f120611b9b9773e8e8ef3935c85218`; qifuxiao submitted formal `APPROVE` at
+  <https://github.com/qifuxiao/QuantiQmt/pull/57#pullrequestreview-4873377772>.
+- The reviewed Head passed 4/4 GitHub CI checks: quality jobs
+  <https://github.com/qifuxiao/QuantiQmt/actions/runs/31089723966/job/92577541060> and
+  <https://github.com/qifuxiao/QuantiQmt/actions/runs/31089719871/job/92577528619>, plus
+  persistence-postgresql jobs
+  <https://github.com/qifuxiao/QuantiQmt/actions/runs/31089723966/job/92577541110> and
+  <https://github.com/qifuxiao/QuantiQmt/actions/runs/31089719871/job/92577528618>.
+- PR #57 merged as `7a39d1a0cad5455b2df0043a9449d4c4da2c36b5` on 2026-08-06.
+- Human authorization on 2026-08-06 added only the completed TASK-045 path for this closeout,
+  Review/CI/merge evidence, and active-to-completed migration. It did not authorize activating,
+  unlocking, implementing, or releasing TASK-005, TASK-029, or any other business task.
 
 ## Review focus
 
