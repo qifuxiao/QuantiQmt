@@ -42,7 +42,7 @@ delivery:
   schema_version: 1
   contract_status: not_applicable
   implementation_status: in_progress
-  acceptance_status: not_run
+  acceptance_status: partial
   review_status: pending
   release_status: prohibited
 ---
@@ -74,18 +74,27 @@ delivery:
 
 ## Acceptance criteria
 
-- [ ] 当前全部 accepted spec、Accepted ADR、任务依赖和相关实现状态均被重新读取，评审记录可定位到精确仓库 Base/Head。
-- [ ] `REVIEW-IMPLEMENTATION-READINESS-0.7` 是新的当前版本 Implementation Readiness Review，具有唯一规范 ID 并登记在 `spec/manifest.yaml`；历史 `REVIEW-IMPLEMENTATION-READINESS-0.5` 未被覆盖或改写。
-- [ ] TASK-017、TASK-018、TASK-019、TASK-020、TASK-021、TASK-022、TASK-029 均有逐项、证据化、可独立复验的 L4 可实施性结论，以及明确的 ready/blocked 状态和解除条件。
-- [ ] TASK-014 仍为 `reported_unverified` 且 release prohibited；没有历史批准、Review、CI 或授权事实被补造或提升为可信证据。
-- [ ] retired waiver 未被使用、恢复、延长、扩展、复制或用于任何业务/L4 解锁。
-- [ ] 只有经新评审确认具备 L4 可实施性的 TASK-017、TASK-018、TASK-020、TASK-022，才把治理依赖从 TASK-014 迁移到 TASK-046；未通过者保持 blocked，并记录精确解除条件。
-- [ ] TASK-019 与 TASK-021 的状态按自身契约和全部直接依赖分别判定，没有因上游结论而自动解锁。
-- [ ] TASK-029 根据 TASK-030 的 `reported_unverified` 状态单独判定，未被 TASK-046 顺带解锁或替换其 remediation 路径。
-- [ ] validator 与 `tests/spec/**` 的正反例证明：`reported_unverified`/缺失可信 delivery evidence 的依赖拒绝激活；active/in-progress 的 TASK-046 也不能解锁对应任务；只有 completed TASK-046 的可信 delivery/completion evidence 才能满足 successor 门禁。
-- [ ] `poetry run python scripts/validate_specs.py` 与 `poetry run pytest tests/spec tests/contract` 全部通过，且变更路径审计未超出 allowed paths、未触及 forbidden paths。
-- [ ] 没有业务 Event、Command、DTO、错误码、状态机、Workflow、Repository 契约、运行时代码或业务发布能力发生变化。
+- [x] 当前全部 accepted spec、Accepted ADR、任务依赖和相关实现状态均被重新读取，评审记录可定位到精确仓库 Base/Head。
+- [x] `REVIEW-IMPLEMENTATION-READINESS-0.7` 是新的当前版本 Implementation Readiness Review，具有唯一规范 ID 并登记在 `spec/manifest.yaml`；历史 `REVIEW-IMPLEMENTATION-READINESS-0.5` 未被覆盖或改写。
+- [x] TASK-017、TASK-018、TASK-019、TASK-020、TASK-021、TASK-022、TASK-029 均有逐项、证据化、可独立复验的 L4 可实施性结论，以及明确的 ready/blocked 状态和解除条件。
+- [x] TASK-014 仍为 `reported_unverified` 且 release prohibited；没有历史批准、Review、CI 或授权事实被补造或提升为可信证据。
+- [x] retired waiver 未被使用、恢复、延长、扩展、复制或用于任何业务/L4 解锁。
+- [x] 只有经新评审确认具备 L4 可实施性的 TASK-017、TASK-018、TASK-020、TASK-022，才把治理依赖从 TASK-014 迁移到 TASK-046；未通过者保持 blocked，并记录精确解除条件。
+- [x] TASK-019 与 TASK-021 的状态按自身契约和全部直接依赖分别判定，没有因上游结论而自动解锁。
+- [x] TASK-029 根据 TASK-030 的 `reported_unverified` 状态单独判定，未被 TASK-046 顺带解锁或替换其 remediation 路径。
+- [x] validator 与 `tests/spec/**` 的正反例证明：`reported_unverified`/缺失可信 delivery evidence 的依赖拒绝激活；active/in-progress 的 TASK-046 也不能解锁对应任务；只有 completed TASK-046 的可信 delivery/completion evidence 才能满足 successor 门禁。
+- [x] `poetry run python scripts/validate_specs.py` 与 `poetry run pytest tests/spec tests/contract` 全部通过，且变更路径审计未超出 allowed paths、未触及 forbidden paths。
+- [x] 没有业务 Event、Command、DTO、错误码、状态机、Workflow、Repository 契约、运行时代码或业务发布能力发生变化。
 - [ ] TASK-046 的实现结果已经独立 Review；实现 Agent 未自行批准、补写完成证据或执行 active-to-completed 状态迁移。
+
+## Implementation evidence pending independent Review
+
+- Audited base is `f50d471530fe355e17e7ce82a33a24b8c1b2c01f`; the implementation branch is `codex/task-046-readiness-revalidation`. The exact pushed PR head is reported at handoff and must be the SHA bound by independent Review.
+- `REVIEW-IMPLEMENTATION-READINESS-0.7` and `ai/governance/l4-readiness-revalidation-task-046.yaml` record the accepted spec/ADR inventory, implementation baseline, seven decisions, dependency before/after matrix and remaining blockers.
+- TASK-017/018/020/022 remain backlog/ready and now depend on TASK-046. TASK-019/021 remain backlog/blocked with all other direct dependencies retained. TASK-029 remains backlog/blocked on TASK-030 and does not depend on TASK-046.
+- Validator integration covers TASK-046 active/in-progress, completed/reported-unverified, completed/missing evidence and completed/trusted evidence; only the last satisfies the dependency gate and none auto-activates a task.
+- `poetry run python scripts/validate_specs.py` passed. `poetry run pytest tests/spec tests/contract` passed with 229 tests; the only warning is inability to create `.pytest_cache` under workspace permissions.
+- No completion evidence, approval, merge claim, release eligibility or active-to-completed transition is recorded by the implementing Agent. The final acceptance item remains open for independent Review and human-authorized closeout.
 
 ## Required evidence
 

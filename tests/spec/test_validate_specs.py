@@ -6,10 +6,12 @@ from scripts.validate_specs import (
     ROOT,
     bootstrap_allows_dependency,
     delivery_is_unlockable,
+    extract_front_matter,
     has_cycle,
     main,
     manifest_entries,
     validate_delivery,
+    validate_l4_successor_dependencies,
     validate_tasks,
     validate_waiver_entries,
 )
@@ -122,6 +124,161 @@ def test_reported_unverified_or_missing_delivery_cannot_unlock() -> None:
             }
         }
     )
+
+
+def test_l4_queue_uses_task046_successor_without_rewriting_task029_gate() -> None:
+    successor_tasks = {
+        "TASK-017": "TASK-017-execution-broker-contracts.md",
+        "TASK-018": "TASK-018-ledger-portfolio-contracts.md",
+        "TASK-019": "TASK-019-target-resolver-contracts.md",
+        "TASK-020": "TASK-020-market-data-contracts.md",
+        "TASK-021": "TASK-021-backtest-live-parity-contracts.md",
+        "TASK-022": "TASK-022-observability-control-contracts.md",
+    }
+    for task_id, filename in successor_tasks.items():
+        task = extract_front_matter(ROOT / "tasks" / "backlog" / filename)
+        assert task["id"] == task_id
+        assert "TASK-046" in task["depends_on"]
+        assert "TASK-014" not in task["depends_on"]
+
+    task029 = extract_front_matter(
+        ROOT / "tasks" / "backlog" / "TASK-029-risk-runtime-schema-contract.md"
+    )
+    assert "TASK-030" in task029["depends_on"]
+    assert "TASK-046" not in task029["depends_on"]
+
+
+def test_l4_successor_policy_rejects_historical_and_risk_substitution_edges() -> None:
+    errors: list[str] = []
+    validate_l4_successor_dependencies(
+        {
+            "TASK-046": {"depends_on": []},
+            "TASK-017": {"depends_on": ["TASK-014"]},
+            "TASK-029": {"depends_on": ["TASK-015", "TASK-046", "TASK-031"]},
+        },
+        errors,
+    )
+    assert any("TASK-017: historical TASK-014" in error for error in errors)
+    assert any("TASK-017: missing TASK-046" in error for error in errors)
+    assert any("TASK-029: TASK-030 evidence dependency" in error for error in errors)
+    assert any("TASK-029: TASK-046 cannot replace" in error for error in errors)
+
+
+@pytest.mark.parametrize(
+    "successor_state,activation_allowed",
+    [
+        ("active", False),
+        ("reported_unverified", False),
+        ("missing_evidence", False),
+        ("trusted_completed", True),
+    ],
+)
+def test_task046_successor_gate_requires_trusted_completed_delivery(
+    monkeypatch, successor_state, activation_allowed
+) -> None:
+    fixture_root = ROOT / "tasks" / ".validator-fixture"
+    fixture_root.mkdir(exist_ok=True)
+    successor = fixture_root / "TASK-046.md"
+    dependent = fixture_root / "TASK-017.md"
+    trusted_evidence = (
+        "  completion_evidence:\n"
+        "    mode: fixture\n"
+        "    change_pr: https://github.com/example/repo/pull/46\n"
+        "    reviewed_head_sha: " + "a" * 40 + "\n"
+        "    review_verdict: APPROVE\n"
+        "    reviewer: independent-reviewer\n"
+        "    evidence_url: https://github.com/example/review/46\n"
+        "    merge_commit_sha: " + "b" * 40 + "\n"
+        "    human_authorization_evidence: fixture authorization\n"
+    )
+    if successor_state == "active":
+        successor_status = "active"
+        successor_delivery = (
+            "  implementation_status: in_progress\n"
+            "  acceptance_status: not_run\n"
+            "  review_status: pending\n"
+        )
+        successor_evidence = ""
+    elif successor_state == "reported_unverified":
+        successor_status = "completed"
+        successor_delivery = (
+            "  implementation_status: merged\n"
+            "  acceptance_status: unverified\n"
+            "  review_status: reported_unverified\n"
+            "  remediation_task: TASK-031\n"
+        )
+        successor_evidence = (
+            "  completion_evidence:\n"
+            "    mode: historical\n"
+            "    change_pr: unverifiable\n"
+            "    reviewed_head_sha: unverifiable\n"
+            "    review_verdict: reported_unverified\n"
+            "    reviewer: unverifiable\n"
+            "    evidence_url: unverifiable\n"
+            "    merge_commit_sha: unverifiable\n"
+            "    human_authorization_evidence: unverifiable\n"
+        )
+    else:
+        successor_status = "completed"
+        successor_delivery = (
+            "  implementation_status: merged\n"
+            "  acceptance_status: passed\n"
+            "  review_status: approved\n"
+        )
+        successor_evidence = trusted_evidence if successor_state == "trusted_completed" else ""
+    try:
+        successor.write_text(
+            f"---\nid: TASK-046\nstatus: {successor_status}\ndepends_on: []\n"
+            "spec_refs: []\nallowed_paths: []\nforbidden_paths: []\n"
+            "verification: {commands: [check]}\ndelivery:\n"
+            "  schema_version: 1\n  contract_status: not_applicable\n"
+            + successor_delivery
+            + "  release_status: prohibited\n"
+            + successor_evidence
+            + "---\n\n## Acceptance criteria\n- [x] fixture\n",
+            encoding="utf-8",
+        )
+        dependent.write_text(
+            "---\nid: TASK-017\nstatus: active\ndepends_on: [TASK-046]\n"
+            "spec_refs: []\nallowed_paths: []\nforbidden_paths: []\n"
+            "verification: {commands: [check]}\ndelivery:\n"
+            "  schema_version: 1\n  contract_status: not_applicable\n"
+            "  implementation_status: in_progress\n  acceptance_status: not_run\n"
+            "  review_status: pending\n  release_status: prohibited\n---\n",
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(validator, "task_files", lambda: [successor, dependent])
+        monkeypatch.setattr(validator, "validate_active_readme", lambda tasks, errors: None)
+        original_load_yaml = validator.load_yaml
+
+        def fake_load_yaml(path):
+            if path == validator.TASK_ROOT / "governance-waivers.yaml":
+                return {"schema_version": 1, "waivers": []}
+            if path == validator.TASK_ROOT / "index.yaml":
+                return {
+                    "tasks": [
+                        {
+                            "id": "TASK-046",
+                            "path": "TASK-046.md",
+                            "status": successor_status,
+                        },
+                        {"id": "TASK-017", "path": "TASK-017.md", "status": "active"},
+                    ]
+                }
+            return original_load_yaml(path)
+
+        monkeypatch.setattr(validator, "load_yaml", fake_load_yaml)
+        errors: list[str] = []
+        validate_tasks({}, errors)
+        denied = any(
+            "TASK-017: dependency TASK-046 lacks trusted completed delivery" in error
+            for error in errors
+        )
+        assert denied is not activation_allowed
+    finally:
+        successor.unlink(missing_ok=True)
+        dependent.unlink(missing_ok=True)
+        fixture_root.rmdir()
 
 
 @pytest.mark.parametrize(

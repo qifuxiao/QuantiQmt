@@ -1,8 +1,8 @@
 specification:
   name: quantiqmt
-  version: 0.7.0
+  version: 0.7.1
   status: accepted
-  updated: 2026-07-10
+  updated: 2026-08-06
   normative_root: spec
   explanatory_root: docs
 
@@ -140,34 +140,38 @@ catalogs:
       path: reviews/BASELINE-0.1-REVIEW.md
     - id: REVIEW-IMPLEMENTATION-READINESS-0.5
       path: reviews/IMPLEMENTATION-READINESS-0.5.md
+    - id: REVIEW-IMPLEMENTATION-READINESS-0.7
+      path: reviews/IMPLEMENTATION-READINESS-0.7.md
 
 change:
-  id: SPEC-0.7-STRATEGY-L4-CONTRACTS
-  compatibility: backward_compatible_additive_contracts_events_and_errors
-  previous_version: 0.6.0
-  public_message_schema_changes: "additive risk.order_evaluated.v2 and strategy.state_changed.v1; existing published identities remain wire-compatible; new strategy contracts are additive and require registry activation before publication"
+  id: SPEC-0.7.1-L4-READINESS-REVALIDATION
+  compatibility: no_runtime_contract_change_governance_successor_gate_only
+  previous_version: 0.7.0
+  public_message_schema_changes: none
   storage_schema_changes: none
-  error_catalog_change: "catalog v3 adds QQ-RISK-4003 through QQ-RISK-4011; existing meanings unchanged"
+  error_catalog_change: none
   runtime_code_change: none
-  strategy_contract_change: "adds versioned read-only StrategyContext, callback/output/checkpoint envelopes, runtime workflow and fail-closed fencing/resource semantics"
-  semantic_validation_change: "RiskAuditOutput requires fail-closed cross-field semantic validation before v1 projection, v1/v2 Outbox persistence, or Execution; timeout guard is last and timed but excluded from completed_rule_count"
-  internal_contracts_added: [CONTRACT-RISK-INPUT-V1, CONTRACT-RISK-RULE-SET-V1, CONTRACT-RISK-DECISION-V1, CONTRACT-RISK-AUDIT-OUTPUT-V1, PORTS-RISK, CONTRACT-STRATEGY-CONTEXT-V1, CONTRACT-STRATEGY-CALLBACK-V1, CONTRACT-STRATEGY-OUTPUT-V1, CONTRACT-STRATEGY-CHECKPOINT-V1]
-  public_contracts_added: [CONTRACT-RISK-ORDER-EVALUATED-V2, CONTRACT-STRATEGY-STATE-CHANGED-V1]
-  task_queue_change: "TASK-016 activated; TASK-008 remains blocked until TASK-016 is independently reviewed and marked completed; TASK-005 remains blocked until TASK-029 is independently reviewed and completed"
-  affected_tasks: [TASK-005, TASK-008, TASK-016, TASK-019, TASK-021, TASK-029, TASK-030]
+  review_change: "registers REVIEW-IMPLEMENTATION-READINESS-0.7 without modifying historical REVIEW-IMPLEMENTATION-READINESS-0.5"
+  contract_change: none
+  semantic_validation_change: none
+  internal_contracts_added: []
+  public_contracts_added: []
+  task_queue_change: "TASK-017/018/019/020/021/022 replace historical TASK-014 readiness dependency with TASK-046; statuses remain unchanged; TASK-029 retains TASK-030 and remains separately blocked"
+  affected_tasks: [TASK-017, TASK-018, TASK-019, TASK-020, TASK-021, TASK-022, TASK-029, TASK-046]
   deployment_order:
-    - merge_and_independently_review_task_015_specs
-    - independently_review_and_merge_task_016_strategy_contracts
-    - implement_and_independently_review_task_029_risk_runtime_schema_contract
-    - implement_and_activate_task_008_against_spec_0_7
+    - independently_review_and_merge_task_046_implementation
+    - human_authorized_task_046_closeout_with_trusted_delivery_evidence
+    - separately_activate_at_most_one_ready_contract_task_after_dependency_validation
+    - keep_task_019_021_029_blocked_until_their_remaining_direct_dependencies_are_trusted_completed
   migration:
     runtime_data: not_applicable
-    public_events: "no backfill; new decisions atomically persist authoritative risk.order_evaluated.v2 plus unchanged lossy risk.order_evaluated.v1 compatibility projection until all v1 consumers migrate"
-    rule_sets: "validate candidate RuleSet against CONTRACT-RISK-RULE-SET-V1 and content_hash before activation; no legacy implicit rule configuration may be auto-converted"
-    task_queue: "TASK-005 may be activated only after independent Review moves TASK-029 to completed; TASK-008 may be activated only after independent Review moves TASK-016 to completed"
+    public_events: not_applicable
+    storage: not_applicable
+    task_queue: "replace TASK-014 with TASK-046 only for TASK-017/018/019/020/021/022; do not change statuses or activate tasks; do not add TASK-046 to TASK-029"
+    historical_evidence: "preserve TASK-014 and TASK-030 as reported_unverified/prohibited; retired waiver remains terminal and unusable"
     destructive_backfill: forbidden
   rollback:
     runtime_data: not_applicable
-    public_events: "rollback consumers to v1 is wire-compatible but loses complete typed audit for new decisions; keep trading fail-closed unless authoritative v2 persistence remains enabled"
-    rule_sets: "keep trading fail-closed and reactivate the last independently validated immutable RuleSet; do not synthesize permissive defaults"
-    task_queue: "return TASK-005 to blocked if any L4 contract ambiguity is found; no persisted production data is changed by this task"
+    public_events: not_applicable
+    task_queue: "restore only pre-TASK-046 review registration, task metadata and validator policy; never restore the retired waiver or reinterpret TASK-014/TASK-030 evidence"
+    release: prohibited

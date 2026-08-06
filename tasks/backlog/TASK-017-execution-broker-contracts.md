@@ -2,10 +2,10 @@
 id: TASK-017
 title: Complete Execution and Broker simulator L4 contracts
 status: ready
-depends_on: [TASK-014]
+depends_on: [TASK-046]
 spec_refs: [INV-TRADING, PORTS-CORE, WF-SUBMIT-ORDER, WF-CANCEL-ORDER, CONTRACT-EXECUTION-ATTEMPT-STARTED-V1, CONTRACT-EXECUTION-OUTCOME-UNKNOWN-V1, CONTRACT-BROKER-ORDER-REPORTED-V1, CONTRACT-BROKER-TRADE-V1, NFR-RELIABILITY]
-allowed_paths: [spec/manifest.yaml, spec/contracts/**, spec/interfaces/**, spec/workflows/**, spec/nfr/**, tasks/backlog/TASK-006-broker-simulator.md, tasks/backlog/TASK-017-execution-broker-contracts.md, tasks/index.yaml]
-forbidden_paths: [src/**, tests/**, migrations/**]
+allowed_paths: [spec/manifest.yaml, spec/contracts/**, spec/interfaces/**, spec/workflows/**, spec/nfr/**, tests/contract/messages/**, tasks/backlog/TASK-006-broker-simulator.md, tasks/backlog/TASK-017-execution-broker-contracts.md, tasks/index.yaml]
+forbidden_paths: [src/**, tests/unit/**, tests/property/**, tests/integration/**, migrations/**]
 verification:
   commands:
     - poetry run python scripts/validate_specs.py

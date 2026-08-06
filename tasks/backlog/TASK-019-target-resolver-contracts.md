@@ -2,10 +2,10 @@
 id: TASK-019
 title: Complete Target Resolver L4 contracts
 status: blocked
-depends_on: [TASK-014, TASK-016, TASK-018]
+depends_on: [TASK-046, TASK-016, TASK-018]
 spec_refs: [INV-TRADING, INV-RISK, PORTS-STRATEGY, CONTRACT-STRATEGY-TARGET-V1, CONTRACT-ORDER-INTENT-V1]
-allowed_paths: [spec/manifest.yaml, spec/contracts/**, spec/interfaces/**, spec/workflows/**, spec/storage/**, tasks/backlog/TASK-009-target-resolver.md, tasks/backlog/TASK-019-target-resolver-contracts.md, tasks/index.yaml]
-forbidden_paths: [src/**, tests/**, migrations/**]
+allowed_paths: [spec/manifest.yaml, spec/contracts/**, spec/interfaces/**, spec/workflows/**, spec/storage/**, tests/contract/messages/**, tasks/backlog/TASK-009-target-resolver.md, tasks/backlog/TASK-019-target-resolver-contracts.md, tasks/index.yaml]
+forbidden_paths: [src/**, tests/unit/**, tests/property/**, tests/integration/**, migrations/**]
 verification:
   commands:
     - poetry run python scripts/validate_specs.py

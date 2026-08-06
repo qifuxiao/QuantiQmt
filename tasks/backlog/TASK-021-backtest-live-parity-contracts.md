@@ -2,10 +2,10 @@
 id: TASK-021
 title: Complete Backtest and Live parity L4 contracts
 status: blocked
-depends_on: [TASK-014, TASK-016, TASK-017, TASK-020]
+depends_on: [TASK-046, TASK-016, TASK-017, TASK-020]
 spec_refs: [INV-TRADING, INV-CONSISTENCY, PORTS-CORE, PORTS-STRATEGY, NFR-PERFORMANCE, NFR-RELIABILITY]
-allowed_paths: [spec/manifest.yaml, spec/contracts/**, spec/interfaces/**, spec/workflows/**, spec/nfr/**, tasks/backlog/TASK-010-reference-buy-hold.md, tasks/backlog/TASK-021-backtest-live-parity-contracts.md, tasks/index.yaml]
-forbidden_paths: [src/**, tests/**, migrations/**]
+allowed_paths: [spec/manifest.yaml, spec/contracts/**, spec/interfaces/**, spec/workflows/**, spec/nfr/**, tests/contract/messages/**, tasks/backlog/TASK-010-reference-buy-hold.md, tasks/backlog/TASK-021-backtest-live-parity-contracts.md, tasks/index.yaml]
+forbidden_paths: [src/**, tests/unit/**, tests/property/**, tests/integration/**, migrations/**]
 verification:
   commands:
     - poetry run python scripts/validate_specs.py
