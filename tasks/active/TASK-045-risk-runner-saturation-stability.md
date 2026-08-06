@@ -85,9 +85,10 @@ Eliminate the reproducible CI flakiness in `RiskEvaluationRunner` saturation han
 - The production ownership defect was an exception-path permit leak. After admission, the
   runner released the bounded semaphore only in selected return branches; a non-timeout
   exception from `iterator`, `future.result()`, `decide()`, semantic validation, or metrics
-  escaped without releasing the permit. The implementation now has one local owner and one
-  `finally` release path. Only a real worker timeout transfers ownership to the future's
-  completion callback, before the timeout audit is returned.
+  escaped without releasing the permit. The implementation now uses a per-admission,
+  thread-safe release-once guard with explicit caller, registering, callback, and released
+  states. Only a successfully registered real worker-timeout callback takes ownership; the
+  caller's `finally` retains ownership if callback registration raises.
 - The historical flaky property test also coupled the maximum 4,000 microsecond business
   evaluation deadline to two OS-thread scheduling round trips. A busy runner could therefore
   correctly time out the admitted request even though the saturated request never changed its
@@ -118,9 +119,9 @@ Eliminate the reproducible CI flakiness in `RiskEvaluationRunner` saturation han
   not released early, saturation cannot steal it, late output is fenced, and callback release is
   exactly once. The immediate-timeout and invalid-audit tests separately assert exactly-once
   release from synchronous timeout and semantic-validator exception paths.
-- `poetry run pytest tests/unit/risk tests/property/risk`: 74 passed in one run.
+- `poetry run pytest tests/unit/risk tests/property/risk`: 77 passed in one run.
 - `poetry run pytest tests/unit tests/property tests/spec tests/contract --cov
-  --cov-report=term-missing`: 404 passed in one run; total coverage 85%.
+  --cov-report=term-missing`: 407 passed in one run; total coverage 85%.
 - A bounded 100-iteration subprocess stress loop ran four targeted concurrency tests per
   iteration: 400/400 targeted executions passed with no retry of a failed iteration.
 - `poetry run mypy src/quantiqmt/risk`, targeted Ruff check/format, and
@@ -128,6 +129,25 @@ Eliminate the reproducible CI flakiness in `RiskEvaluationRunner` saturation han
 - Diff and task-state audits show only TASK-045 allowed paths changed; TASK-005 and TASK-029
   remain `blocked`, TASK-045 remains the sole `active` task, Review remains `pending`, and release
   remains `prohibited`.
+
+### PR #57 P1 ownership-handoff remediation
+
+- Review of Head `5c42aa6ba451d6e481f930d364f3d206661ba17b` identified that setting
+  `release_on_exit=false` before `Future.add_done_callback()` leaked the permit when callback
+  registration raised. `_AdmissionOwnership` now performs a locked state transition to
+  `registering`, rolls back to caller ownership on registration failure, records successful
+  asynchronous handoff as `callback`, and makes both caller and callback release through the same
+  idempotent `released` fence.
+- `test_timeout_callback_registration_failure_releases_real_admission_once` uses the runner's
+  real `BoundedSemaphore`: the registration exception propagates, exactly one permit can be
+  acquired afterward, and a subsequent unique evaluation succeeds.
+- `test_timeout_callback_synchronous_registration_releases_exactly_once` forces callback execution
+  inside `add_done_callback()` and proves callback plus caller `finally` release only once.
+- `test_timeout_callback_asynchronous_completion_releases_exactly_once` stores the callback,
+  proves another request remains saturated, then invokes late completion on a controlled thread
+  and proves exactly one release.
+- A separate bounded 100-iteration subprocess stress loop ran these three callback-handoff tests:
+  300/300 executions passed without retrying a failed iteration.
 
 ## Review focus
 

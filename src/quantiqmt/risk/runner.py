@@ -6,7 +6,7 @@ import concurrent.futures
 import hashlib
 import threading
 from collections.abc import Mapping
-from typing import Literal, Protocol
+from typing import Any, Literal, Protocol
 
 from quantiqmt.risk.audit import RiskAuditSemanticValidator
 from quantiqmt.risk.evaluator import DeterministicRiskEvaluator, timeout_decision, timeout_result
@@ -72,7 +72,7 @@ class RiskEvaluationRunner:
                 self._saturation_audit(risk_input, rule_set),
                 reason="RISK_EVALUATION_TIMEOUT",
             )
-        release_on_exit = True
+        ownership = _AdmissionOwnership(self._admission)
         try:
             input_version = risk_input.to_primitive()["input_version"]
             if not isinstance(input_version, str) or self._seen_filter.contains(input_version):
@@ -103,8 +103,7 @@ class RiskEvaluationRunner:
                 try:
                     result = future.result(timeout=remaining_ns / 1_000_000_000)
                 except concurrent.futures.TimeoutError:
-                    release_on_exit = False
-                    future.add_done_callback(lambda _future: _release_admission(self._admission))
+                    ownership.transfer_to_future(future)
                     return self._validate_and_record(
                         self._timeout_audit(
                             risk_input, rule_set, results, timings, start_ns, timeout_us, attempt
@@ -151,8 +150,7 @@ class RiskEvaluationRunner:
                 )
             )
         finally:
-            if release_on_exit:
-                self._admission.release()
+            ownership.release_from_caller()
 
     def _timeout_audit(
         self,
@@ -228,8 +226,43 @@ def _timeout_us(rule_set: RiskRuleSetV1) -> int:
     return value
 
 
-def _release_admission(admission: threading.BoundedSemaphore) -> None:
-    admission.release()
+class _AdmissionOwnership:
+    """Release one admitted permit exactly once across caller/future handoff races."""
+
+    def __init__(self, admission: threading.BoundedSemaphore) -> None:
+        self._admission = admission
+        self._lock = threading.Lock()
+        self._state: Literal["caller", "registering", "callback", "released"] = "caller"
+
+    def transfer_to_future(self, future: concurrent.futures.Future[Any]) -> None:
+        with self._lock:
+            if self._state != "caller":
+                raise RuntimeError("admission ownership can only be transferred by its caller")
+            self._state = "registering"
+        try:
+            future.add_done_callback(self._release_from_callback)
+        except BaseException:
+            with self._lock:
+                if self._state == "registering":
+                    self._state = "caller"
+            raise
+        with self._lock:
+            if self._state == "registering":
+                self._state = "callback"
+
+    def release_from_caller(self) -> None:
+        with self._lock:
+            if self._state == "caller":
+                self._release_locked()
+
+    def _release_from_callback(self, _future: concurrent.futures.Future[Any]) -> None:
+        with self._lock:
+            if self._state in {"registering", "callback"}:
+                self._release_locked()
+
+    def _release_locked(self) -> None:
+        self._admission.release()
+        self._state = "released"
 
 
 class _InputVersionFilter:

@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import concurrent.futures
+from collections.abc import Callable
 from copy import deepcopy
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from threading import BoundedSemaphore, Event, Lock
+from threading import BoundedSemaphore, Event, Lock, Thread
 from typing import Any
 
 import pytest
@@ -424,6 +426,77 @@ def test_timeout_late_completion_owns_admission_until_worker_exits() -> None:
     admission.release()
 
 
+def test_timeout_callback_registration_failure_releases_real_admission_once() -> None:
+    rule_set = valid_rule_set()
+    runner = RiskEvaluationRunner(DeterministicRiskEvaluator(), FakeClock([0] * 100))
+    original_executor = runner._executor
+    runner._executor = ControlledExecutor(RegistrationFailureFuture())
+    first = RiskInputV1.create(with_input_hash(valid_input(rule_set), rule_set))
+
+    with pytest.raises(CallbackRegistrationError, match="registration failed"):
+        runner.run(first, rule_set_dto(rule_set))
+
+    assert runner._admission.acquire(blocking=False)
+    assert not runner._admission.acquire(blocking=False)
+    runner._admission.release()
+    runner._executor = original_executor
+    second_payload = valid_input(rule_set)
+    second_payload["order"]["order_id"] = "550e8400-e29b-41d4-a716-446655440096"
+    recovered = runner.run(
+        RiskInputV1.create(with_input_hash(second_payload, rule_set)), rule_set_dto(rule_set)
+    )
+    assert recovered.decision.decision_origin == "EVALUATOR"
+
+
+def test_timeout_callback_synchronous_registration_releases_exactly_once() -> None:
+    rule_set = valid_rule_set()
+    runner = RiskEvaluationRunner(DeterministicRiskEvaluator(), FakeClock([0] * 100))
+    admission = TrackingAdmission()
+    runner._admission = admission
+    runner._executor = ControlledExecutor(SynchronousCallbackFuture())
+    risk_input = RiskInputV1.create(with_input_hash(valid_input(rule_set), rule_set))
+
+    audit = runner.run(risk_input, rule_set_dto(rule_set))
+
+    assert audit.decision.decision_origin == "TIMEOUT_GUARD"
+    assert admission.release_count == 1
+    assert admission.acquire(blocking=False)
+    assert not admission.acquire(blocking=False)
+    admission.release()
+
+
+def test_timeout_callback_asynchronous_completion_releases_exactly_once() -> None:
+    rule_set = valid_rule_set()
+    controlled_future = AsynchronousCallbackFuture()
+    runner = RiskEvaluationRunner(DeterministicRiskEvaluator(), FakeClock([0] * 100))
+    original_executor = runner._executor
+    runner._executor = ControlledExecutor(controlled_future)
+    admission = TrackingAdmission()
+    runner._admission = admission
+    first = RiskInputV1.create(with_input_hash(valid_input(rule_set), rule_set))
+
+    audit = runner.run(first, rule_set_dto(rule_set))
+    assert audit.decision.decision_origin == "TIMEOUT_GUARD"
+    assert controlled_future.registered.wait(timeout=1)
+    assert admission.release_count == 0
+
+    second_payload = valid_input(rule_set)
+    second_payload["order"]["order_id"] = "550e8400-e29b-41d4-a716-446655440095"
+    saturated = runner.run(
+        RiskInputV1.create(with_input_hash(second_payload, rule_set)), rule_set_dto(rule_set)
+    )
+    assert saturated.decision.decision_origin == "TIMEOUT_GUARD"
+    assert admission.release_count == 0
+
+    completion = Thread(target=controlled_future.complete)
+    completion.start()
+    completion.join(timeout=1)
+    assert not completion.is_alive()
+    assert admission.released.wait(timeout=1)
+    assert admission.release_count == 1
+    runner._executor = original_executor
+
+
 def test_many_unique_input_versions_keep_runner_state_bounded() -> None:
     rule_set = valid_rule_set()
     runner = RiskEvaluationRunner(DeterministicRiskEvaluator(), FakeClock([0] * 10_000))
@@ -830,6 +903,57 @@ class TrackingAdmission:
         with self._lock:
             self.release_count += 1
             self.released.set()
+
+
+class CallbackRegistrationError(RuntimeError):
+    pass
+
+
+class TimeoutFuture:
+    def result(self, timeout: float | None = None) -> None:
+        del timeout
+        raise concurrent.futures.TimeoutError
+
+    def add_done_callback(self, callback: Callable[[TimeoutFuture], None]) -> None:
+        raise NotImplementedError
+
+
+class RegistrationFailureFuture(TimeoutFuture):
+    def add_done_callback(self, callback: Callable[[TimeoutFuture], None]) -> None:
+        del callback
+        raise CallbackRegistrationError("registration failed")
+
+
+class SynchronousCallbackFuture(TimeoutFuture):
+    def add_done_callback(self, callback: Callable[[TimeoutFuture], None]) -> None:
+        callback(self)
+
+
+class AsynchronousCallbackFuture(TimeoutFuture):
+    def __init__(self) -> None:
+        self._callback: Callable[[TimeoutFuture], None] | None = None
+        self._lock = Lock()
+        self.registered = Event()
+
+    def add_done_callback(self, callback: Callable[[TimeoutFuture], None]) -> None:
+        with self._lock:
+            self._callback = callback
+            self.registered.set()
+
+    def complete(self) -> None:
+        with self._lock:
+            callback = self._callback
+        assert callback is not None
+        callback(self)
+
+
+class ControlledExecutor:
+    def __init__(self, future: TimeoutFuture) -> None:
+        self._future = future
+
+    def submit(self, function: Callable[..., Any], *args: Any) -> TimeoutFuture:
+        del function, args
+        return self._future
 
 
 class DuplicateRuleEvaluator(DeterministicRiskEvaluator):
