@@ -44,7 +44,7 @@ delivery:
   review_status: reported_unverified
   release_status: prohibited
   remediation_task: TASK-031
-  completion_evidence: {mode: historical_evidence_unverifiable, change_pr: unverifiable, reviewed_head_sha: unverifiable, review_verdict: reported_unverified, reviewer: unverifiable, evidence_url: unverifiable, merge_commit_sha: unverifiable, human_authorization_evidence: TASK-031 governance recovery authorization}
+  completion_evidence: {mode: historical_git_verified_review_unavailable, change_pr: https://github.com/qifuxiao/QuantiQmt/pull/22, reviewed_head_sha: a69c2360a58fac7a9608fc04b69765d00c1e0b10, review_verdict: reported_unverified, reviewer: unverifiable, evidence_url: unverifiable, merge_commit_sha: 308d4bf0306ef12bd12834bceeeb45251d52824d, human_authorization_evidence: unverifiable}
 ---
 
 # Objective
