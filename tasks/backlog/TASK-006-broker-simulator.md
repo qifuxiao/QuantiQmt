@@ -2,7 +2,7 @@
 id: TASK-006
 title: Implement execution port and programmable broker simulator
 status: blocked
-depends_on: [TASK-004, TASK-005, TASK-017]
+depends_on: [TASK-004, TASK-005, TASK-017, TASK-048]
 spec_refs: [INV-TRADING, PORTS-CORE, PORTS-BROKER-SIMULATOR, WF-SUBMIT-ORDER, WF-CANCEL-ORDER, NFR-RELIABILITY, CONTRACT-CANCEL-ORDER-V1, CONTRACT-EXECUTION-ATTEMPT-STARTED-V1, CONTRACT-EXECUTION-OUTCOME-UNKNOWN-V1, CONTRACT-EXECUTION-BROKER-GATEWAY-V1, CONTRACT-BROKER-SCENARIO-V1, CONTRACT-BROKER-ORDER-REPORTED-V1, CONTRACT-BROKER-TRADE-V1, REVIEW-IMPLEMENTATION-READINESS-0.7]
 allowed_paths: [src/quantiqmt/execution/**, src/quantiqmt/simulation/broker/**, tests/contract/broker/**]
 forbidden_paths: [src/quantiqmt/live/qmt/**]
@@ -25,6 +25,12 @@ contracts without adding DTO fields, outcome/reason values, simulator actions,
 ordering rules, retry behavior, or broker-specific fallbacks. It remains blocked
 until every declared dependency is trusted completed; this clarification does
 not activate TASK-006.
+
+TASK-006 also MUST wait for TASK-048 to complete the OrderRegistration
+`broker` and `broker_capability_version` persistence/runtime binding. An
+unbound or partially bound registration MUST fail closed before Broker dispatch;
+TASK-006 MUST NOT substitute the adapter's current capability state. This added
+dependency does not change TASK-006 allowed paths or activate TASK-006.
 
 ## Frozen implementation contract
 
