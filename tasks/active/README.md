@@ -1,5 +1,5 @@
 # Active Tasks
 
-当前没有 active task。
+当前 active task: TASK-017。
 
-TASK-047 已通过独立 Review 并完成。TASK-017、TASK-018、TASK-020、TASK-022 仍为 backlog/ready，尚未激活；TASK-019、TASK-021、TASK-029 仍为 backlog/blocked。
+TASK-017 仅执行 Execution/Broker simulator L4 契约冻结，不接 MiniQMT、不实现运行时代码。TASK-018、TASK-020、TASK-022 仍为 backlog/ready；TASK-019、TASK-021、TASK-029 仍为 backlog/blocked。
