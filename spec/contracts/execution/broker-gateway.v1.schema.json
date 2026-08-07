@@ -125,6 +125,22 @@
         {"if": {"not": {"properties": {"reason_code": {"const": "RATE_LIMITED"}}}}, "then": {"properties": {"retry_after_ms": {"type": "null"}}}}
       ]
     },
-    "brokerHealth": {"type": "object", "additionalProperties": false, "required": ["dto_type", "broker", "status", "capability_version", "reason_code", "observed_at"], "properties": {"dto_type": {"const": "BROKER_HEALTH"}, "broker": {"type": "string", "minLength": 1, "maxLength": 64}, "status": {"enum": ["HEALTHY", "DEGRADED", "DISCONNECTED"]}, "capability_version": {"type": ["string", "null"], "minLength": 1, "maxLength": 128}, "reason_code": {"type": ["string", "null"], "minLength": 1, "maxLength": 128}, "observed_at": {"$ref": "#/$defs/deadline"}}}
+    "brokerHealth": {
+      "type": "object", "additionalProperties": false,
+      "required": ["dto_type", "broker", "status", "capability_version", "reason_code", "observed_at"],
+      "properties": {
+        "dto_type": {"const": "BROKER_HEALTH"},
+        "broker": {"type": "string", "minLength": 1, "maxLength": 64},
+        "status": {"enum": ["HEALTHY", "DEGRADED", "DISCONNECTED"]},
+        "capability_version": {"oneOf": [{"$ref": "#/$defs/identifier"}, {"type": "null"}]},
+        "reason_code": {"enum": [null, "RATE_LIMITED", "TRANSPORT_ERROR", "DISCONNECTED"]},
+        "observed_at": {"$ref": "#/$defs/deadline"}
+      },
+      "oneOf": [
+        {"properties": {"status": {"const": "HEALTHY"}, "capability_version": {"$ref": "#/$defs/identifier"}, "reason_code": {"type": "null"}}},
+        {"properties": {"status": {"const": "DEGRADED"}, "capability_version": {"$ref": "#/$defs/identifier"}, "reason_code": {"enum": ["RATE_LIMITED", "TRANSPORT_ERROR"]}}},
+        {"properties": {"status": {"const": "DISCONNECTED"}, "capability_version": {"type": "null"}, "reason_code": {"const": "DISCONNECTED"}}}
+      ]
+    }
   }
 }

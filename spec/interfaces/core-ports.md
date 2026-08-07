@@ -66,9 +66,20 @@ may return `NOT_FOUND/null`). A rejection has `payload=null` and one of
 `DEADLINE_EXCEEDED`, `DISCONNECTED`, or `TRANSPORT_ERROR`. `RATE_LIMITED`
 requires bounded `retry_after_ms`; all other reasons require null. Read failures
 have no external mutation, are fail-closed, and never authorize an OMS state
-change. `BrokerHealth` is the versioned `BROKER_HEALTH` DTO; it reports
-`HEALTHY`, `DEGRADED`, or `DISCONNECTED` plus the observed capability version,
-reason, and UTC observation time.
+change. `BrokerHealth` is the versioned `BROKER_HEALTH` DTO with this exhaustive
+state matrix; adapters MUST NOT emit any other combination:
+
+| status | capability_version | reason_code |
+|---|---|---|
+| `HEALTHY` | required, non-null | null |
+| `DEGRADED` | required, non-null | `RATE_LIMITED` or `TRANSPORT_ERROR` |
+| `DISCONNECTED` | null | `DISCONNECTED` |
+
+`reason_code` is the frozen enum `null`, `RATE_LIMITED`, `TRANSPORT_ERROR`, or
+`DISCONNECTED`, not adapter-selected text. `capability_version` identifies the
+snapshot actually observed while connected; a disconnected adapter cannot
+claim that an unobserved/current snapshot remains authoritative. Every health
+DTO also carries its broker identity and UTC observation time.
 
 Fencing validation happens before idempotency lookup and before every external
 side effect. A stale token is `REJECTED/STALE_FENCING_TOKEN` and maps to
@@ -85,12 +96,23 @@ to register the order. Unsupported behavior is rejected before dispatch as
 ID. A changed capability version requires revalidation, not mutation of an
 already-dispatched identity.
 
-Order registration MUST persist the selected broker and
-`broker_capability_version` beside `client_order_id`. Submit/cancel request
-`capability_version` MUST equal that persisted value; a missing or mismatched
-value is `REJECTED/UNSUPPORTED_CAPABILITY` before fencing/idempotency dispatch.
-No ambient adapter state, current capability lookup, or side channel may supply
-or overwrite the version for an existing order.
+Order registration MUST persist the selected `broker` and
+`broker_capability_version` beside `client_order_id`. Before either submit or
+cancel dispatch, the mandatory semantic validator MUST compare the request,
+persisted registration, and selected immutable capability snapshot and require
+all five bindings:
+
+- `request.capability_version == registration.broker_capability_version`;
+- `capability.capability_version == registration.broker_capability_version`;
+- `request.client_order_id == registration.client_order_id`;
+- `request.broker == registration.broker`;
+- `capability.broker == registration.broker`.
+
+Any missing or mismatched binding is `REJECTED/UNSUPPORTED_CAPABILITY` before
+fencing/idempotency dispatch. No ambient adapter state, current capability
+lookup, or side channel may supply or overwrite any identity for an existing
+order. Implementations MUST run the schema validator and this complete semantic
+validator; validating only the two capability-version fields is non-conforming.
 
 Gateway DTO schema validation MUST run before a capability semantic validator.
 That validator MUST compile the declared regular expression before activation

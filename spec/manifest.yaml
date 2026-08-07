@@ -151,34 +151,37 @@ catalogs:
 
 change:
   id: SPEC-0.8.0-EXECUTION-BROKER-CONTRACTS
-  compatibility: additive_internal_execution_and_simulator_contracts_existing_public_messages_unchanged
+  compatibility: additive_internal_contracts_public_messages_unchanged_runtime_and_storage_binding_deferred_to_task_048
   previous_version: 0.7.1
   public_message_schema_changes: none
-  storage_schema_changes: none
+  storage_schema_changes: "required additive OrderRegistration broker/capability binding; implementation and expand-only migration are owned by blocked TASK-048"
   error_catalog_change: none
-  runtime_code_change: none
+  runtime_code_change: "required in Order persistence DTO, serialization, Memory/PostgreSQL projections, Journal, Snapshot, and Recovery; owned by blocked TASK-048 and not implemented by TASK-017"
   review_change: none
   contract_change: "freezes ExecutionGateway/BrokerGateway DTOs including typed read failures and BrokerHealth, persisted capability-version binding, operation-specific results, plus deterministic Broker Simulator scenario DSL"
   semantic_validation_change: "adds mandatory scenario/request operation, sequence/reference/fill-bound and capability regex/registered-ID validation before simulation; canonical UNKNOWN reconciliation rules remain fail-closed"
   internal_contracts_added: [CONTRACT-EXECUTION-BROKER-GATEWAY-V1, CONTRACT-BROKER-SCENARIO-V1, PORTS-BROKER-SIMULATOR]
   public_contracts_added: []
-  task_queue_change: "TASK-017 remains active; TASK-006 remains blocked but becomes implementation-ready with respect to its execution/simulator contract dependency after independent review"
-  affected_tasks: [TASK-006, TASK-017, TASK-021, TASK-024, TASK-026, TASK-027]
+  task_queue_change: "TASK-017 remains active; TASK-048 owns runtime/storage compatibility and remains blocked on TASK-017; TASK-006 remains blocked on TASK-048 and other declared dependencies"
+  affected_tasks: [TASK-006, TASK-017, TASK-021, TASK-024, TASK-026, TASK-027, TASK-048]
   deployment_order:
     - independently_review_and_merge_task_017_contracts
     - human_authorized_task_017_closeout_with_trusted_delivery_evidence
-    - keep_task_006_blocked_until_task_005_and_task_017_are_trusted_completed
+    - activate_implement_review_and_merge_task_048_order_registration_binding
+    - deploy_task_048_expand_only_storage_and_compatible_runtime_read_write_path
+    - verify_historical_registrations_remain_unbound_and_fail_closed_until_auditable_binding
+    - keep_task_006_blocked_until_task_005_task_017_and_task_048_are_trusted_completed
     - implement_task_006_only_against_the_versioned_contract_snapshot
   migration:
-    runtime_data: not_applicable
+    runtime_data: "TASK-048 adds broker and broker_capability_version to runtime DTO and canonical persisted payloads; legacy missing values remain explicitly unbound and cannot dispatch"
     public_events: not_applicable
-    storage: not_applicable
-    task_queue: "no activation or status migration; TASK-006 retains existing dependencies and remains blocked"
-    historical_evidence: not_applicable
+    storage: "TASK-048 supplies an expand-only migration and compatible readers/writers; no ambient capability backfill is permitted"
+    task_queue: "TASK-048 remains blocked on TASK-017; TASK-006 depends on TASK-048 and remains blocked; this PR activates neither task"
+    historical_evidence: "legacy registration bindings cannot be inferred from current adapter state; only auditable reconciliation evidence or explicit human authorization may bind them under TASK-048"
     destructive_backfill: forbidden
   rollback:
-    runtime_data: not_applicable
+    runtime_data: "stop or roll back new writers/readers while preserving broker binding and audit evidence; legacy rows remain unbound/fail-closed"
     public_events: not_applicable
-    task_queue: "restore TASK-006 spec_refs and blocking text only; do not activate any task"
-    contracts: "remove only the unimplemented 0.8.0 internal schema/interface registrations; public v1 broker/execution messages remain unchanged"
+    task_queue: "keep TASK-048 and TASK-006 blocked; do not activate any task"
+    contracts: "remove only the unimplemented 0.8.0 internal schema/interface registrations; public v1 broker/execution messages remain unchanged; never delete persisted binding or audit evidence"
     release: prohibited

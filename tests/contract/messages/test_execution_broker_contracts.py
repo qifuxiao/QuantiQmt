@@ -85,6 +85,12 @@ def _validate_execution_request_semantics(
         raise ValueError("request capability version differs from registration")
     if capability["capability_version"] != registration["broker_capability_version"]:
         raise ValueError("capability snapshot differs from registration")
+    if request["client_order_id"] != registration["client_order_id"]:
+        raise ValueError("request client_order_id differs from registration")
+    if request["broker"] != registration["broker"]:
+        raise ValueError("request broker differs from registration")
+    if capability["broker"] != registration["broker"]:
+        raise ValueError("capability broker differs from registration")
     _validate_capability_semantics(capability, registration["client_order_id"])
 
 
@@ -136,6 +142,28 @@ def test_gateway_rejects_unsafe_or_ambiguous_dtos(case: dict[str, Any]) -> None:
 
 
 @pytest.mark.parametrize(
+    ("name", "repair"),
+    [
+        ("submit_missing_idempotency", ("idempotency_key", "idem-submit-1")),
+        ("cancel_missing_fence", ("fencing_token", 7)),
+        ("float_limit_price", ("limit_price", "10.01")),
+    ],
+)
+def test_named_invalid_fixture_has_exactly_its_named_failure(
+    name: str, repair: tuple[str, object]
+) -> None:
+    gateway, _ = _validators()
+    cases = _load(FIXTURE_ROOT / "execution-broker-gateway.v1/invalid.json")["cases"]
+    invalid = deepcopy(next(case["dto"] for case in cases if case["name"] == name))
+
+    assert invalid["capability_version"] == "sim-v1"
+    assert not gateway.is_valid(invalid)
+    field, value = repair
+    invalid[field] = value
+    gateway.validate(invalid)
+
+
+@pytest.mark.parametrize(
     "mutation",
     ["client_id_range", "reserved_capacity", "invalid_regex", "registered_id_mismatch"],
 )
@@ -172,20 +200,94 @@ def test_submit_cancel_require_frozen_capability_version() -> None:
         assert not gateway.is_valid(missing)
 
 
-def test_submit_cancel_semantics_bind_persisted_capability_version() -> None:
+@pytest.mark.parametrize(
+    ("mutation", "message"),
+    [
+        ("request_capability_version", "request capability version"),
+        ("capability_version", "capability snapshot"),
+        ("request_client_order_id", "request client_order_id"),
+        ("request_broker", "request broker"),
+        ("capability_broker", "capability broker"),
+    ],
+)
+def test_submit_cancel_semantics_bind_registration_and_capability_identity(
+    mutation: str, message: str
+) -> None:
     fixture = _load(FIXTURE_ROOT / "execution-broker-gateway.v1/all-dtos.valid.json")
-    capability = fixture["dtos"][0]
     registration = {
         "client_order_id": "client-1",
+        "broker": "sim",
         "broker_capability_version": "sim-v1",
     }
     for operation in ("SUBMIT_ORDER_REQUEST", "CANCEL_ORDER_REQUEST"):
-        request = next(dto for dto in fixture["dtos"] if dto["dto_type"] == operation)
+        capability = deepcopy(fixture["dtos"][0])
+        request = deepcopy(next(dto for dto in fixture["dtos"] if dto["dto_type"] == operation))
         _validate_execution_request_semantics(request, registration, capability)
-        mismatch = deepcopy(request)
-        mismatch["capability_version"] = "sim-v2"
-        with pytest.raises(ValueError, match="differs from registration"):
-            _validate_execution_request_semantics(mismatch, registration, capability)
+        if mutation == "request_capability_version":
+            request["capability_version"] = "sim-v2"
+        elif mutation == "capability_version":
+            capability["capability_version"] = "sim-v2"
+        elif mutation == "request_client_order_id":
+            request["client_order_id"] = "client-2"
+        elif mutation == "request_broker":
+            request["broker"] = "other"
+        elif mutation == "capability_broker":
+            capability["broker"] = "other"
+        with pytest.raises(ValueError, match=message):
+            _validate_execution_request_semantics(request, registration, capability)
+
+
+@pytest.mark.parametrize(
+    ("status", "capability_version", "reason_code"),
+    [
+        ("HEALTHY", "sim-v1", None),
+        ("DEGRADED", "sim-v1", "RATE_LIMITED"),
+        ("DEGRADED", "sim-v1", "TRANSPORT_ERROR"),
+        ("DISCONNECTED", None, "DISCONNECTED"),
+    ],
+)
+def test_broker_health_accepts_only_frozen_legal_matrix(
+    status: str, capability_version: str | None, reason_code: str | None
+) -> None:
+    gateway, _ = _validators()
+    health = {
+        "dto_type": "BROKER_HEALTH",
+        "broker": "sim",
+        "status": status,
+        "capability_version": capability_version,
+        "reason_code": reason_code,
+        "observed_at": "2026-08-07T02:00:02Z",
+    }
+    gateway.validate(health)
+
+
+def test_broker_health_rejects_every_contradictory_status_combination() -> None:
+    gateway, _ = _validators()
+    valid = {
+        ("HEALTHY", "sim-v1", None),
+        ("DEGRADED", "sim-v1", "RATE_LIMITED"),
+        ("DEGRADED", "sim-v1", "TRANSPORT_ERROR"),
+        ("DISCONNECTED", None, "DISCONNECTED"),
+    }
+    statuses = ("HEALTHY", "DEGRADED", "DISCONNECTED")
+    versions = ("sim-v1", None)
+    reasons = (None, "RATE_LIMITED", "TRANSPORT_ERROR", "DISCONNECTED", "ADAPTER_TEXT")
+
+    for status in statuses:
+        for capability_version in versions:
+            for reason_code in reasons:
+                combination = (status, capability_version, reason_code)
+                if combination in valid:
+                    continue
+                health = {
+                    "dto_type": "BROKER_HEALTH",
+                    "broker": "sim",
+                    "status": status,
+                    "capability_version": capability_version,
+                    "reason_code": reason_code,
+                    "observed_at": "2026-08-07T02:00:02Z",
+                }
+                assert not gateway.is_valid(health), combination
 
 
 @pytest.mark.parametrize(
@@ -344,3 +446,25 @@ def test_normative_text_freezes_ownership_unknown_and_determinism() -> None:
         "manual_clock",
         "request_sequence",
     ]
+
+
+def test_manifest_defers_runtime_storage_binding_to_task_048_fail_closed() -> None:
+    manifest = yaml.safe_load(Path("spec/manifest.yaml").read_text(encoding="utf-8"))
+    change = manifest["change"]
+
+    assert change["storage_schema_changes"] != "none"
+    assert change["runtime_code_change"] != "none"
+    assert "TASK-048" in change["storage_schema_changes"]
+    assert "TASK-048" in change["runtime_code_change"]
+    deployment_order = change["deployment_order"]
+    task_017 = deployment_order.index("independently_review_and_merge_task_017_contracts")
+    task_048 = deployment_order.index(
+        "activate_implement_review_and_merge_task_048_order_registration_binding"
+    )
+    task_006 = deployment_order.index(
+        "implement_task_006_only_against_the_versioned_contract_snapshot"
+    )
+    assert task_017 < task_048 < task_006
+    assert "unbound" in change["migration"]["runtime_data"]
+    assert "cannot dispatch" in change["migration"]["runtime_data"]
+    assert "never delete" in change["rollback"]["contracts"]

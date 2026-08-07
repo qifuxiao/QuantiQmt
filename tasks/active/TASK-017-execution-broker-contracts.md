@@ -42,6 +42,11 @@ delivery:
 - `CONTRACT-EXECUTION-BROKER-GATEWAY-V1` freezes seven request DTOs,
   operation-specific submit/cancel results, five typed `READ_RESULT` variants,
   `BROKER_HEALTH`, Broker capabilities, snapshots, and bounded page responses.
+  The BrokerHealth schema exhaustively accepts only HEALTHY with a non-null
+  capability version and null reason, DEGRADED with a non-null version and a
+  frozen RATE_LIMITED/TRANSPORT_ERROR reason, or DISCONNECTED with a null
+  version and DISCONNECTED reason. An executable Cartesian-product probe rejects
+  every contradictory status/version/reason combination.
   Golden/negative fixtures reject missing fencing/idempotency/capability version,
   cross-operation confirmations, rejected post-dispatch timeout, typed failure
   payloads, missing rate-limit retry advice, floats, and every negative-zero form.
@@ -49,8 +54,9 @@ delivery:
   complete read failure returns, client_order_id capability validation, reserved
   rate-limit capacity, unsupported-capability failure, and the rule that
   Execution never advances OMS business state. `PORTS-ORDER-PERSISTENCE` stores
-  broker/capability version beside client_order_id; semantic probes reject a
-  submit/cancel version different from the persisted registration.
+  broker/capability version beside client_order_id; semantic probes independently
+  reject all five request/registration/capability version, client-order-ID, and
+  broker identity mismatches for both submit and cancel.
 - `CONTRACT-BROKER-SCENARIO-V1` and `PORTS-BROKER-SIMULATOR` freeze all nine
   required actions, manual clock/seed inputs, fill/report emission order, and the
   mandatory schema-first semantic validator. Fixtures/probes reject wall-clock
@@ -61,10 +67,18 @@ delivery:
   `NFR-RELIABILITY` bind post-dispatch timeout/disconnect to UNKNOWN_OUTCOME,
   reconciliation under the same identities, and blind-retry prohibition.
 - TASK-006 now references the frozen contract IDs and contains a bounded
-  implementation checklist; it remains blocked and was not activated.
-- Verification on 2026-08-07 after the PR #66 REQUEST_CHANGES remediation:
-  `scripts/validate_specs.py` passed and `tests/spec tests/contract` passed 272
-  tests. Final Ruff/format/diff/path gates are rerun before publication. No
+  implementation checklist; it remains blocked and was not activated. TASK-048
+  is the blocked owner for the required OrderRegistration runtime/storage binding
+  and expand-only migration. Manifest deployment is explicitly ordered
+  TASK-017 -> TASK-048 -> TASK-006; historical registrations remain unbound and
+  fail closed, and rollback preserves all binding/audit evidence.
+- The three named negative fixtures now contain valid `capability_version`
+  values. Their contract test repairs only the named defect (missing
+  idempotency, missing fence, or float price) and requires the repaired DTO to
+  validate, proving no secondary missing field masks the intended failure.
+- Verification on 2026-08-07 after the second PR #66 REQUEST_CHANGES
+  remediation: `scripts/validate_specs.py` passed and `tests/spec tests/contract`
+  passed 285 tests; the focused Ruff, format, diff, and path gates passed. No
   runtime code, MiniQMT
   connection, OMS state-machine change, approval, merge, or completion evidence
   is claimed.
