@@ -30,8 +30,15 @@ not activate TASK-006.
 
 - Implement all seven request methods plus versioned capabilities and canonical
   result/snapshot DTOs exactly as registered in `spec/manifest.yaml`.
+- Return `ReadResult` for every query/list/account/position operation and
+  `BROKER_HEALTH` for health; do not invent adapter exceptions, null/error
+  sentinels, payload shapes, or additional failure reasons.
+- Copy submit/cancel `capability_version` from the persisted OrderRegistration
+  and reject mismatch before dispatch; do not use current adapter state as a
+  side channel.
 - Validate schema first, then scenario sequence/reference/fill semantics before
-  starting a simulator run.
+  starting a simulator run, including request-operation matching, remaining
+  quantity bounds, regex compilation, and registered client_order_id matching.
 - Use only the manual clock and declared seed. Emit fills and order reports using
   the canonical ordering, while explicitly scripted duplicate/out-of-order
   actions preserve their original identities.

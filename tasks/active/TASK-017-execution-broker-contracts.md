@@ -40,25 +40,32 @@ delivery:
 ## Evidence
 
 - `CONTRACT-EXECUTION-BROKER-GATEWAY-V1` freezes seven request DTOs,
-  canonical operation results, Broker capabilities, snapshots, and bounded page
-  responses. Golden fixtures exercise every DTO; negative fixtures reject
-  missing fencing/idempotency, float prices, and inconsistent UNKNOWN results.
+  operation-specific submit/cancel results, five typed `READ_RESULT` variants,
+  `BROKER_HEALTH`, Broker capabilities, snapshots, and bounded page responses.
+  Golden/negative fixtures reject missing fencing/idempotency/capability version,
+  cross-operation confirmations, rejected post-dispatch timeout, typed failure
+  payloads, missing rate-limit retry advice, floats, and every negative-zero form.
 - `PORTS-CORE` freezes deadline ownership, fencing order, idempotency identity,
-  client_order_id capability validation, reserved rate-limit capacity,
-  unsupported-capability failure, and the rule that Execution never advances
-  OMS business state.
+  complete read failure returns, client_order_id capability validation, reserved
+  rate-limit capacity, unsupported-capability failure, and the rule that
+  Execution never advances OMS business state. `PORTS-ORDER-PERSISTENCE` stores
+  broker/capability version beside client_order_id; semantic probes reject a
+  submit/cancel version different from the persisted registration.
 - `CONTRACT-BROKER-SCENARIO-V1` and `PORTS-BROKER-SIMULATOR` freeze all nine
   required actions, manual clock/seed inputs, fill/report emission order, and the
-  schema-first semantic validator. Fixtures reject wall-clock mode, float fills,
-  ambiguous action fields, sequence gaps, and forward references.
+  mandatory schema-first semantic validator. Fixtures/probes reject wall-clock
+  mode, float fills, unsafe REJECT reasons, ambiguous action fields, sequence
+  gaps, forward references, request-operation mismatch, overfill, invalid regex,
+  non-matching registered client_order_id, and invalid reserved capacity.
 - `WF-SUBMIT-ORDER`, `WF-CANCEL-ORDER`, `WF-BROKER-RECONNECT`, and
   `NFR-RELIABILITY` bind post-dispatch timeout/disconnect to UNKNOWN_OUTCOME,
   reconciliation under the same identities, and blind-retry prohibition.
 - TASK-006 now references the frozen contract IDs and contains a bounded
   implementation checklist; it remains blocked and was not activated.
-- Verification on 2026-08-07: `scripts/validate_specs.py` passed; the final
-  `tests/spec tests/contract` run passed 252 tests; targeted Ruff check and
-  format check plus `git diff --check` passed. No runtime code, MiniQMT
+- Verification on 2026-08-07 after the PR #66 REQUEST_CHANGES remediation:
+  `scripts/validate_specs.py` passed and `tests/spec tests/contract` passed 272
+  tests. Final Ruff/format/diff/path gates are rerun before publication. No
+  runtime code, MiniQMT
   connection, OMS state-machine change, approval, merge, or completion evidence
   is claimed.
 

@@ -158,8 +158,8 @@ change:
   error_catalog_change: none
   runtime_code_change: none
   review_change: none
-  contract_change: "freezes ExecutionGateway/BrokerGateway DTOs, capability and result semantics, plus deterministic Broker Simulator scenario DSL"
-  semantic_validation_change: "adds scenario sequence/reference/fill-bound semantic validation before simulation and canonical UNKNOWN reconciliation rules"
+  contract_change: "freezes ExecutionGateway/BrokerGateway DTOs including typed read failures and BrokerHealth, persisted capability-version binding, operation-specific results, plus deterministic Broker Simulator scenario DSL"
+  semantic_validation_change: "adds mandatory scenario/request operation, sequence/reference/fill-bound and capability regex/registered-ID validation before simulation; canonical UNKNOWN reconciliation rules remain fail-closed"
   internal_contracts_added: [CONTRACT-EXECUTION-BROKER-GATEWAY-V1, CONTRACT-BROKER-SCENARIO-V1, PORTS-BROKER-SIMULATOR]
   public_contracts_added: []
   task_queue_change: "TASK-017 remains active; TASK-006 remains blocked but becomes implementation-ready with respect to its execution/simulator contract dependency after independent review"

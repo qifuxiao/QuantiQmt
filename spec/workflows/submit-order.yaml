@@ -51,7 +51,8 @@ workflow:
       timeout: SUBMIT_UNKNOWN
       input_contract: CONTRACT-EXECUTION-BROKER-GATEWAY-V1.SubmitOrderRequest
       output_contract: CONTRACT-EXECUTION-BROKER-GATEWAY-V1.OperationResult
-      pre_dispatch_guards: [deadline, fencing_token, capability_version, client_order_id, rate_limit]
+      pre_dispatch_guards: [deadline, fencing_token, persisted_capability_version_match, client_order_id, rate_limit]
+      capability_version_source: OrderRegistration.broker_capability_version
     - id: merge_report
       owner: OMS
       duplicate_safe: true

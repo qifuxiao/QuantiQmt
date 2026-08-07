@@ -35,6 +35,14 @@ nfr:
     blind_retry_with_changed_identity: forbidden
     stale_fencing_side_effect: forbidden
     execution_owns_oms_business_state: false
+    read_failure_contract:
+      envelope: READ_RESULT
+      operations: [QUERY_ORDER, OPEN_ORDERS, TRADES, ACCOUNT, POSITIONS]
+      routine_exception_escape: forbidden
+      rejected_payload: null
+      failure_reasons: [INVALID_REQUEST, UNSUPPORTED_CAPABILITY, RATE_LIMITED, DEADLINE_EXCEEDED, DISCONNECTED, TRANSPORT_ERROR]
+    capability_version_source: persisted_order_registration
+    capability_version_side_channel: forbidden
   broker_simulator:
     contract: CONTRACT-BROKER-SCENARIO-V1
     determinism_inputs: [scenario, seed, manual_clock, request_sequence]

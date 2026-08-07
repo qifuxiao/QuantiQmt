@@ -18,10 +18,12 @@
     {"$ref": "#/$defs/positionSnapshot"},
     {"$ref": "#/$defs/orderPage"},
     {"$ref": "#/$defs/tradePage"},
-    {"$ref": "#/$defs/positionPage"}
+    {"$ref": "#/$defs/positionPage"},
+    {"$ref": "#/$defs/readResult"},
+    {"$ref": "#/$defs/brokerHealth"}
   ],
   "$defs": {
-    "decimal": {"type": "string", "pattern": "^-?(0|[1-9][0-9]{0,17})(\\.[0-9]{1,8})?$"},
+    "decimal": {"type": "string", "pattern": "^(0(\\.[0-9]{1,8})?|[1-9][0-9]{0,17}(\\.[0-9]{1,8})?|-(?=.*[1-9])(0|[1-9][0-9]{0,17})(\\.[0-9]{1,8})?)$"},
     "nonNegativeDecimal": {"type": "string", "pattern": "^(0|[1-9][0-9]{0,17})(\\.[0-9]{1,8})?$"},
     "positiveDecimal": {"type": "string", "pattern": "^(?=.*[1-9])(0|[1-9][0-9]{0,17})(\\.[0-9]{1,8})?$"},
     "identifier": {"type": "string", "minLength": 1, "maxLength": 128},
@@ -41,23 +43,23 @@
         "order_types": {"type": "array", "items": {"enum": ["LIMIT", "MARKET"]}, "uniqueItems": true},
         "time_in_force": {"type": "array", "items": {"enum": ["DAY", "IOC", "FOK"]}, "uniqueItems": true},
         "position_effects": {"type": "array", "items": {"enum": ["OPEN", "CLOSE", "AUTO"]}, "uniqueItems": true},
-        "client_order_id": {"type": "object", "additionalProperties": false, "required": ["min_length", "max_length", "pattern", "case_sensitive"], "properties": {"min_length": {"type": "integer", "minimum": 1, "maximum": 128}, "max_length": {"type": "integer", "minimum": 1, "maximum": 128}, "pattern": {"type": "string", "minLength": 1, "maxLength": 256}, "case_sensitive": {"type": "boolean"}}},
+        "client_order_id": {"type": "object", "additionalProperties": false, "required": ["min_length", "max_length", "pattern", "case_sensitive"], "properties": {"min_length": {"type": "integer", "minimum": 1, "maximum": 128}, "max_length": {"type": "integer", "minimum": 1, "maximum": 128}, "pattern": {"type": "string", "format": "regex", "minLength": 1, "maxLength": 256}, "case_sensitive": {"type": "boolean"}}},
         "native_idempotency": {"type": "boolean"},
         "rate_limit": {"type": "object", "additionalProperties": false, "required": ["requests_per_second", "burst", "reserved_cancel", "reserved_reconciliation"], "properties": {"requests_per_second": {"type": "integer", "minimum": 1}, "burst": {"type": "integer", "minimum": 1}, "reserved_cancel": {"type": "integer", "minimum": 1}, "reserved_reconciliation": {"type": "integer", "minimum": 1}}}
       }
     },
     "submitOrderRequest": {
       "type": "object", "additionalProperties": false,
-      "required": ["dto_type", "operation_id", "attempt_id", "order_id", "broker", "account_id", "deadline_at", "fencing_token", "idempotency_key", "client_order_id", "instrument_id", "side", "position_effect", "order_type", "quantity", "limit_price", "time_in_force"],
+      "required": ["dto_type", "operation_id", "attempt_id", "order_id", "broker", "account_id", "deadline_at", "capability_version", "fencing_token", "idempotency_key", "client_order_id", "instrument_id", "side", "position_effect", "order_type", "quantity", "limit_price", "time_in_force"],
       "properties": {
-        "dto_type": {"const": "SUBMIT_ORDER_REQUEST"}, "operation_id": {"$ref": "#/$defs/identifier"}, "attempt_id": {"$ref": "#/$defs/uuid"}, "order_id": {"$ref": "#/$defs/uuid"}, "broker": {"type": "string", "minLength": 1, "maxLength": 64}, "account_id": {"$ref": "#/$defs/identifier"}, "deadline_at": {"$ref": "#/$defs/deadline"}, "fencing_token": {"type": "integer", "minimum": 1}, "idempotency_key": {"$ref": "#/$defs/identifier"}, "client_order_id": {"$ref": "#/$defs/identifier"}, "instrument_id": {"type": "string", "minLength": 1, "maxLength": 64}, "side": {"enum": ["BUY", "SELL"]}, "position_effect": {"enum": ["OPEN", "CLOSE", "AUTO"]}, "order_type": {"enum": ["LIMIT", "MARKET"]}, "quantity": {"type": "integer", "minimum": 1}, "limit_price": {"oneOf": [{"$ref": "#/$defs/positiveDecimal"}, {"type": "null"}]}, "time_in_force": {"enum": ["DAY", "IOC", "FOK"]}
+        "dto_type": {"const": "SUBMIT_ORDER_REQUEST"}, "operation_id": {"$ref": "#/$defs/identifier"}, "attempt_id": {"$ref": "#/$defs/uuid"}, "order_id": {"$ref": "#/$defs/uuid"}, "broker": {"type": "string", "minLength": 1, "maxLength": 64}, "account_id": {"$ref": "#/$defs/identifier"}, "deadline_at": {"$ref": "#/$defs/deadline"}, "capability_version": {"$ref": "#/$defs/identifier"}, "fencing_token": {"type": "integer", "minimum": 1}, "idempotency_key": {"$ref": "#/$defs/identifier"}, "client_order_id": {"$ref": "#/$defs/identifier"}, "instrument_id": {"type": "string", "minLength": 1, "maxLength": 64}, "side": {"enum": ["BUY", "SELL"]}, "position_effect": {"enum": ["OPEN", "CLOSE", "AUTO"]}, "order_type": {"enum": ["LIMIT", "MARKET"]}, "quantity": {"type": "integer", "minimum": 1}, "limit_price": {"oneOf": [{"$ref": "#/$defs/positiveDecimal"}, {"type": "null"}]}, "time_in_force": {"enum": ["DAY", "IOC", "FOK"]}
       },
       "allOf": [{"if": {"properties": {"order_type": {"const": "LIMIT"}}}, "then": {"properties": {"limit_price": {"$ref": "#/$defs/positiveDecimal"}}}}, {"if": {"properties": {"order_type": {"const": "MARKET"}}}, "then": {"properties": {"limit_price": {"type": "null"}}}}]
     },
     "cancelOrderRequest": {
       "type": "object", "additionalProperties": false,
-      "required": ["dto_type", "operation_id", "attempt_id", "order_id", "cancel_request_id", "broker", "account_id", "deadline_at", "fencing_token", "idempotency_key", "client_order_id"],
-      "properties": {"dto_type": {"const": "CANCEL_ORDER_REQUEST"}, "operation_id": {"$ref": "#/$defs/identifier"}, "attempt_id": {"$ref": "#/$defs/uuid"}, "order_id": {"$ref": "#/$defs/uuid"}, "cancel_request_id": {"$ref": "#/$defs/uuid"}, "broker": {"type": "string", "minLength": 1, "maxLength": 64}, "account_id": {"$ref": "#/$defs/identifier"}, "deadline_at": {"$ref": "#/$defs/deadline"}, "fencing_token": {"type": "integer", "minimum": 1}, "idempotency_key": {"$ref": "#/$defs/identifier"}, "client_order_id": {"$ref": "#/$defs/identifier"}, "broker_order_id": {"oneOf": [{"$ref": "#/$defs/identifier"}, {"type": "null"}]}}
+      "required": ["dto_type", "operation_id", "attempt_id", "order_id", "cancel_request_id", "broker", "account_id", "deadline_at", "capability_version", "fencing_token", "idempotency_key", "client_order_id"],
+      "properties": {"dto_type": {"const": "CANCEL_ORDER_REQUEST"}, "operation_id": {"$ref": "#/$defs/identifier"}, "attempt_id": {"$ref": "#/$defs/uuid"}, "order_id": {"$ref": "#/$defs/uuid"}, "cancel_request_id": {"$ref": "#/$defs/uuid"}, "broker": {"type": "string", "minLength": 1, "maxLength": 64}, "account_id": {"$ref": "#/$defs/identifier"}, "deadline_at": {"$ref": "#/$defs/deadline"}, "capability_version": {"$ref": "#/$defs/identifier"}, "fencing_token": {"type": "integer", "minimum": 1}, "idempotency_key": {"$ref": "#/$defs/identifier"}, "client_order_id": {"$ref": "#/$defs/identifier"}, "broker_order_id": {"oneOf": [{"$ref": "#/$defs/identifier"}, {"type": "null"}]}}
     },
     "queryOrderRequest": {"$ref": "#/$defs/queryOrderRequestObject"},
     "queryOrderRequestObject": {
@@ -85,9 +87,12 @@
       "required": ["dto_type", "operation", "operation_id", "outcome", "reason_code", "broker", "account_id", "attempt_id", "client_order_id", "idempotency_key", "broker_order_id", "side_effect_possible", "reconciliation_required", "retry_after_ms"],
       "properties": {"dto_type": {"const": "OPERATION_RESULT"}, "operation": {"enum": ["SUBMIT", "CANCEL"]}, "operation_id": {"$ref": "#/$defs/identifier"}, "outcome": {"enum": ["CONFIRMED", "REJECTED", "UNKNOWN_OUTCOME"]}, "reason_code": {"enum": ["BROKER_ACCEPTED", "BROKER_CANCELED", "BROKER_REJECTED", "INVALID_REQUEST", "UNSUPPORTED_CAPABILITY", "RATE_LIMITED", "STALE_FENCING_TOKEN", "DEADLINE_EXCEEDED_BEFORE_DISPATCH", "DISCONNECTED_BEFORE_DISPATCH", "TIMEOUT_AFTER_DISPATCH", "DISCONNECTED_AFTER_DISPATCH", "TRANSPORT_UNCERTAIN"]}, "broker": {"type": "string", "minLength": 1, "maxLength": 64}, "account_id": {"$ref": "#/$defs/identifier"}, "attempt_id": {"$ref": "#/$defs/uuid"}, "client_order_id": {"$ref": "#/$defs/identifier"}, "idempotency_key": {"$ref": "#/$defs/identifier"}, "broker_order_id": {"oneOf": [{"$ref": "#/$defs/identifier"}, {"type": "null"}]}, "side_effect_possible": {"type": "boolean"}, "reconciliation_required": {"type": "boolean"}, "retry_after_ms": {"type": ["integer", "null"], "minimum": 0}},
       "oneOf": [
-        {"properties": {"outcome": {"const": "CONFIRMED"}, "reason_code": {"enum": ["BROKER_ACCEPTED", "BROKER_CANCELED"]}, "side_effect_possible": {"const": true}, "reconciliation_required": {"const": false}}},
-        {"properties": {"outcome": {"const": "REJECTED"}, "reason_code": {"enum": ["BROKER_REJECTED", "INVALID_REQUEST", "UNSUPPORTED_CAPABILITY", "RATE_LIMITED", "STALE_FENCING_TOKEN", "DEADLINE_EXCEEDED_BEFORE_DISPATCH", "DISCONNECTED_BEFORE_DISPATCH"]}, "side_effect_possible": {"const": false}, "reconciliation_required": {"const": false}}},
-        {"properties": {"outcome": {"const": "UNKNOWN_OUTCOME"}, "reason_code": {"enum": ["TIMEOUT_AFTER_DISPATCH", "DISCONNECTED_AFTER_DISPATCH", "TRANSPORT_UNCERTAIN"]}, "side_effect_possible": {"const": true}, "reconciliation_required": {"const": true}}}
+        {"properties": {"operation": {"const": "SUBMIT"}, "outcome": {"const": "CONFIRMED"}, "reason_code": {"const": "BROKER_ACCEPTED"}, "side_effect_possible": {"const": true}, "reconciliation_required": {"const": false}}},
+        {"properties": {"operation": {"const": "CANCEL"}, "outcome": {"const": "CONFIRMED"}, "reason_code": {"const": "BROKER_CANCELED"}, "side_effect_possible": {"const": true}, "reconciliation_required": {"const": false}}},
+        {"properties": {"operation": {"const": "SUBMIT"}, "outcome": {"const": "REJECTED"}, "reason_code": {"enum": ["BROKER_REJECTED", "INVALID_REQUEST", "UNSUPPORTED_CAPABILITY", "RATE_LIMITED", "STALE_FENCING_TOKEN", "DEADLINE_EXCEEDED_BEFORE_DISPATCH", "DISCONNECTED_BEFORE_DISPATCH"]}, "side_effect_possible": {"const": false}, "reconciliation_required": {"const": false}}},
+        {"properties": {"operation": {"const": "CANCEL"}, "outcome": {"const": "REJECTED"}, "reason_code": {"enum": ["BROKER_REJECTED", "INVALID_REQUEST", "UNSUPPORTED_CAPABILITY", "RATE_LIMITED", "STALE_FENCING_TOKEN", "DEADLINE_EXCEEDED_BEFORE_DISPATCH", "DISCONNECTED_BEFORE_DISPATCH"]}, "side_effect_possible": {"const": false}, "reconciliation_required": {"const": false}}},
+        {"properties": {"operation": {"const": "SUBMIT"}, "outcome": {"const": "UNKNOWN_OUTCOME"}, "reason_code": {"enum": ["TIMEOUT_AFTER_DISPATCH", "DISCONNECTED_AFTER_DISPATCH", "TRANSPORT_UNCERTAIN"]}, "side_effect_possible": {"const": true}, "reconciliation_required": {"const": true}}},
+        {"properties": {"operation": {"const": "CANCEL"}, "outcome": {"const": "UNKNOWN_OUTCOME"}, "reason_code": {"enum": ["TIMEOUT_AFTER_DISPATCH", "DISCONNECTED_AFTER_DISPATCH", "TRANSPORT_UNCERTAIN"]}, "side_effect_possible": {"const": true}, "reconciliation_required": {"const": true}}}
       ],
       "allOf": [
         {"if": {"properties": {"reason_code": {"const": "RATE_LIMITED"}}}, "then": {"properties": {"retry_after_ms": {"type": "integer", "minimum": 0}}}},
@@ -101,6 +106,25 @@
     "positionSnapshot": {"type": "object", "additionalProperties": false, "required": ["dto_type", "broker", "account_id", "instrument_id", "side", "quantity", "available_quantity", "average_cost", "market_value", "currency", "snapshot_version", "observed_at"], "properties": {"dto_type": {"const": "POSITION_SNAPSHOT"}, "broker": {"type": "string", "minLength": 1}, "account_id": {"$ref": "#/$defs/identifier"}, "instrument_id": {"type": "string", "minLength": 1}, "side": {"enum": ["LONG", "SHORT", "NET"]}, "quantity": {"type": "integer"}, "available_quantity": {"type": "integer", "minimum": 0}, "average_cost": {"$ref": "#/$defs/nonNegativeDecimal"}, "market_value": {"$ref": "#/$defs/decimal"}, "currency": {"type": "string", "pattern": "^[A-Z]{3}$"}, "snapshot_version": {"$ref": "#/$defs/identifier"}, "observed_at": {"$ref": "#/$defs/deadline"}}},
     "orderPage": {"type": "object", "additionalProperties": false, "required": ["dto_type", "items", "next_page_token", "complete"], "properties": {"dto_type": {"const": "ORDER_PAGE"}, "items": {"type": "array", "items": {"$ref": "#/$defs/orderSnapshot"}, "maxItems": 1000}, "next_page_token": {"type": ["string", "null"], "minLength": 1, "maxLength": 256}, "complete": {"type": "boolean"}}},
     "tradePage": {"type": "object", "additionalProperties": false, "required": ["dto_type", "items", "next_page_token", "complete"], "properties": {"dto_type": {"const": "TRADE_PAGE"}, "items": {"type": "array", "items": {"$ref": "#/$defs/tradeSnapshot"}, "maxItems": 1000}, "next_page_token": {"type": ["string", "null"], "minLength": 1, "maxLength": 256}, "complete": {"type": "boolean"}}},
-    "positionPage": {"type": "object", "additionalProperties": false, "required": ["dto_type", "items", "next_page_token", "complete"], "properties": {"dto_type": {"const": "POSITION_PAGE"}, "items": {"type": "array", "items": {"$ref": "#/$defs/positionSnapshot"}, "maxItems": 1000}, "next_page_token": {"type": ["string", "null"], "minLength": 1, "maxLength": 256}, "complete": {"type": "boolean"}}}
+    "positionPage": {"type": "object", "additionalProperties": false, "required": ["dto_type", "items", "next_page_token", "complete"], "properties": {"dto_type": {"const": "POSITION_PAGE"}, "items": {"type": "array", "items": {"$ref": "#/$defs/positionSnapshot"}, "maxItems": 1000}, "next_page_token": {"type": ["string", "null"], "minLength": 1, "maxLength": 256}, "complete": {"type": "boolean"}}},
+    "readResult": {
+      "type": "object", "additionalProperties": false,
+      "required": ["dto_type", "operation", "operation_id", "outcome", "reason_code", "payload", "retry_after_ms"],
+      "properties": {"dto_type": {"const": "READ_RESULT"}, "operation": {"enum": ["QUERY_ORDER", "OPEN_ORDERS", "TRADES", "ACCOUNT", "POSITIONS"]}, "operation_id": {"$ref": "#/$defs/identifier"}, "outcome": {"enum": ["CONFIRMED", "REJECTED"]}, "reason_code": {"enum": ["OK", "NOT_FOUND", "INVALID_REQUEST", "UNSUPPORTED_CAPABILITY", "RATE_LIMITED", "DEADLINE_EXCEEDED", "DISCONNECTED", "TRANSPORT_ERROR"]}, "payload": {}, "retry_after_ms": {"type": ["integer", "null"], "minimum": 0}},
+      "oneOf": [
+        {"properties": {"operation": {"const": "QUERY_ORDER"}, "outcome": {"const": "CONFIRMED"}, "reason_code": {"const": "OK"}, "payload": {"$ref": "#/$defs/orderSnapshot"}, "retry_after_ms": {"type": "null"}}},
+        {"properties": {"operation": {"const": "QUERY_ORDER"}, "outcome": {"const": "CONFIRMED"}, "reason_code": {"const": "NOT_FOUND"}, "payload": {"type": "null"}, "retry_after_ms": {"type": "null"}}},
+        {"properties": {"operation": {"const": "OPEN_ORDERS"}, "outcome": {"const": "CONFIRMED"}, "reason_code": {"const": "OK"}, "payload": {"$ref": "#/$defs/orderPage"}, "retry_after_ms": {"type": "null"}}},
+        {"properties": {"operation": {"const": "TRADES"}, "outcome": {"const": "CONFIRMED"}, "reason_code": {"const": "OK"}, "payload": {"$ref": "#/$defs/tradePage"}, "retry_after_ms": {"type": "null"}}},
+        {"properties": {"operation": {"const": "ACCOUNT"}, "outcome": {"const": "CONFIRMED"}, "reason_code": {"const": "OK"}, "payload": {"$ref": "#/$defs/accountSnapshot"}, "retry_after_ms": {"type": "null"}}},
+        {"properties": {"operation": {"const": "POSITIONS"}, "outcome": {"const": "CONFIRMED"}, "reason_code": {"const": "OK"}, "payload": {"$ref": "#/$defs/positionPage"}, "retry_after_ms": {"type": "null"}}},
+        {"properties": {"outcome": {"const": "REJECTED"}, "reason_code": {"enum": ["INVALID_REQUEST", "UNSUPPORTED_CAPABILITY", "RATE_LIMITED", "DEADLINE_EXCEEDED", "DISCONNECTED", "TRANSPORT_ERROR"]}, "payload": {"type": "null"}}}
+      ],
+      "allOf": [
+        {"if": {"properties": {"reason_code": {"const": "RATE_LIMITED"}}}, "then": {"properties": {"retry_after_ms": {"type": "integer", "minimum": 0}}}},
+        {"if": {"not": {"properties": {"reason_code": {"const": "RATE_LIMITED"}}}}, "then": {"properties": {"retry_after_ms": {"type": "null"}}}}
+      ]
+    },
+    "brokerHealth": {"type": "object", "additionalProperties": false, "required": ["dto_type", "broker", "status", "capability_version", "reason_code", "observed_at"], "properties": {"dto_type": {"const": "BROKER_HEALTH"}, "broker": {"type": "string", "minLength": 1, "maxLength": 64}, "status": {"enum": ["HEALTHY", "DEGRADED", "DISCONNECTED"]}, "capability_version": {"type": ["string", "null"], "minLength": 1, "maxLength": 128}, "reason_code": {"type": ["string", "null"], "minLength": 1, "maxLength": 128}, "observed_at": {"$ref": "#/$defs/deadline"}}}
   }
 }

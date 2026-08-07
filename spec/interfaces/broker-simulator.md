@@ -13,10 +13,20 @@ clock starts at `clock.start_at`; only the harness may advance it in integer
 microseconds. Identical inputs MUST produce byte-identical gateway results,
 `broker.order_reported.v1`, and `broker.trade_reported.v1` payloads.
 
-Steps have unique, contiguous `sequence` values starting at 1. A semantic
-validator MUST reject gaps, duplicates, forward references, unknown source
-sequences, a step whose `on_operation` does not match the consumed request, and
-fill quantity exceeding remaining quantity. Schema validation runs first.
+Steps have unique, contiguous `sequence` values starting at 1. After schema
+validation and before consuming the first step, the mandatory semantic validator
+MUST validate the scenario together with the ordered gateway request stream and
+the frozen BrokerCapabilities snapshot. It rejects gaps, duplicates, forward
+references, unknown source sequences, step/request count mismatch, a step whose
+`on_operation` does not equal the consumed request operation, and partial/race
+fill quantity exceeding that request's positive remaining quantity.
+
+The same semantic gate MUST compile the capability's client_order_id regular
+expression, reject invalid syntax, verify `min_length <= max_length`, and require
+the persisted registered client_order_id to satisfy length and full-string match
+under the declared case-sensitivity rule. It also preserves PORTS-CORE's
+reserved-capacity invariant. Validation is fail-closed: no step, clock advance,
+random draw, or simulated side effect occurs after any validation error.
 
 Emissions are ordered by `(scheduled_clock_us, step.sequence, emission_index)`.
 The default fill action emits `broker.trade_reported.v1` at emission index 0 and
@@ -28,7 +38,12 @@ trade ID. Consumers still MUST be duplicate- and out-of-order-safe.
 ## Actions
 
 - `ACCEPT`: confirms submit and emits an ACCEPTED order report.
-- `REJECT`: definitely rejects before side effect using the declared reason.
+- `REJECT`: definitely rejects before side effect using only `BROKER_REJECTED`,
+  `INVALID_REQUEST`, `UNSUPPORTED_CAPABILITY`, `RATE_LIMITED`,
+  `STALE_FENCING_TOKEN`, `DEADLINE_EXCEEDED_BEFORE_DISPATCH`, or
+  `DISCONNECTED_BEFORE_DISPATCH`. Post-dispatch timeout/disconnect/transport
+  reasons are invalid for this action and must use `DISCONNECT`/`DELAY` UNKNOWN
+  semantics instead.
 - `PARTIAL_FILL`: emits a positive bounded fill and cumulative order report.
 - `FULL_FILL`: fills exactly the remaining quantity.
 - `DUPLICATE`: emits `copies` byte-identical copies of a prior emission group.

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from copy import deepcopy
 from pathlib import Path
 from typing import Any
@@ -32,28 +33,59 @@ def _validators() -> tuple[Draft202012Validator, Draft202012Validator]:
     )
 
 
-def _validate_scenario_semantics(scenario: dict[str, Any]) -> None:
+def _validate_scenario_semantics(scenario: dict[str, Any], requests: list[dict[str, Any]]) -> None:
+    if len(scenario["steps"]) != len(requests):
+        raise ValueError("each scenario step must consume exactly one request")
     produced: set[int] = set()
-    for expected, step in enumerate(scenario["steps"], start=1):
+    for expected, (step, request) in enumerate(
+        zip(scenario["steps"], requests, strict=True), start=1
+    ):
         if step["sequence"] != expected:
             raise ValueError("step sequence must be contiguous from one")
+        if step["on_operation"] != request["operation"]:
+            raise ValueError("step operation does not match the consumed request")
         references = []
         if "source_sequence" in step:
             references.append(step["source_sequence"])
         references.extend(step.get("source_sequences", []))
         if any(reference not in produced for reference in references):
             raise ValueError("source sequence must reference a prior emission group")
+        remaining = request.get("remaining_quantity")
+        fill = step.get("quantity", step.get("fill_quantity"))
+        if fill is not None and (not isinstance(remaining, int) or fill > remaining):
+            raise ValueError("fill quantity exceeds request remaining quantity")
         if step["action"] != "DELAY":
             produced.add(step["sequence"])
 
 
-def _validate_capability_semantics(capability: dict[str, Any]) -> None:
+def _validate_capability_semantics(
+    capability: dict[str, Any], registered_client_order_id: str
+) -> None:
     client_id = capability["client_order_id"]
     rate_limit = capability["rate_limit"]
     if client_id["min_length"] > client_id["max_length"]:
         raise ValueError("client_order_id minimum exceeds maximum")
     if rate_limit["reserved_cancel"] + rate_limit["reserved_reconciliation"] > rate_limit["burst"]:
         raise ValueError("reserved capacity exceeds burst")
+    try:
+        flags = 0 if client_id["case_sensitive"] else re.IGNORECASE
+        pattern = re.compile(client_id["pattern"], flags)
+    except re.error as exc:
+        raise ValueError("client_order_id pattern is invalid") from exc
+    if not client_id["min_length"] <= len(registered_client_order_id) <= client_id["max_length"]:
+        raise ValueError("registered client_order_id length violates capability")
+    if pattern.fullmatch(registered_client_order_id) is None:
+        raise ValueError("registered client_order_id does not match capability")
+
+
+def _validate_execution_request_semantics(
+    request: dict[str, Any], registration: dict[str, Any], capability: dict[str, Any]
+) -> None:
+    if request["capability_version"] != registration["broker_capability_version"]:
+        raise ValueError("request capability version differs from registration")
+    if capability["capability_version"] != registration["broker_capability_version"]:
+        raise ValueError("capability snapshot differs from registration")
+    _validate_capability_semantics(capability, registration["client_order_id"])
 
 
 def test_gateway_fixture_freezes_every_operation_and_canonical_result() -> None:
@@ -80,8 +112,17 @@ def test_gateway_fixture_freezes_every_operation_and_canonical_result() -> None:
         "ORDER_PAGE",
         "TRADE_PAGE",
         "POSITION_PAGE",
+        "READ_RESULT",
+        "BROKER_HEALTH",
     }
-    _validate_capability_semantics(fixture["dtos"][0])
+    assert {dto["operation"] for dto in fixture["dtos"] if dto["dto_type"] == "READ_RESULT"} == {
+        "QUERY_ORDER",
+        "OPEN_ORDERS",
+        "TRADES",
+        "ACCOUNT",
+        "POSITIONS",
+    }
+    _validate_capability_semantics(fixture["dtos"][0], "client-1")
 
 
 @pytest.mark.parametrize(
@@ -94,20 +135,123 @@ def test_gateway_rejects_unsafe_or_ambiguous_dtos(case: dict[str, Any]) -> None:
     assert not gateway.is_valid(case["dto"])
 
 
-@pytest.mark.parametrize("mutation", ["client_id_range", "reserved_capacity"])
+@pytest.mark.parametrize(
+    "mutation",
+    ["client_id_range", "reserved_capacity", "invalid_regex", "registered_id_mismatch"],
+)
 def test_capability_semantics_fail_closed_on_cross_field_conflicts(mutation: str) -> None:
     gateway, _ = _validators()
     fixture = _load(FIXTURE_ROOT / "execution-broker-gateway.v1/all-dtos.valid.json")
     capability = deepcopy(fixture["dtos"][0])
     if mutation == "client_id_range":
         capability["client_order_id"]["min_length"] = 33
-    else:
+    elif mutation == "reserved_capacity":
         capability["rate_limit"]["reserved_cancel"] = 19
         capability["rate_limit"]["reserved_reconciliation"] = 2
+    elif mutation == "invalid_regex":
+        capability["client_order_id"]["pattern"] = "["
 
-    gateway.validate(capability)
+    if mutation == "invalid_regex":
+        assert not gateway.is_valid(capability)
+    else:
+        gateway.validate(capability)
     with pytest.raises(ValueError):
-        _validate_capability_semantics(capability)
+        _validate_capability_semantics(
+            capability, "client with spaces" if mutation == "registered_id_mismatch" else "client-1"
+        )
+
+
+def test_submit_cancel_require_frozen_capability_version() -> None:
+    gateway, _ = _validators()
+    fixture = _load(FIXTURE_ROOT / "execution-broker-gateway.v1/all-dtos.valid.json")
+    for operation in ("SUBMIT_ORDER_REQUEST", "CANCEL_ORDER_REQUEST"):
+        request = next(dto for dto in fixture["dtos"] if dto["dto_type"] == operation)
+        gateway.validate(request)
+        missing = deepcopy(request)
+        missing.pop("capability_version")
+        assert not gateway.is_valid(missing)
+
+
+def test_submit_cancel_semantics_bind_persisted_capability_version() -> None:
+    fixture = _load(FIXTURE_ROOT / "execution-broker-gateway.v1/all-dtos.valid.json")
+    capability = fixture["dtos"][0]
+    registration = {
+        "client_order_id": "client-1",
+        "broker_capability_version": "sim-v1",
+    }
+    for operation in ("SUBMIT_ORDER_REQUEST", "CANCEL_ORDER_REQUEST"):
+        request = next(dto for dto in fixture["dtos"] if dto["dto_type"] == operation)
+        _validate_execution_request_semantics(request, registration, capability)
+        mismatch = deepcopy(request)
+        mismatch["capability_version"] = "sim-v2"
+        with pytest.raises(ValueError, match="differs from registration"):
+            _validate_execution_request_semantics(mismatch, registration, capability)
+
+
+@pytest.mark.parametrize(
+    ("operation", "reason"),
+    [("SUBMIT", "BROKER_CANCELED"), ("CANCEL", "BROKER_ACCEPTED")],
+)
+def test_operation_result_rejects_cross_operation_confirmations(
+    operation: str, reason: str
+) -> None:
+    gateway, _ = _validators()
+    fixture = _load(FIXTURE_ROOT / "execution-broker-gateway.v1/all-dtos.valid.json")
+    result = next(dto for dto in fixture["dtos"] if dto["dto_type"] == "OPERATION_RESULT")
+    contradictory = deepcopy(result)
+    contradictory.update(
+        {
+            "operation": operation,
+            "outcome": "CONFIRMED",
+            "reason_code": reason,
+            "broker_order_id": "broker-1",
+            "reconciliation_required": False,
+        }
+    )
+    assert not gateway.is_valid(contradictory)
+
+
+def test_operation_result_reject_cannot_claim_post_dispatch_timeout() -> None:
+    gateway, _ = _validators()
+    fixture = _load(FIXTURE_ROOT / "execution-broker-gateway.v1/all-dtos.valid.json")
+    result = next(dto for dto in fixture["dtos"] if dto["dto_type"] == "OPERATION_RESULT")
+    contradictory = deepcopy(result)
+    contradictory.update(
+        {
+            "outcome": "REJECTED",
+            "reason_code": "TIMEOUT_AFTER_DISPATCH",
+            "side_effect_possible": False,
+            "reconciliation_required": False,
+        }
+    )
+    assert not gateway.is_valid(contradictory)
+
+
+@pytest.mark.parametrize(
+    "reason",
+    ["UNSUPPORTED_CAPABILITY", "RATE_LIMITED", "DEADLINE_EXCEEDED", "DISCONNECTED"],
+)
+def test_read_failures_are_typed_and_payload_free(reason: str) -> None:
+    gateway, _ = _validators()
+    fixture = _load(FIXTURE_ROOT / "execution-broker-gateway.v1/all-dtos.valid.json")
+    reads = [dto for dto in fixture["dtos"] if dto["dto_type"] == "READ_RESULT"]
+    for result in reads:
+        gateway.validate(result)
+        failed = deepcopy(result)
+        failed.update({"outcome": "REJECTED", "reason_code": reason, "payload": None})
+        failed["retry_after_ms"] = 10 if reason == "RATE_LIMITED" else None
+        gateway.validate(failed)
+        failed["payload"] = result["payload"] if result["payload"] is not None else {}
+        assert not gateway.is_valid(failed)
+
+
+def test_rate_limited_read_requires_retry_after() -> None:
+    gateway, _ = _validators()
+    fixture = _load(FIXTURE_ROOT / "execution-broker-gateway.v1/all-dtos.valid.json")
+    result = next(dto for dto in fixture["dtos"] if dto["dto_type"] == "READ_RESULT")
+    result.update({"outcome": "REJECTED", "reason_code": "RATE_LIMITED", "payload": None})
+    result["retry_after_ms"] = None
+    assert not gateway.is_valid(result)
 
 
 def test_unknown_outcome_is_machine_bound_to_reconciliation_and_same_identity() -> None:
@@ -143,7 +287,8 @@ def test_scenario_fixture_covers_required_fault_model_deterministically() -> Non
     }
     assert fixture["clock"]["mode"] == "MANUAL"
     assert isinstance(fixture["seed"], int)
-    _validate_scenario_semantics(fixture)
+    context = _load(FIXTURE_ROOT / "broker-scenario.v1/semantic-context.valid.json")
+    _validate_scenario_semantics(fixture, context["requests"])
 
 
 @pytest.mark.parametrize(
@@ -155,7 +300,7 @@ def test_scenario_semantic_validator_rejects_ordering_ambiguity(case: dict[str, 
     _, scenario = _validators()
     scenario.validate(case["scenario"])
     with pytest.raises(ValueError):
-        _validate_scenario_semantics(case["scenario"])
+        _validate_scenario_semantics(case["scenario"], case["requests"])
 
 
 @pytest.mark.parametrize(
@@ -168,14 +313,29 @@ def test_scenario_rejects_nondeterministic_or_imprecise_cases(case: dict[str, An
     assert not scenario.is_valid(case["scenario"])
 
 
+@pytest.mark.parametrize("negative_zero", ["-0", "-0.0", "-0.00", "-0.00000000"])
+def test_signed_decimal_schema_rejects_every_negative_zero_form(negative_zero: str) -> None:
+    gateway, _ = _validators()
+    fixture = _load(FIXTURE_ROOT / "execution-broker-gateway.v1/all-dtos.valid.json")
+    account = next(dto for dto in fixture["dtos"] if dto["dto_type"] == "ACCOUNT_SNAPSHOT")
+    invalid = deepcopy(account)
+    invalid["cash_balance"] = negative_zero
+    assert not gateway.is_valid(invalid)
+
+
 def test_normative_text_freezes_ownership_unknown_and_determinism() -> None:
     ports = Path("spec/interfaces/core-ports.md").read_text(encoding="utf-8")
+    persistence = Path("spec/interfaces/order-persistence-ports.md").read_text(encoding="utf-8")
+    simulator = Path("spec/interfaces/broker-simulator.md").read_text(encoding="utf-8")
     submit = yaml.safe_load(Path("spec/workflows/submit-order.yaml").read_text(encoding="utf-8"))
     cancel = yaml.safe_load(Path("spec/workflows/cancel-order.yaml").read_text(encoding="utf-8"))
     reliability = yaml.safe_load(Path("spec/nfr/reliability.yaml").read_text(encoding="utf-8"))
 
     assert "Execution MUST NOT own or advance OMS business state" in ports
     assert "same idempotency_key and client_order_id" in ports
+    assert "MUST return the schema-defined `ReadResult`" in ports
+    assert "broker_capability_version" in persistence
+    assert "step/request count mismatch" in simulator
     assert submit["workflow"]["unknown_outcome"]["blind_retry"] == "forbidden"
     assert cancel["workflow"]["unknown_outcome"]["blind_retry"] == "forbidden"
     assert reliability["nfr"]["broker_simulator"]["determinism_inputs"] == [

@@ -12,11 +12,11 @@ DTOs with broker-specific dictionaries.
 class ExecutionGateway(Protocol):
     def submit_order(self, request: SubmitOrderRequest) -> OperationResult: ...
     def cancel_order(self, request: CancelOrderRequest) -> OperationResult: ...
-    def query_order(self, request: QueryOrderRequest) -> OrderSnapshot | None: ...
-    def open_orders(self, request: OpenOrdersRequest) -> Page[OrderSnapshot]: ...
-    def trades(self, request: TradesRequest) -> Page[TradeSnapshot]: ...
-    def account(self, request: AccountRequest) -> AccountSnapshot: ...
-    def positions(self, request: PositionsRequest) -> Page[PositionSnapshot]: ...
+    def query_order(self, request: QueryOrderRequest) -> ReadResult[OrderSnapshot | None]: ...
+    def open_orders(self, request: OpenOrdersRequest) -> ReadResult[OrderPage]: ...
+    def trades(self, request: TradesRequest) -> ReadResult[TradePage]: ...
+    def account(self, request: AccountRequest) -> ReadResult[AccountSnapshot]: ...
+    def positions(self, request: PositionsRequest) -> ReadResult[PositionPage]: ...
 
 class BrokerGateway(ExecutionGateway, Protocol):
     def connect(self, *, deadline_at: datetime) -> None: ...
@@ -27,8 +27,9 @@ class BrokerGateway(ExecutionGateway, Protocol):
 
 Every request MUST carry an absolute UTC `deadline_at`; adapters MUST derive a
 bounded monotonic wait at ingress and MUST NOT extend it. Submit and cancel MUST
-also carry the persisted execution `attempt_id`, a positive `fencing_token`, a
-stable `idempotency_key`, and the registered `client_order_id`. The tuple
+also carry the persisted execution `attempt_id`, the registration's immutable
+`capability_version`, a positive `fencing_token`, a stable `idempotency_key`,
+and the registered `client_order_id`. The tuple
 `(broker, account_id, operation, idempotency_key)` identifies one external
 operation. Reuse with a different payload is a definite local rejection. Replay
 with the same payload MUST preserve the same idempotency_key and client_order_id
@@ -56,6 +57,19 @@ transport ambiguity is `UNKNOWN_OUTCOME` (`QQ-EXEC-6003` for submit and
 retried by changing `attempt_id`, `idempotency_key`, or `client_order_id`.
 Reconciliation queries use the same client_order_id and broker/account scope.
 
+Every `query_order`, `open_orders`, `trades`, `account`, and `positions` call
+MUST return the schema-defined `ReadResult`; routine dependency failures MUST
+NOT escape as implementation-selected exceptions or ad-hoc nulls. A confirmed
+result contains only the payload selected by its operation (`query_order` alone
+may return `NOT_FOUND/null`). A rejection has `payload=null` and one of
+`INVALID_REQUEST`, `UNSUPPORTED_CAPABILITY`, `RATE_LIMITED`,
+`DEADLINE_EXCEEDED`, `DISCONNECTED`, or `TRANSPORT_ERROR`. `RATE_LIMITED`
+requires bounded `retry_after_ms`; all other reasons require null. Read failures
+have no external mutation, are fail-closed, and never authorize an OMS state
+change. `BrokerHealth` is the versioned `BROKER_HEALTH` DTO; it reports
+`HEALTHY`, `DEGRADED`, or `DISCONNECTED` plus the observed capability version,
+reason, and UTC observation time.
+
 Fencing validation happens before idempotency lookup and before every external
 side effect. A stale token is `REJECTED/STALE_FENCING_TOKEN` and maps to
 `QQ-EXEC-6006`; it cannot return cached success from an older leader.
@@ -71,9 +85,17 @@ to register the order. Unsupported behavior is rejected before dispatch as
 ID. A changed capability version requires revalidation, not mutation of an
 already-dispatched identity.
 
+Order registration MUST persist the selected broker and
+`broker_capability_version` beside `client_order_id`. Submit/cancel request
+`capability_version` MUST equal that persisted value; a missing or mismatched
+value is `REJECTED/UNSUPPORTED_CAPABILITY` before fencing/idempotency dispatch.
+No ambient adapter state, current capability lookup, or side channel may supply
+or overwrite the version for an existing order.
+
 Gateway DTO schema validation MUST run before a capability semantic validator.
-That validator MUST reject `min_length > max_length`, a registered ID that does
-not match the declared constraint, or
+That validator MUST compile the declared regular expression before activation
+and reject invalid syntax, `min_length > max_length`, a registered ID whose
+length or full-string match violates the frozen constraint, or
 `reserved_cancel + reserved_reconciliation > burst`; it MUST NOT repair the
 snapshot or infer broker defaults.
 
