@@ -5,7 +5,7 @@ tasks:
   - {id: TASK-003, path: completed/TASK-003-order-domain.md, status: completed, depends_on: [TASK-001, TASK-002, TASK-012]}
   - {id: TASK-004, path: completed/TASK-004-persistence-outbox.md, status: completed, depends_on: [TASK-002, TASK-003, TASK-013]}
   - {id: TASK-005, path: backlog/TASK-005-risk-engine.md, status: blocked, depends_on: [TASK-003, TASK-015, TASK-029]}
-  - {id: TASK-006, path: backlog/TASK-006-broker-simulator.md, status: blocked, depends_on: [TASK-004, TASK-005, TASK-017]}
+  - {id: TASK-006, path: backlog/TASK-006-broker-simulator.md, status: blocked, depends_on: [TASK-004, TASK-005, TASK-017, TASK-048]}
   - {id: TASK-007, path: backlog/TASK-007-ledger-portfolio.md, status: blocked, depends_on: [TASK-004, TASK-006, TASK-018]}
   - {id: TASK-008, path: backlog/TASK-008-strategy-sdk.md, status: blocked, depends_on: [TASK-002, TASK-016]}
   - {id: TASK-009, path: backlog/TASK-009-target-resolver.md, status: blocked, depends_on: [TASK-007, TASK-008, TASK-019]}
@@ -36,3 +36,4 @@ tasks:
   - {id: TASK-045, path: completed/TASK-045-risk-runner-saturation-stability.md, status: completed, depends_on: [TASK-015]}
   - {id: TASK-046, path: completed/TASK-046-l4-contract-queue-readiness-revalidation.md, status: completed, depends_on: []}
   - {id: TASK-047, path: completed/TASK-047-l4-successor-test-location-awareness.md, status: completed, depends_on: [TASK-046]}
+  - {id: TASK-048, path: backlog/TASK-048-order-registration-broker-capability-binding.md, status: blocked, depends_on: [TASK-004, TASK-017]}
