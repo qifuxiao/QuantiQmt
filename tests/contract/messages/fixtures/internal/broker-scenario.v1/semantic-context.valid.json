@@ -1,0 +1,13 @@
+{
+  "requests": [
+    {"operation": "SUBMIT", "remaining_quantity": 100},
+    {"operation": "SUBMIT", "remaining_quantity": 100},
+    {"operation": "SUBMIT", "remaining_quantity": 100},
+    {"operation": "SUBMIT", "remaining_quantity": 60},
+    {"operation": "QUERY"},
+    {"operation": "QUERY"},
+    {"operation": "QUERY"},
+    {"operation": "SUBMIT", "remaining_quantity": 100},
+    {"operation": "CANCEL", "remaining_quantity": 50}
+  ]
+}

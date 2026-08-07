@@ -27,3 +27,27 @@ nfr:
     output_frequency_per_minute: 120
     checkpoint_restore: atomic_and_fail_closed
     source_checkout_spec_access: forbidden
+  execution_gateway:
+    request_deadline: absolute_utc_with_bounded_monotonic_wait
+    submit_cancel_identity: [broker, account_id, operation, idempotency_key, client_order_id]
+    timeout_after_possible_dispatch: UNKNOWN_OUTCOME
+    unknown_required_action: reconciliation
+    blind_retry_with_changed_identity: forbidden
+    stale_fencing_side_effect: forbidden
+    execution_owns_oms_business_state: false
+    read_failure_contract:
+      envelope: READ_RESULT
+      operations: [QUERY_ORDER, OPEN_ORDERS, TRADES, ACCOUNT, POSITIONS]
+      routine_exception_escape: forbidden
+      rejected_payload: null
+      failure_reasons: [INVALID_REQUEST, UNSUPPORTED_CAPABILITY, RATE_LIMITED, DEADLINE_EXCEEDED, DISCONNECTED, TRANSPORT_ERROR]
+    capability_version_source: persisted_order_registration
+    capability_version_side_channel: forbidden
+  broker_simulator:
+    contract: CONTRACT-BROKER-SCENARIO-V1
+    determinism_inputs: [scenario, seed, manual_clock, request_sequence]
+    output_order: [scheduled_clock_us, step_sequence, emission_index]
+    fill_emission_order: [broker_trade_reported, broker_order_reported]
+    ambient_randomness: forbidden
+    wall_clock: forbidden
+    exhausted_scenario_fallback: forbidden

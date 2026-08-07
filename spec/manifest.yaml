@@ -1,6 +1,6 @@
 specification:
   name: quantiqmt
-  version: 0.7.1
+  version: 0.8.0
   status: accepted
   updated: 2026-08-06
   normative_root: spec
@@ -67,6 +67,10 @@ catalogs:
       path: contracts/events/execution.attempt_started.v1.schema.json
     - id: CONTRACT-EXECUTION-OUTCOME-UNKNOWN-V1
       path: contracts/events/execution.outcome_unknown.v1.schema.json
+    - id: CONTRACT-EXECUTION-BROKER-GATEWAY-V1
+      path: contracts/execution/broker-gateway.v1.schema.json
+    - id: CONTRACT-BROKER-SCENARIO-V1
+      path: contracts/simulation/broker-scenario.v1.schema.json
     - id: CONTRACT-BROKER-ORDER-REPORTED-V1
       path: contracts/events/broker.order_reported.v1.schema.json
     - id: CONTRACT-LEDGER-TRADE-POSTED-V1
@@ -84,6 +88,8 @@ catalogs:
       path: interfaces/order-persistence-ports.md
     - id: PORTS-RISK
       path: interfaces/risk-ports.md
+    - id: PORTS-BROKER-SIMULATOR
+      path: interfaces/broker-simulator.md
   state_machines:
     - id: SM-ORDER
       path: state-machines/order.yaml
@@ -144,34 +150,38 @@ catalogs:
       path: reviews/IMPLEMENTATION-READINESS-0.7.md
 
 change:
-  id: SPEC-0.7.1-L4-READINESS-REVALIDATION
-  compatibility: no_runtime_contract_change_governance_successor_gate_only
-  previous_version: 0.7.0
+  id: SPEC-0.8.0-EXECUTION-BROKER-CONTRACTS
+  compatibility: additive_internal_contracts_public_messages_unchanged_runtime_and_storage_binding_deferred_to_task_048
+  previous_version: 0.7.1
   public_message_schema_changes: none
-  storage_schema_changes: none
+  storage_schema_changes: "required additive OrderRegistration broker/capability binding; implementation and expand-only migration are owned by blocked TASK-048"
   error_catalog_change: none
-  runtime_code_change: none
-  review_change: "registers REVIEW-IMPLEMENTATION-READINESS-0.7 without modifying historical REVIEW-IMPLEMENTATION-READINESS-0.5"
-  contract_change: none
-  semantic_validation_change: none
-  internal_contracts_added: []
+  runtime_code_change: "required in Order persistence DTO, serialization, Memory/PostgreSQL projections, Journal, Snapshot, and Recovery; owned by blocked TASK-048 and not implemented by TASK-017"
+  review_change: none
+  contract_change: "freezes ExecutionGateway/BrokerGateway DTOs including typed read failures and BrokerHealth, persisted capability-version binding, operation-specific results, plus deterministic Broker Simulator scenario DSL"
+  semantic_validation_change: "adds mandatory scenario/request operation, sequence/reference/fill-bound and capability regex/registered-ID validation before simulation; canonical UNKNOWN reconciliation rules remain fail-closed"
+  internal_contracts_added: [CONTRACT-EXECUTION-BROKER-GATEWAY-V1, CONTRACT-BROKER-SCENARIO-V1, PORTS-BROKER-SIMULATOR]
   public_contracts_added: []
-  task_queue_change: "TASK-017/018/019/020/021/022 replace historical TASK-014 readiness dependency with TASK-046; statuses remain unchanged; TASK-029 retains TASK-030 and remains separately blocked"
-  affected_tasks: [TASK-017, TASK-018, TASK-019, TASK-020, TASK-021, TASK-022, TASK-029, TASK-046]
+  task_queue_change: "TASK-017 remains active; TASK-048 owns runtime/storage compatibility and remains blocked on TASK-017; TASK-006 remains blocked on TASK-048 and other declared dependencies"
+  affected_tasks: [TASK-006, TASK-017, TASK-021, TASK-024, TASK-026, TASK-027, TASK-048]
   deployment_order:
-    - independently_review_and_merge_task_046_implementation
-    - human_authorized_task_046_closeout_with_trusted_delivery_evidence
-    - separately_activate_at_most_one_ready_contract_task_after_dependency_validation
-    - keep_task_019_021_029_blocked_until_their_remaining_direct_dependencies_are_trusted_completed
+    - independently_review_and_merge_task_017_contracts
+    - human_authorized_task_017_closeout_with_trusted_delivery_evidence
+    - activate_implement_review_and_merge_task_048_order_registration_binding
+    - deploy_task_048_expand_only_storage_and_compatible_runtime_read_write_path
+    - verify_historical_registrations_remain_unbound_and_fail_closed_until_auditable_binding
+    - keep_task_006_blocked_until_task_005_task_017_and_task_048_are_trusted_completed
+    - implement_task_006_only_against_the_versioned_contract_snapshot
   migration:
-    runtime_data: not_applicable
+    runtime_data: "TASK-048 adds broker and broker_capability_version to runtime DTO and canonical persisted payloads; legacy missing values remain explicitly unbound and cannot dispatch"
     public_events: not_applicable
-    storage: not_applicable
-    task_queue: "replace TASK-014 with TASK-046 only for TASK-017/018/019/020/021/022; do not change statuses or activate tasks; do not add TASK-046 to TASK-029"
-    historical_evidence: "preserve TASK-014 and TASK-030 as reported_unverified/prohibited; retired waiver remains terminal and unusable"
+    storage: "TASK-048 supplies an expand-only migration and compatible readers/writers; no ambient capability backfill is permitted"
+    task_queue: "TASK-048 remains blocked on TASK-017; TASK-006 depends on TASK-048 and remains blocked; this PR activates neither task"
+    historical_evidence: "legacy registration bindings cannot be inferred from current adapter state; only auditable reconciliation evidence or explicit human authorization may bind them under TASK-048"
     destructive_backfill: forbidden
   rollback:
-    runtime_data: not_applicable
+    runtime_data: "stop or roll back new writers/readers while preserving broker binding and audit evidence; legacy rows remain unbound/fail-closed"
     public_events: not_applicable
-    task_queue: "restore only pre-TASK-046 review registration, task metadata and validator policy; never restore the retired waiver or reinterpret TASK-014/TASK-030 evidence"
+    task_queue: "keep TASK-048 and TASK-006 blocked; do not activate any task"
+    contracts: "remove only the unimplemented 0.8.0 internal schema/interface registrations; public v1 broker/execution messages remain unchanged; never delete persisted binding or audit evidence"
     release: prohibited

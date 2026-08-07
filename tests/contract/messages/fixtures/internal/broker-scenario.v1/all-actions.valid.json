@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "scenario_id": "all-actions-v1",
+  "seed": 42,
+  "clock": {"mode": "MANUAL", "start_at": "2026-08-07T02:00:00Z", "tick_us": 100},
+  "broker": "sim",
+  "account_id": "a",
+  "steps": [
+    {"sequence": 1, "on_operation": "SUBMIT", "action": "ACCEPT", "broker_order_id": "broker-1"},
+    {"sequence": 2, "on_operation": "SUBMIT", "action": "REJECT", "reason_code": "BROKER_REJECTED"},
+    {"sequence": 3, "on_operation": "SUBMIT", "action": "PARTIAL_FILL", "quantity": 40, "price": "10.01", "trade_id": "trade-1"},
+    {"sequence": 4, "on_operation": "SUBMIT", "action": "FULL_FILL", "price": "10.02", "trade_id": "trade-2"},
+    {"sequence": 5, "on_operation": "QUERY", "action": "DUPLICATE", "source_sequence": 3, "copies": 2},
+    {"sequence": 6, "on_operation": "QUERY", "action": "OUT_OF_ORDER", "source_sequences": [4, 3]},
+    {"sequence": 7, "on_operation": "QUERY", "action": "DELAY", "duration_us": 5000},
+    {"sequence": 8, "on_operation": "SUBMIT", "action": "DISCONNECT", "phase": "AFTER_DISPATCH"},
+    {"sequence": 9, "on_operation": "CANCEL", "action": "CANCEL_RACE", "winner": "PARTIAL_FILL_THEN_CANCEL", "fill_quantity": 10, "fill_price": "10.03", "trade_id": "trade-3"}
+  ]
+}

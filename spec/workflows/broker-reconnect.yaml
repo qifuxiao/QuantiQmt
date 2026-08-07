@@ -4,9 +4,14 @@ workflow:
   steps:
     - {id: enter_safe_scope, owner: TradingCore}
     - {id: reconnect_with_bounded_backoff, owner: BrokerGateway, failure: remain_safe}
-    - {id: active_probe_and_capabilities, owner: BrokerGateway, failure: remain_safe}
+    - {id: active_probe_and_capabilities, owner: BrokerGateway, output_contract: CONTRACT-EXECUTION-BROKER-GATEWAY-V1.BrokerCapabilities, failure: remain_safe}
     - {id: query_orders_trades_account_positions, owner: Reconciliation, failure: remain_safe}
     - {id: classify_and_resolve_differences, owner: Reconciliation, failure: remain_safe_or_halted}
     - {id: observe_healthy_window, owner: HealthService, failure: remain_safe}
     - {id: approve_mode_recovery, owner: ControlPlane, guard: policy_or_operator_approval}
   forbidden: [resume_normal_on_socket_connect_only]
+  query_contracts:
+    request: [QueryOrderRequest, OpenOrdersRequest, TradesRequest, AccountRequest, PositionsRequest]
+    response: [OrderSnapshot, TradeSnapshot, AccountSnapshot, PositionSnapshot]
+    source: CONTRACT-EXECUTION-BROKER-GATEWAY-V1
+  capability_change: "remain safe and revalidate; never mutate an already-dispatched client_order_id"

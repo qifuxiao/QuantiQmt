@@ -24,6 +24,8 @@ class OrderRegistration(Protocol):
     order_id: Identifier
     intent_id: Identifier
     client_order_id: str
+    broker: str
+    broker_capability_version: str
     account_id: str
     instrument_id: InstrumentId
     side: str
@@ -215,6 +217,11 @@ class ClientOrderIdFactory(Protocol):
 ```
 
 The factory is an Application Port. It receives `OrderRegistrationDraft`, which intentionally has no `client_order_id`; `OrderRegistration` is built only after `create` returns a candidate and `validate` succeeds. The factory MUST generate the ID before any Broker side effect, MUST validate length/charset/capability constraints for the selected Broker adapter, and MUST never query or mutate Repository state directly. Repository uniqueness remains authoritative; on a `client_order_id` uniqueness race the Application MAY call `create` again only if no Broker side effect has occurred and the original `intent_id` is still absent.
+
+`OrderRegistration.broker` and `broker_capability_version` MUST be copied from
+the validated `ClientOrderIdCandidate` in the same registration commit and are
+immutable. Execution submit/cancel requests MUST use this persisted version;
+the adapter's current capability snapshot is not a substitute.
 
 ## SnapshotStore
 

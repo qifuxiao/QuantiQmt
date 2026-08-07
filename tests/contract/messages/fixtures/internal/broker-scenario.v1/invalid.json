@@ -1,0 +1,10 @@
+{
+  "cases": [
+    {"name": "system_clock_forbidden", "scenario": {"schema_version": 1, "scenario_id": "bad-clock", "seed": 1, "clock": {"mode": "SYSTEM", "start_at": "2026-08-07T02:00:00Z", "tick_us": 1}, "broker": "sim", "account_id": "a", "steps": []}},
+    {"name": "float_fill_price", "scenario": {"schema_version": 1, "scenario_id": "bad-price", "seed": 1, "clock": {"mode": "MANUAL", "start_at": "2026-08-07T02:00:00Z", "tick_us": 1}, "broker": "sim", "account_id": "a", "steps": [{"sequence": 1, "on_operation": "SUBMIT", "action": "PARTIAL_FILL", "quantity": 1, "price": 10.01, "trade_id": "t"}]}},
+    {"name": "delay_without_duration", "scenario": {"schema_version": 1, "scenario_id": "bad-delay", "seed": 1, "clock": {"mode": "MANUAL", "start_at": "2026-08-07T02:00:00Z", "tick_us": 1}, "broker": "sim", "account_id": "a", "steps": [{"sequence": 1, "on_operation": "QUERY", "action": "DELAY"}]}},
+    {"name": "duplicate_without_source", "scenario": {"schema_version": 1, "scenario_id": "bad-duplicate", "seed": 1, "clock": {"mode": "MANUAL", "start_at": "2026-08-07T02:00:00Z", "tick_us": 1}, "broker": "sim", "account_id": "a", "steps": [{"sequence": 1, "on_operation": "QUERY", "action": "DUPLICATE", "copies": 2}]}},
+    {"name": "delay_with_accept_field", "scenario": {"schema_version": 1, "scenario_id": "ambiguous", "seed": 1, "clock": {"mode": "MANUAL", "start_at": "2026-08-07T02:00:00Z", "tick_us": 1}, "broker": "sim", "account_id": "a", "steps": [{"sequence": 1, "on_operation": "QUERY", "action": "DELAY", "duration_us": 1, "broker_order_id": "b"}]}},
+    {"name": "reject_with_post_dispatch_timeout", "scenario": {"schema_version": 1, "scenario_id": "unsafe-reject", "seed": 1, "clock": {"mode": "MANUAL", "start_at": "2026-08-07T02:00:00Z", "tick_us": 1}, "broker": "sim", "account_id": "a", "steps": [{"sequence": 1, "on_operation": "SUBMIT", "action": "REJECT", "reason_code": "TIMEOUT_AFTER_DISPATCH"}]}}
+  ]
+}

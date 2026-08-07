@@ -7,9 +7,15 @@ workflow:
     - {id: register_cancel_request, owner: OMS, idempotency_key: cancel_request_id, failure: no_broker_side_effect}
     - {id: transition_cancel_pending, owner: OMS, transaction: "Order + Event + Outbox"}
     - {id: start_cancel_attempt, owner: ExecutionEngine, persist_before_external_call: true}
-    - {id: broker_cancel, owner: BrokerGateway, timeout: CANCEL_UNKNOWN}
+    - {id: broker_cancel, owner: BrokerGateway, timeout: CANCEL_UNKNOWN, input_contract: CONTRACT-EXECUTION-BROKER-GATEWAY-V1.CancelOrderRequest, output_contract: CONTRACT-EXECUTION-BROKER-GATEWAY-V1.OperationResult, capability_version_source: OrderRegistration.broker_capability_version, guard: persisted_capability_version_match}
     - {id: merge_cancel_or_trade_report, owner: OMS, duplicate_safe: true, out_of_order_safe: true}
   forbidden: [blind_retry_after_unknown_outcome, ignore_trade_during_cancel]
+  unknown_outcome:
+    outcome: UNKNOWN_OUTCOME
+    error: QQ-EXEC-6004
+    identity: "preserve attempt_id, cancel_request_id, idempotency_key, and client_order_id"
+    blind_retry: forbidden
+    required_next_step: "query_order/open_orders/trades reconciliation before any decision"
   persistence:
     transition_contract: WF-ORDER-COMMIT.transition_commit
     request_idempotency_key: cancel_request_id

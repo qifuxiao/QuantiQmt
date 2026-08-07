@@ -1,0 +1,41 @@
+{
+  "dtos": [
+    {
+      "dto_type": "BROKER_CAPABILITIES",
+      "broker": "sim",
+      "capability_version": "sim-v1",
+      "supports": {"submit": true, "cancel": true, "query_order": true, "open_orders": true, "trades": true, "account": true, "positions": true},
+      "order_types": ["LIMIT", "MARKET"],
+      "time_in_force": ["DAY", "IOC"],
+      "position_effects": ["OPEN", "CLOSE", "AUTO"],
+      "client_order_id": {"min_length": 1, "max_length": 32, "pattern": "^[A-Za-z0-9_-]+$", "case_sensitive": true},
+      "native_idempotency": true,
+      "rate_limit": {"requests_per_second": 100, "burst": 20, "reserved_cancel": 2, "reserved_reconciliation": 2}
+    },
+    {
+      "dto_type": "SUBMIT_ORDER_REQUEST", "operation_id": "op-submit-000001", "attempt_id": "550e8400-e29b-41d4-a716-446655440000", "order_id": "550e8400-e29b-41d4-a716-446655440001", "broker": "sim", "account_id": "a", "deadline_at": "2026-08-07T02:00:01Z", "capability_version": "sim-v1", "fencing_token": 7, "idempotency_key": "idem-submit-1", "client_order_id": "client-1", "instrument_id": "600000.XSHG", "side": "BUY", "position_effect": "AUTO", "order_type": "LIMIT", "quantity": 100, "limit_price": "10.01", "time_in_force": "DAY"
+    },
+    {
+      "dto_type": "CANCEL_ORDER_REQUEST", "operation_id": "op-cancel-000001", "attempt_id": "550e8400-e29b-41d4-a716-446655440002", "order_id": "550e8400-e29b-41d4-a716-446655440001", "cancel_request_id": "550e8400-e29b-41d4-a716-446655440003", "broker": "sim", "account_id": "a", "deadline_at": "2026-08-07T02:00:01Z", "capability_version": "sim-v1", "fencing_token": 7, "idempotency_key": "idem-cancel-1", "client_order_id": "client-1", "broker_order_id": "broker-1"
+    },
+    {"dto_type": "QUERY_ORDER_REQUEST", "operation_id": "op-query-000001", "broker": "sim", "account_id": "a", "deadline_at": "2026-08-07T02:00:01Z", "client_order_id": "client-1"},
+    {"dto_type": "OPEN_ORDERS_REQUEST", "operation_id": "op-open-0000001", "broker": "sim", "account_id": "a", "deadline_at": "2026-08-07T02:00:01Z", "page_size": 100, "page_token": null},
+    {"dto_type": "TRADES_REQUEST", "operation_id": "op-trades-000001", "broker": "sim", "account_id": "a", "deadline_at": "2026-08-07T02:00:01Z", "trading_day": "2026-08-07", "page_size": 100, "page_token": null},
+    {"dto_type": "ACCOUNT_REQUEST", "operation_id": "op-account-00001", "broker": "sim", "account_id": "a", "deadline_at": "2026-08-07T02:00:01Z"},
+    {"dto_type": "POSITIONS_REQUEST", "operation_id": "op-position-0001", "broker": "sim", "account_id": "a", "deadline_at": "2026-08-07T02:00:01Z", "instrument_id": null},
+    {"dto_type": "OPERATION_RESULT", "operation": "SUBMIT", "operation_id": "op-submit-000001", "outcome": "UNKNOWN_OUTCOME", "reason_code": "TIMEOUT_AFTER_DISPATCH", "broker": "sim", "account_id": "a", "attempt_id": "550e8400-e29b-41d4-a716-446655440000", "client_order_id": "client-1", "idempotency_key": "idem-submit-1", "broker_order_id": null, "side_effect_possible": true, "reconciliation_required": true, "retry_after_ms": null},
+    {"dto_type": "ORDER_SNAPSHOT", "broker": "sim", "account_id": "a", "trading_day": "2026-08-07", "client_order_id": "client-1", "broker_order_id": "broker-1", "broker_status": "PARTIALLY_FILLED", "cum_quantity": 50, "leaves_quantity": 50, "average_price": "10.01", "broker_sequence": 2, "observed_at": "2026-08-07T02:00:02Z"},
+    {"dto_type": "TRADE_SNAPSHOT", "broker": "sim", "account_id": "a", "trading_day": "2026-08-07", "trade_id": "trade-1", "client_order_id": "client-1", "broker_order_id": "broker-1", "instrument_id": "600000.XSHG", "side": "BUY", "position_effect": "AUTO", "price": "10.01", "quantity": 50, "commission": "0.10", "tax": "0", "broker_sequence": 3, "trade_time": "2026-08-07T02:00:02Z"},
+    {"dto_type": "ACCOUNT_SNAPSHOT", "broker": "sim", "account_id": "a", "currency": "CNY", "cash_balance": "100000.00", "available_cash": "99000.00", "market_value": "1000.00", "snapshot_version": "acct-1", "observed_at": "2026-08-07T02:00:02Z"},
+    {"dto_type": "POSITION_SNAPSHOT", "broker": "sim", "account_id": "a", "instrument_id": "600000.XSHG", "side": "LONG", "quantity": 100, "available_quantity": 50, "average_cost": "10.00", "market_value": "1000.00", "currency": "CNY", "snapshot_version": "pos-1", "observed_at": "2026-08-07T02:00:02Z"},
+    {"dto_type": "ORDER_PAGE", "items": [], "next_page_token": null, "complete": true},
+    {"dto_type": "TRADE_PAGE", "items": [], "next_page_token": null, "complete": true},
+    {"dto_type": "POSITION_PAGE", "items": [], "next_page_token": null, "complete": true},
+    {"dto_type": "READ_RESULT", "operation": "QUERY_ORDER", "operation_id": "op-query-000001", "outcome": "CONFIRMED", "reason_code": "NOT_FOUND", "payload": null, "retry_after_ms": null},
+    {"dto_type": "READ_RESULT", "operation": "OPEN_ORDERS", "operation_id": "op-open-0000001", "outcome": "CONFIRMED", "reason_code": "OK", "payload": {"dto_type": "ORDER_PAGE", "items": [], "next_page_token": null, "complete": true}, "retry_after_ms": null},
+    {"dto_type": "READ_RESULT", "operation": "TRADES", "operation_id": "op-trades-000001", "outcome": "CONFIRMED", "reason_code": "OK", "payload": {"dto_type": "TRADE_PAGE", "items": [], "next_page_token": null, "complete": true}, "retry_after_ms": null},
+    {"dto_type": "READ_RESULT", "operation": "ACCOUNT", "operation_id": "op-account-00001", "outcome": "CONFIRMED", "reason_code": "OK", "payload": {"dto_type": "ACCOUNT_SNAPSHOT", "broker": "sim", "account_id": "a", "currency": "CNY", "cash_balance": "100000.00", "available_cash": "99000.00", "market_value": "1000.00", "snapshot_version": "acct-1", "observed_at": "2026-08-07T02:00:02Z"}, "retry_after_ms": null},
+    {"dto_type": "READ_RESULT", "operation": "POSITIONS", "operation_id": "op-position-0001", "outcome": "CONFIRMED", "reason_code": "OK", "payload": {"dto_type": "POSITION_PAGE", "items": [], "next_page_token": null, "complete": true}, "retry_after_ms": null},
+    {"dto_type": "BROKER_HEALTH", "broker": "sim", "status": "HEALTHY", "capability_version": "sim-v1", "reason_code": null, "observed_at": "2026-08-07T02:00:02Z"}
+  ]
+}

@@ -49,6 +49,10 @@ workflow:
       owner: BrokerGateway
       idempotency_key: client_order_id
       timeout: SUBMIT_UNKNOWN
+      input_contract: CONTRACT-EXECUTION-BROKER-GATEWAY-V1.SubmitOrderRequest
+      output_contract: CONTRACT-EXECUTION-BROKER-GATEWAY-V1.OperationResult
+      pre_dispatch_guards: [deadline, fencing_token, persisted_capability_version_match, client_order_id, rate_limit]
+      capability_version_source: OrderRegistration.broker_capability_version
     - id: merge_report
       owner: OMS
       duplicate_safe: true
@@ -57,6 +61,13 @@ workflow:
     - risk_before_order_registration
     - broker_call_before_persisted_approval
     - blind_retry_after_unknown_outcome
+    - execution_advances_oms_business_state
+  unknown_outcome:
+    outcome: UNKNOWN_OUTCOME
+    error: QQ-EXEC-6003
+    identity: "preserve attempt_id, idempotency_key, and client_order_id"
+    blind_retry: forbidden
+    required_next_step: "query_order/open_orders/trades reconciliation before any decision"
   success_evidence:
     - OrderRegistered
     - RiskDecision
