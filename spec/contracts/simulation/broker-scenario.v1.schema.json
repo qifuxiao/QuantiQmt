@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:quantiqmt:contract:broker-scenario:v1",
+  "title": "BrokerScenarioV1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "scenario_id", "seed", "clock", "broker", "account_id", "steps"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "scenario_id": {"type": "string", "minLength": 1, "maxLength": 128},
+    "seed": {"type": "integer", "minimum": 0, "maximum": 9223372036854775807},
+    "clock": {"type": "object", "additionalProperties": false, "required": ["mode", "start_at", "tick_us"], "properties": {"mode": {"const": "MANUAL"}, "start_at": {"type": "string", "format": "date-time", "pattern": "Z$"}, "tick_us": {"type": "integer", "minimum": 1}}},
+    "broker": {"type": "string", "minLength": 1, "maxLength": 64},
+    "account_id": {"type": "string", "minLength": 1, "maxLength": 128},
+    "steps": {"type": "array", "items": {"$ref": "#/$defs/step"}, "maxItems": 10000}
+  },
+  "$defs": {
+    "positiveDecimal": {"type": "string", "pattern": "^(?=.*[1-9])(0|[1-9][0-9]{0,17})(\\.[0-9]{1,8})?$"},
+    "id": {"type": "string", "minLength": 1, "maxLength": 128},
+    "step": {
+      "type": "object",
+      "unevaluatedProperties": false,
+      "properties": {
+        "sequence": {"type": "integer", "minimum": 1},
+        "on_operation": {"enum": ["SUBMIT", "CANCEL", "QUERY"]},
+        "action": {"enum": ["ACCEPT", "REJECT", "PARTIAL_FILL", "FULL_FILL", "DUPLICATE", "OUT_OF_ORDER", "DELAY", "DISCONNECT", "CANCEL_RACE"]},
+        "broker_order_id": {"$ref": "#/$defs/id"}, "reason_code": {"$ref": "#/$defs/id"}, "quantity": {"type": "integer", "minimum": 1}, "price": {"$ref": "#/$defs/positiveDecimal"}, "trade_id": {"$ref": "#/$defs/id"}, "source_sequence": {"type": "integer", "minimum": 1}, "copies": {"type": "integer", "minimum": 2, "maximum": 100}, "source_sequences": {"type": "array", "items": {"type": "integer", "minimum": 1}, "minItems": 2, "uniqueItems": true}, "duration_us": {"type": "integer", "minimum": 1}, "phase": {"enum": ["BEFORE_DISPATCH", "AFTER_DISPATCH", "BEFORE_RESPONSE"]}, "winner": {"enum": ["FILL", "CANCEL", "PARTIAL_FILL_THEN_CANCEL"]}, "fill_quantity": {"type": "integer", "minimum": 1}, "fill_price": {"$ref": "#/$defs/positiveDecimal"}
+      },
+      "required": ["sequence", "on_operation", "action"],
+      "oneOf": [
+        {"properties": {"action": {"const": "ACCEPT"}}, "required": ["broker_order_id"], "propertyNames": {"enum": ["sequence", "on_operation", "action", "broker_order_id"]}},
+        {"properties": {"action": {"const": "REJECT"}}, "required": ["reason_code"], "propertyNames": {"enum": ["sequence", "on_operation", "action", "reason_code"]}},
+        {"properties": {"action": {"const": "PARTIAL_FILL"}}, "required": ["quantity", "price", "trade_id"], "propertyNames": {"enum": ["sequence", "on_operation", "action", "quantity", "price", "trade_id"]}},
+        {"properties": {"action": {"const": "FULL_FILL"}}, "required": ["price", "trade_id"], "propertyNames": {"enum": ["sequence", "on_operation", "action", "price", "trade_id"]}},
+        {"properties": {"action": {"const": "DUPLICATE"}}, "required": ["source_sequence", "copies"], "propertyNames": {"enum": ["sequence", "on_operation", "action", "source_sequence", "copies"]}},
+        {"properties": {"action": {"const": "OUT_OF_ORDER"}}, "required": ["source_sequences"], "propertyNames": {"enum": ["sequence", "on_operation", "action", "source_sequences"]}},
+        {"properties": {"action": {"const": "DELAY"}}, "required": ["duration_us"], "propertyNames": {"enum": ["sequence", "on_operation", "action", "duration_us"]}},
+        {"properties": {"action": {"const": "DISCONNECT"}}, "required": ["phase"], "propertyNames": {"enum": ["sequence", "on_operation", "action", "phase"]}},
+        {"properties": {"action": {"const": "CANCEL_RACE"}}, "required": ["winner", "fill_quantity", "fill_price", "trade_id"], "propertyNames": {"enum": ["sequence", "on_operation", "action", "winner", "fill_quantity", "fill_price", "trade_id"]}}
+      ]
+    }
+  }
+}

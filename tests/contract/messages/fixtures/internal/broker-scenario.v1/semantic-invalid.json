@@ -1,0 +1,6 @@
+{
+  "cases": [
+    {"name": "sequence_gap", "scenario": {"schema_version": 1, "scenario_id": "gap", "seed": 1, "clock": {"mode": "MANUAL", "start_at": "2026-08-07T02:00:00Z", "tick_us": 1}, "broker": "sim", "account_id": "a", "steps": [{"sequence": 2, "on_operation": "SUBMIT", "action": "ACCEPT", "broker_order_id": "b"}]}},
+    {"name": "forward_duplicate_reference", "scenario": {"schema_version": 1, "scenario_id": "forward", "seed": 1, "clock": {"mode": "MANUAL", "start_at": "2026-08-07T02:00:00Z", "tick_us": 1}, "broker": "sim", "account_id": "a", "steps": [{"sequence": 1, "on_operation": "QUERY", "action": "DUPLICATE", "source_sequence": 2, "copies": 2}, {"sequence": 2, "on_operation": "SUBMIT", "action": "ACCEPT", "broker_order_id": "b"}]}}
+  ]
+}

@@ -1,0 +1,106 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:quantiqmt:contract:execution-broker-gateway:v1",
+  "title": "ExecutionBrokerGatewayDtoV1",
+  "oneOf": [
+    {"$ref": "#/$defs/brokerCapabilities"},
+    {"$ref": "#/$defs/submitOrderRequest"},
+    {"$ref": "#/$defs/cancelOrderRequest"},
+    {"$ref": "#/$defs/queryOrderRequest"},
+    {"$ref": "#/$defs/openOrdersRequest"},
+    {"$ref": "#/$defs/tradesRequest"},
+    {"$ref": "#/$defs/accountRequest"},
+    {"$ref": "#/$defs/positionsRequest"},
+    {"$ref": "#/$defs/operationResult"},
+    {"$ref": "#/$defs/orderSnapshot"},
+    {"$ref": "#/$defs/tradeSnapshot"},
+    {"$ref": "#/$defs/accountSnapshot"},
+    {"$ref": "#/$defs/positionSnapshot"},
+    {"$ref": "#/$defs/orderPage"},
+    {"$ref": "#/$defs/tradePage"},
+    {"$ref": "#/$defs/positionPage"}
+  ],
+  "$defs": {
+    "decimal": {"type": "string", "pattern": "^-?(0|[1-9][0-9]{0,17})(\\.[0-9]{1,8})?$"},
+    "nonNegativeDecimal": {"type": "string", "pattern": "^(0|[1-9][0-9]{0,17})(\\.[0-9]{1,8})?$"},
+    "positiveDecimal": {"type": "string", "pattern": "^(?=.*[1-9])(0|[1-9][0-9]{0,17})(\\.[0-9]{1,8})?$"},
+    "identifier": {"type": "string", "minLength": 1, "maxLength": 128},
+    "uuid": {"type": "string", "format": "uuid", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"},
+    "deadline": {"type": "string", "format": "date-time", "pattern": "Z$"},
+    "requestProperties": {
+      "dto_type": {}, "operation_id": {"$ref": "#/$defs/identifier"}, "broker": {"type": "string", "minLength": 1, "maxLength": 64}, "account_id": {"$ref": "#/$defs/identifier"}, "deadline_at": {"$ref": "#/$defs/deadline"}
+    },
+    "brokerCapabilities": {
+      "type": "object", "additionalProperties": false,
+      "required": ["dto_type", "broker", "capability_version", "supports", "order_types", "time_in_force", "position_effects", "client_order_id", "native_idempotency", "rate_limit"],
+      "properties": {
+        "dto_type": {"const": "BROKER_CAPABILITIES"},
+        "broker": {"type": "string", "minLength": 1, "maxLength": 64},
+        "capability_version": {"$ref": "#/$defs/identifier"},
+        "supports": {"type": "object", "additionalProperties": false, "required": ["submit", "cancel", "query_order", "open_orders", "trades", "account", "positions"], "properties": {"submit": {"type": "boolean"}, "cancel": {"type": "boolean"}, "query_order": {"type": "boolean"}, "open_orders": {"type": "boolean"}, "trades": {"type": "boolean"}, "account": {"type": "boolean"}, "positions": {"type": "boolean"}}},
+        "order_types": {"type": "array", "items": {"enum": ["LIMIT", "MARKET"]}, "uniqueItems": true},
+        "time_in_force": {"type": "array", "items": {"enum": ["DAY", "IOC", "FOK"]}, "uniqueItems": true},
+        "position_effects": {"type": "array", "items": {"enum": ["OPEN", "CLOSE", "AUTO"]}, "uniqueItems": true},
+        "client_order_id": {"type": "object", "additionalProperties": false, "required": ["min_length", "max_length", "pattern", "case_sensitive"], "properties": {"min_length": {"type": "integer", "minimum": 1, "maximum": 128}, "max_length": {"type": "integer", "minimum": 1, "maximum": 128}, "pattern": {"type": "string", "minLength": 1, "maxLength": 256}, "case_sensitive": {"type": "boolean"}}},
+        "native_idempotency": {"type": "boolean"},
+        "rate_limit": {"type": "object", "additionalProperties": false, "required": ["requests_per_second", "burst", "reserved_cancel", "reserved_reconciliation"], "properties": {"requests_per_second": {"type": "integer", "minimum": 1}, "burst": {"type": "integer", "minimum": 1}, "reserved_cancel": {"type": "integer", "minimum": 1}, "reserved_reconciliation": {"type": "integer", "minimum": 1}}}
+      }
+    },
+    "submitOrderRequest": {
+      "type": "object", "additionalProperties": false,
+      "required": ["dto_type", "operation_id", "attempt_id", "order_id", "broker", "account_id", "deadline_at", "fencing_token", "idempotency_key", "client_order_id", "instrument_id", "side", "position_effect", "order_type", "quantity", "limit_price", "time_in_force"],
+      "properties": {
+        "dto_type": {"const": "SUBMIT_ORDER_REQUEST"}, "operation_id": {"$ref": "#/$defs/identifier"}, "attempt_id": {"$ref": "#/$defs/uuid"}, "order_id": {"$ref": "#/$defs/uuid"}, "broker": {"type": "string", "minLength": 1, "maxLength": 64}, "account_id": {"$ref": "#/$defs/identifier"}, "deadline_at": {"$ref": "#/$defs/deadline"}, "fencing_token": {"type": "integer", "minimum": 1}, "idempotency_key": {"$ref": "#/$defs/identifier"}, "client_order_id": {"$ref": "#/$defs/identifier"}, "instrument_id": {"type": "string", "minLength": 1, "maxLength": 64}, "side": {"enum": ["BUY", "SELL"]}, "position_effect": {"enum": ["OPEN", "CLOSE", "AUTO"]}, "order_type": {"enum": ["LIMIT", "MARKET"]}, "quantity": {"type": "integer", "minimum": 1}, "limit_price": {"oneOf": [{"$ref": "#/$defs/positiveDecimal"}, {"type": "null"}]}, "time_in_force": {"enum": ["DAY", "IOC", "FOK"]}
+      },
+      "allOf": [{"if": {"properties": {"order_type": {"const": "LIMIT"}}}, "then": {"properties": {"limit_price": {"$ref": "#/$defs/positiveDecimal"}}}}, {"if": {"properties": {"order_type": {"const": "MARKET"}}}, "then": {"properties": {"limit_price": {"type": "null"}}}}]
+    },
+    "cancelOrderRequest": {
+      "type": "object", "additionalProperties": false,
+      "required": ["dto_type", "operation_id", "attempt_id", "order_id", "cancel_request_id", "broker", "account_id", "deadline_at", "fencing_token", "idempotency_key", "client_order_id"],
+      "properties": {"dto_type": {"const": "CANCEL_ORDER_REQUEST"}, "operation_id": {"$ref": "#/$defs/identifier"}, "attempt_id": {"$ref": "#/$defs/uuid"}, "order_id": {"$ref": "#/$defs/uuid"}, "cancel_request_id": {"$ref": "#/$defs/uuid"}, "broker": {"type": "string", "minLength": 1, "maxLength": 64}, "account_id": {"$ref": "#/$defs/identifier"}, "deadline_at": {"$ref": "#/$defs/deadline"}, "fencing_token": {"type": "integer", "minimum": 1}, "idempotency_key": {"$ref": "#/$defs/identifier"}, "client_order_id": {"$ref": "#/$defs/identifier"}, "broker_order_id": {"oneOf": [{"$ref": "#/$defs/identifier"}, {"type": "null"}]}}
+    },
+    "queryOrderRequest": {"$ref": "#/$defs/queryOrderRequestObject"},
+    "queryOrderRequestObject": {
+      "type": "object", "additionalProperties": false,
+      "required": ["dto_type", "operation_id", "broker", "account_id", "deadline_at"],
+      "properties": {"dto_type": {"const": "QUERY_ORDER_REQUEST"}, "operation_id": {"$ref": "#/$defs/identifier"}, "broker": {"type": "string", "minLength": 1, "maxLength": 64}, "account_id": {"$ref": "#/$defs/identifier"}, "deadline_at": {"$ref": "#/$defs/deadline"}, "client_order_id": {"$ref": "#/$defs/identifier"}, "broker_order_id": {"$ref": "#/$defs/identifier"}},
+      "anyOf": [{"required": ["client_order_id"]}, {"required": ["broker_order_id"]}]
+    },
+    "openOrdersRequest": {"$ref": "#/$defs/pagedRequestObject"},
+    "pagedRequestObject": {
+      "type": "object", "additionalProperties": false,
+      "required": ["dto_type", "operation_id", "broker", "account_id", "deadline_at", "page_size", "page_token"],
+      "properties": {"dto_type": {"const": "OPEN_ORDERS_REQUEST"}, "operation_id": {"$ref": "#/$defs/identifier"}, "broker": {"type": "string", "minLength": 1, "maxLength": 64}, "account_id": {"$ref": "#/$defs/identifier"}, "deadline_at": {"$ref": "#/$defs/deadline"}, "page_size": {"type": "integer", "minimum": 1, "maximum": 1000}, "page_token": {"type": ["string", "null"], "minLength": 1, "maxLength": 256}}
+    },
+    "tradesRequest": {
+      "type": "object", "additionalProperties": false,
+      "required": ["dto_type", "operation_id", "broker", "account_id", "deadline_at", "trading_day", "page_size", "page_token"],
+      "properties": {"dto_type": {"const": "TRADES_REQUEST"}, "operation_id": {"$ref": "#/$defs/identifier"}, "broker": {"type": "string", "minLength": 1, "maxLength": 64}, "account_id": {"$ref": "#/$defs/identifier"}, "deadline_at": {"$ref": "#/$defs/deadline"}, "trading_day": {"type": "string", "format": "date"}, "page_size": {"type": "integer", "minimum": 1, "maximum": 1000}, "page_token": {"type": ["string", "null"], "minLength": 1, "maxLength": 256}}
+    },
+    "accountRequest": {"$ref": "#/$defs/simpleRequestObject"},
+    "simpleRequestObject": {"type": "object", "additionalProperties": false, "required": ["dto_type", "operation_id", "broker", "account_id", "deadline_at"], "properties": {"dto_type": {"const": "ACCOUNT_REQUEST"}, "operation_id": {"$ref": "#/$defs/identifier"}, "broker": {"type": "string", "minLength": 1, "maxLength": 64}, "account_id": {"$ref": "#/$defs/identifier"}, "deadline_at": {"$ref": "#/$defs/deadline"}}},
+    "positionsRequest": {"type": "object", "additionalProperties": false, "required": ["dto_type", "operation_id", "broker", "account_id", "deadline_at", "instrument_id"], "properties": {"dto_type": {"const": "POSITIONS_REQUEST"}, "operation_id": {"$ref": "#/$defs/identifier"}, "broker": {"type": "string", "minLength": 1, "maxLength": 64}, "account_id": {"$ref": "#/$defs/identifier"}, "deadline_at": {"$ref": "#/$defs/deadline"}, "instrument_id": {"type": ["string", "null"], "minLength": 1, "maxLength": 64}}},
+    "operationResult": {
+      "type": "object", "additionalProperties": false,
+      "required": ["dto_type", "operation", "operation_id", "outcome", "reason_code", "broker", "account_id", "attempt_id", "client_order_id", "idempotency_key", "broker_order_id", "side_effect_possible", "reconciliation_required", "retry_after_ms"],
+      "properties": {"dto_type": {"const": "OPERATION_RESULT"}, "operation": {"enum": ["SUBMIT", "CANCEL"]}, "operation_id": {"$ref": "#/$defs/identifier"}, "outcome": {"enum": ["CONFIRMED", "REJECTED", "UNKNOWN_OUTCOME"]}, "reason_code": {"enum": ["BROKER_ACCEPTED", "BROKER_CANCELED", "BROKER_REJECTED", "INVALID_REQUEST", "UNSUPPORTED_CAPABILITY", "RATE_LIMITED", "STALE_FENCING_TOKEN", "DEADLINE_EXCEEDED_BEFORE_DISPATCH", "DISCONNECTED_BEFORE_DISPATCH", "TIMEOUT_AFTER_DISPATCH", "DISCONNECTED_AFTER_DISPATCH", "TRANSPORT_UNCERTAIN"]}, "broker": {"type": "string", "minLength": 1, "maxLength": 64}, "account_id": {"$ref": "#/$defs/identifier"}, "attempt_id": {"$ref": "#/$defs/uuid"}, "client_order_id": {"$ref": "#/$defs/identifier"}, "idempotency_key": {"$ref": "#/$defs/identifier"}, "broker_order_id": {"oneOf": [{"$ref": "#/$defs/identifier"}, {"type": "null"}]}, "side_effect_possible": {"type": "boolean"}, "reconciliation_required": {"type": "boolean"}, "retry_after_ms": {"type": ["integer", "null"], "minimum": 0}},
+      "oneOf": [
+        {"properties": {"outcome": {"const": "CONFIRMED"}, "reason_code": {"enum": ["BROKER_ACCEPTED", "BROKER_CANCELED"]}, "side_effect_possible": {"const": true}, "reconciliation_required": {"const": false}}},
+        {"properties": {"outcome": {"const": "REJECTED"}, "reason_code": {"enum": ["BROKER_REJECTED", "INVALID_REQUEST", "UNSUPPORTED_CAPABILITY", "RATE_LIMITED", "STALE_FENCING_TOKEN", "DEADLINE_EXCEEDED_BEFORE_DISPATCH", "DISCONNECTED_BEFORE_DISPATCH"]}, "side_effect_possible": {"const": false}, "reconciliation_required": {"const": false}}},
+        {"properties": {"outcome": {"const": "UNKNOWN_OUTCOME"}, "reason_code": {"enum": ["TIMEOUT_AFTER_DISPATCH", "DISCONNECTED_AFTER_DISPATCH", "TRANSPORT_UNCERTAIN"]}, "side_effect_possible": {"const": true}, "reconciliation_required": {"const": true}}}
+      ],
+      "allOf": [
+        {"if": {"properties": {"reason_code": {"const": "RATE_LIMITED"}}}, "then": {"properties": {"retry_after_ms": {"type": "integer", "minimum": 0}}}},
+        {"if": {"not": {"properties": {"reason_code": {"const": "RATE_LIMITED"}}}}, "then": {"properties": {"retry_after_ms": {"type": "null"}}}},
+        {"if": {"properties": {"outcome": {"const": "CONFIRMED"}}}, "then": {"properties": {"broker_order_id": {"$ref": "#/$defs/identifier"}}}}
+      ]
+    },
+    "orderSnapshot": {"type": "object", "additionalProperties": false, "required": ["dto_type", "broker", "account_id", "trading_day", "client_order_id", "broker_order_id", "broker_status", "cum_quantity", "leaves_quantity", "average_price", "broker_sequence", "observed_at"], "properties": {"dto_type": {"const": "ORDER_SNAPSHOT"}, "broker": {"type": "string", "minLength": 1}, "account_id": {"$ref": "#/$defs/identifier"}, "trading_day": {"type": "string", "format": "date"}, "client_order_id": {"$ref": "#/$defs/identifier"}, "broker_order_id": {"oneOf": [{"$ref": "#/$defs/identifier"}, {"type": "null"}]}, "broker_status": {"enum": ["ACCEPTED", "REJECTED", "PARTIALLY_FILLED", "FILLED", "CANCELED", "EXPIRED", "UNKNOWN"]}, "cum_quantity": {"type": "integer", "minimum": 0}, "leaves_quantity": {"type": "integer", "minimum": 0}, "average_price": {"oneOf": [{"$ref": "#/$defs/positiveDecimal"}, {"type": "null"}]}, "broker_sequence": {"type": ["integer", "null"], "minimum": 0}, "observed_at": {"$ref": "#/$defs/deadline"}}},
+    "tradeSnapshot": {"type": "object", "additionalProperties": false, "required": ["dto_type", "broker", "account_id", "trading_day", "trade_id", "client_order_id", "broker_order_id", "instrument_id", "side", "position_effect", "price", "quantity", "commission", "tax", "broker_sequence", "trade_time"], "properties": {"dto_type": {"const": "TRADE_SNAPSHOT"}, "broker": {"type": "string", "minLength": 1}, "account_id": {"$ref": "#/$defs/identifier"}, "trading_day": {"type": "string", "format": "date"}, "trade_id": {"$ref": "#/$defs/identifier"}, "client_order_id": {"$ref": "#/$defs/identifier"}, "broker_order_id": {"$ref": "#/$defs/identifier"}, "instrument_id": {"type": "string", "minLength": 1}, "side": {"enum": ["BUY", "SELL"]}, "position_effect": {"enum": ["OPEN", "CLOSE", "AUTO"]}, "price": {"$ref": "#/$defs/positiveDecimal"}, "quantity": {"type": "integer", "minimum": 1}, "commission": {"$ref": "#/$defs/nonNegativeDecimal"}, "tax": {"$ref": "#/$defs/nonNegativeDecimal"}, "broker_sequence": {"type": ["integer", "null"], "minimum": 0}, "trade_time": {"$ref": "#/$defs/deadline"}}},
+    "accountSnapshot": {"type": "object", "additionalProperties": false, "required": ["dto_type", "broker", "account_id", "currency", "cash_balance", "available_cash", "market_value", "snapshot_version", "observed_at"], "properties": {"dto_type": {"const": "ACCOUNT_SNAPSHOT"}, "broker": {"type": "string", "minLength": 1}, "account_id": {"$ref": "#/$defs/identifier"}, "currency": {"type": "string", "pattern": "^[A-Z]{3}$"}, "cash_balance": {"$ref": "#/$defs/decimal"}, "available_cash": {"$ref": "#/$defs/decimal"}, "market_value": {"$ref": "#/$defs/nonNegativeDecimal"}, "snapshot_version": {"$ref": "#/$defs/identifier"}, "observed_at": {"$ref": "#/$defs/deadline"}}},
+    "positionSnapshot": {"type": "object", "additionalProperties": false, "required": ["dto_type", "broker", "account_id", "instrument_id", "side", "quantity", "available_quantity", "average_cost", "market_value", "currency", "snapshot_version", "observed_at"], "properties": {"dto_type": {"const": "POSITION_SNAPSHOT"}, "broker": {"type": "string", "minLength": 1}, "account_id": {"$ref": "#/$defs/identifier"}, "instrument_id": {"type": "string", "minLength": 1}, "side": {"enum": ["LONG", "SHORT", "NET"]}, "quantity": {"type": "integer"}, "available_quantity": {"type": "integer", "minimum": 0}, "average_cost": {"$ref": "#/$defs/nonNegativeDecimal"}, "market_value": {"$ref": "#/$defs/decimal"}, "currency": {"type": "string", "pattern": "^[A-Z]{3}$"}, "snapshot_version": {"$ref": "#/$defs/identifier"}, "observed_at": {"$ref": "#/$defs/deadline"}}},
+    "orderPage": {"type": "object", "additionalProperties": false, "required": ["dto_type", "items", "next_page_token", "complete"], "properties": {"dto_type": {"const": "ORDER_PAGE"}, "items": {"type": "array", "items": {"$ref": "#/$defs/orderSnapshot"}, "maxItems": 1000}, "next_page_token": {"type": ["string", "null"], "minLength": 1, "maxLength": 256}, "complete": {"type": "boolean"}}},
+    "tradePage": {"type": "object", "additionalProperties": false, "required": ["dto_type", "items", "next_page_token", "complete"], "properties": {"dto_type": {"const": "TRADE_PAGE"}, "items": {"type": "array", "items": {"$ref": "#/$defs/tradeSnapshot"}, "maxItems": 1000}, "next_page_token": {"type": ["string", "null"], "minLength": 1, "maxLength": 256}, "complete": {"type": "boolean"}}},
+    "positionPage": {"type": "object", "additionalProperties": false, "required": ["dto_type", "items", "next_page_token", "complete"], "properties": {"dto_type": {"const": "POSITION_PAGE"}, "items": {"type": "array", "items": {"$ref": "#/$defs/positionSnapshot"}, "maxItems": 1000}, "next_page_token": {"type": ["string", "null"], "minLength": 1, "maxLength": 256}, "complete": {"type": "boolean"}}}
+  }
+}

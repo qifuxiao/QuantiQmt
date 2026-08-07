@@ -14,7 +14,7 @@ delivery:
   schema_version: 1
   contract_status: draft
   implementation_status: in_progress
-  acceptance_status: not_run
+  acceptance_status: passed
   review_status: pending
   release_status: prohibited
 ---
@@ -31,11 +31,36 @@ delivery:
 
 ## Acceptance criteria
 
-- [ ] 定义 submit/cancel/query/open_orders/trades/account/positions 的 DTO、deadline、fencing 和 canonical outcomes。
-- [ ] 定义 Broker capabilities、client_order_id 约束、rate limit 和 idempotency 语义。
-- [ ] 定义 simulator scenario DSL：accept、reject、partial fill、full fill、duplicate、out-of-order、delay、disconnect、cancel race。
-- [ ] 定义 simulator deterministic clock/seed 与 contract fixtures。
-- [ ] 更新 TASK-006，使其不再需要自行发明 Broker/Execution 契约。
+- [x] 定义 submit/cancel/query/open_orders/trades/account/positions 的 DTO、deadline、fencing 和 canonical outcomes。
+- [x] 定义 Broker capabilities、client_order_id 约束、rate limit 和 idempotency 语义。
+- [x] 定义 simulator scenario DSL：accept、reject、partial fill、full fill、duplicate、out-of-order、delay、disconnect、cancel race。
+- [x] 定义 simulator deterministic clock/seed 与 contract fixtures。
+- [x] 更新 TASK-006，使其不再需要自行发明 Broker/Execution 契约。
+
+## Evidence
+
+- `CONTRACT-EXECUTION-BROKER-GATEWAY-V1` freezes seven request DTOs,
+  canonical operation results, Broker capabilities, snapshots, and bounded page
+  responses. Golden fixtures exercise every DTO; negative fixtures reject
+  missing fencing/idempotency, float prices, and inconsistent UNKNOWN results.
+- `PORTS-CORE` freezes deadline ownership, fencing order, idempotency identity,
+  client_order_id capability validation, reserved rate-limit capacity,
+  unsupported-capability failure, and the rule that Execution never advances
+  OMS business state.
+- `CONTRACT-BROKER-SCENARIO-V1` and `PORTS-BROKER-SIMULATOR` freeze all nine
+  required actions, manual clock/seed inputs, fill/report emission order, and the
+  schema-first semantic validator. Fixtures reject wall-clock mode, float fills,
+  ambiguous action fields, sequence gaps, and forward references.
+- `WF-SUBMIT-ORDER`, `WF-CANCEL-ORDER`, `WF-BROKER-RECONNECT`, and
+  `NFR-RELIABILITY` bind post-dispatch timeout/disconnect to UNKNOWN_OUTCOME,
+  reconciliation under the same identities, and blind-retry prohibition.
+- TASK-006 now references the frozen contract IDs and contains a bounded
+  implementation checklist; it remains blocked and was not activated.
+- Verification on 2026-08-07: `scripts/validate_specs.py` passed; the final
+  `tests/spec tests/contract` run passed 252 tests; targeted Ruff check and
+  format check plus `git diff --check` passed. No runtime code, MiniQMT
+  connection, OMS state-machine change, approval, merge, or completion evidence
+  is claimed.
 
 ## Review focus
 

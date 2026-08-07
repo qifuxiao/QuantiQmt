@@ -3,7 +3,7 @@ id: TASK-006
 title: Implement execution port and programmable broker simulator
 status: blocked
 depends_on: [TASK-004, TASK-005, TASK-017]
-spec_refs: [INV-TRADING, PORTS-CORE, WF-SUBMIT-ORDER, WF-CANCEL-ORDER, NFR-RELIABILITY, CONTRACT-CANCEL-ORDER-V1, CONTRACT-EXECUTION-ATTEMPT-STARTED-V1, CONTRACT-EXECUTION-OUTCOME-UNKNOWN-V1, CONTRACT-BROKER-ORDER-REPORTED-V1, REVIEW-IMPLEMENTATION-READINESS-0.5]
+spec_refs: [INV-TRADING, PORTS-CORE, PORTS-BROKER-SIMULATOR, WF-SUBMIT-ORDER, WF-CANCEL-ORDER, NFR-RELIABILITY, CONTRACT-CANCEL-ORDER-V1, CONTRACT-EXECUTION-ATTEMPT-STARTED-V1, CONTRACT-EXECUTION-OUTCOME-UNKNOWN-V1, CONTRACT-EXECUTION-BROKER-GATEWAY-V1, CONTRACT-BROKER-SCENARIO-V1, CONTRACT-BROKER-ORDER-REPORTED-V1, CONTRACT-BROKER-TRADE-V1, REVIEW-IMPLEMENTATION-READINESS-0.7]
 allowed_paths: [src/quantiqmt/execution/**, src/quantiqmt/simulation/broker/**, tests/contract/broker/**]
 forbidden_paths: [src/quantiqmt/live/qmt/**]
 verification:
@@ -17,6 +17,29 @@ verification:
 ## Blocking reason
 
 需要 TASK-017 冻结 Execution/Broker DTO、capabilities、fencing、timeout/UNKNOWN、simulator scenario DSL、fill model 和 contract fixtures。还需要 TASK-004 提供持久化/outbox，TASK-005 提供 Risk approve/reject 语义。
+
+TASK-017 freezes the Execution/Broker portion through
+`CONTRACT-EXECUTION-BROKER-GATEWAY-V1`, `CONTRACT-BROKER-SCENARIO-V1`,
+`PORTS-CORE`, and `PORTS-BROKER-SIMULATOR`. TASK-006 MUST implement those
+contracts without adding DTO fields, outcome/reason values, simulator actions,
+ordering rules, retry behavior, or broker-specific fallbacks. It remains blocked
+until every declared dependency is trusted completed; this clarification does
+not activate TASK-006.
+
+## Frozen implementation contract
+
+- Implement all seven request methods plus versioned capabilities and canonical
+  result/snapshot DTOs exactly as registered in `spec/manifest.yaml`.
+- Validate schema first, then scenario sequence/reference/fill semantics before
+  starting a simulator run.
+- Use only the manual clock and declared seed. Emit fills and order reports using
+  the canonical ordering, while explicitly scripted duplicate/out-of-order
+  actions preserve their original identities.
+- Validate fencing/capability/rate-limit before side effect. Idempotent replay
+  preserves both idempotency_key and client_order_id.
+- Treat any post-dispatch timeout/disconnect/transport ambiguity as
+  `UNKNOWN_OUTCOME`; reconcile under the same identities and never blind retry.
+- Return evidence to OMS. Do not import the OMS aggregate or advance its state.
 
 ## Non-goals
 
