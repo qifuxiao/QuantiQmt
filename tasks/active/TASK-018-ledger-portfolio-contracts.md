@@ -1,15 +1,22 @@
 ---
 id: TASK-018
 title: Complete Ledger, Portfolio, and Reconciliation L4 contracts
-status: ready
+status: active
 depends_on: [TASK-046]
 spec_refs: [INV-CONSISTENCY, STORAGE-SOT, SM-ACCOUNT, SM-PORTFOLIO, SM-RECONCILIATION-CASE, CONTRACT-BROKER-TRADE-V1, CONTRACT-LEDGER-TRADE-POSTED-V1, CONTRACT-PORTFOLIO-POSITION-CHANGED-V1]
-allowed_paths: [spec/manifest.yaml, spec/contracts/**, spec/interfaces/**, spec/state-machines/**, spec/workflows/**, spec/repositories/**, spec/storage/**, tests/contract/messages/**, tasks/backlog/TASK-007-ledger-portfolio.md, tasks/backlog/TASK-018-ledger-portfolio-contracts.md, tasks/index.yaml]
+allowed_paths: [spec/manifest.yaml, spec/contracts/**, spec/interfaces/**, spec/state-machines/**, spec/workflows/**, spec/repositories/**, spec/storage/**, tests/contract/messages/**, tasks/backlog/TASK-007-ledger-portfolio.md, tasks/active/TASK-018-ledger-portfolio-contracts.md, tasks/index.yaml]
 forbidden_paths: [src/**, tests/unit/**, tests/property/**, tests/integration/**, migrations/**]
 verification:
   commands:
     - poetry run python scripts/validate_specs.py
     - poetry run pytest tests/spec tests/contract
+delivery:
+  schema_version: 1
+  contract_status: draft
+  implementation_status: in_progress
+  acceptance_status: not_run
+  review_status: pending
+  release_status: prohibited
 ---
 
 # Objective
