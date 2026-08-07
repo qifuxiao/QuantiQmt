@@ -3,7 +3,7 @@ id: TASK-007
 title: Implement trade ledger and portfolio projection
 status: blocked
 depends_on: [TASK-004, TASK-006, TASK-018]
-spec_refs: [INV-CONSISTENCY, CONTRACT-BROKER-TRADE-V1, CONTRACT-LEDGER-TRADE-POSTED-V1, CONTRACT-PORTFOLIO-POSITION-CHANGED-V1, STORAGE-SOT, REVIEW-IMPLEMENTATION-READINESS-0.5]
+spec_refs: [INV-CONSISTENCY, CONTRACT-BROKER-TRADE-V1, CONTRACT-LEDGER-TRADE-POSTED-V1, CONTRACT-PORTFOLIO-POSITION-CHANGED-V1, CONTRACT-LEDGER-ACCOUNTING-V1, CONTRACT-PORTFOLIO-PROJECTION-V1, CONTRACT-RECONCILIATION-V1, PORTS-LEDGER-PORTFOLIO, REPO-LEDGER-PORTFOLIO, STORAGE-SOT, STORAGE-LEDGER-PORTFOLIO, SM-PORTFOLIO, SM-RECONCILIATION-CASE, WF-TRADE-ACCOUNTING, WF-RECONCILIATION-REPAIR, REVIEW-IMPLEMENTATION-READINESS-0.7]
 allowed_paths: [src/quantiqmt/account/**, src/quantiqmt/portfolio/**, tests/unit/ledger/**, tests/unit/portfolio/**, tests/integration/portfolio/**]
 forbidden_paths: [src/quantiqmt/strategy/**]
 verification:
@@ -16,7 +16,16 @@ verification:
 
 ## Blocking reason
 
-需要 TASK-018 冻结 Ledger account model、entry taxonomy、费用/税费、成本法、position projection、portfolio snapshot、reconciliation repair command 和 checksum 语义。
+TASK-018 已在 draft 契约中冻结 Ledger account model、entry taxonomy、费用/税费、成本法、position projection、portfolio snapshot、reconciliation repair command 和 checksum 语义；本任务仍保持 blocked，直到 TASK-004、TASK-006、TASK-018 均以可信 completion evidence 完成且由人类激活。
+
+## Implementation constraints
+
+- 只能实现 `SPEC-0.9.0` 登记的 Ledger/Portfolio/Reconciliation 契约；不得自行发明或改变账户分类、entry type、成本法、PnL、rounding、identity、Case/repair、状态迁移或失败码。
+- V1 只实现 `WEIGHTED_AVERAGE_V1` 与 long-only `FLAT/LONG` Position。新成本法、short/小数持仓或 FX posting 需要独立 spec-change。
+- 必须先执行 Schema 与语义校验，再进入 Repository；不平衡、账户缺失、scope/currency/instrument 不一致、重复 identity 冲突、版本/序列回退、坏 snapshot、过期 evidence/fencing 均 fail-closed。
+- Ledger、projection journal、Case evidence/transition、repair/audit 全部 append-only。Broker snapshot 只能创建证据/Case，不能覆盖内部 Ledger/Portfolio 历史。
+- Repair 只能追加 adjustment/compensating facts；UNKNOWN 使用同一 command/idempotency identity 查询和对账，禁止盲目重试。
+- 本任务不得在未获得人类授权且 allowed paths 未覆盖时创建 migration 或部署持久化 schema；需要 PostgreSQL migration 时必须先走独立治理授权。
 
 ## Non-goals
 

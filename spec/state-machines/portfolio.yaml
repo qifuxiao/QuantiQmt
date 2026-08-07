@@ -11,6 +11,8 @@ machine:
   transitions:
     - {from: EMPTY, event: Restore, to: RECOVERING, guard: true}
     - {from: RECOVERING, event: ReplayVerified, to: READY, guard: snapshot_and_replay_checksums_match}
+    - {from: RECOVERING, event: SnapshotInvalid, to: RECOVERING, guard: discard_snapshot_and_schedule_full_ledger_replay}
+    - {from: RECOVERING, event: ReplayMismatch, to: INCONSISTENT, guard: checksum_version_or_sequence_mismatch}
     - {from: RECOVERING, event: DifferenceDetected, to: INCONSISTENT, guard: true}
     - {from: READY, event: ProjectionLagExceeded, to: STALE, guard: true}
     - {from: STALE, event: CaughtUp, to: READY, guard: replay_verified}
@@ -21,3 +23,11 @@ machine:
   invariants:
     - "projection is derivable from ledger and trade facts"
     - "only READY snapshots may approve increased risk"
+    - "position_version and portfolio_version never regress and increment exactly once per accepted source transaction"
+    - "source ledger sequence is contiguous during verified replay"
+    - "invalid snapshots are discarded and never silently accepted"
+    - "Broker position is reconciliation evidence and never overwrites projection history"
+  failures:
+    invalid_snapshot: QQ-STORAGE-7003
+    replay_mismatch: QQ-RECOVERY-8003
+    version_or_sequence_regression: QQ-STORAGE-7010

@@ -1,0 +1,170 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:quantiqmt:internal:portfolio-projection:v1",
+  "title": "PortfolioProjectionContractV1",
+  "oneOf": [
+    {"$ref": "#/$defs/position"},
+    {"$ref": "#/$defs/positionChange"},
+    {"$ref": "#/$defs/portfolioSnapshot"},
+    {"$ref": "#/$defs/replayRequest"},
+    {"$ref": "#/$defs/replayResult"}
+  ],
+  "$defs": {
+    "uuid": {"type": "string", "format": "uuid", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"},
+    "timestamp": {"type": "string", "format": "date-time", "pattern": "Z$"},
+    "currency": {"type": "string", "pattern": "^[A-Z]{3}$"},
+    "decimal": {"type": "string", "pattern": "^-?(0|[1-9][0-9]{0,17})(\\.[0-9]{1,8})?$", "not": {"pattern": "^-0(?:\\.0+)?$"}},
+    "nonNegativeDecimal": {"type": "string", "pattern": "^(0|[1-9][0-9]{0,17})(\\.[0-9]{1,8})?$"},
+    "positiveDecimal": {"type": "string", "pattern": "^(?=.*[1-9])(0|[1-9][0-9]{0,17})(\\.[0-9]{1,8})?$"},
+    "hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "position": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["dto_type", "schema_version", "position_id", "account_id", "scope_id", "instrument_id", "currency", "side", "quantity", "available_quantity", "availability_policy_version", "cost_basis_total", "average_cost", "cost_basis_method", "realized_pnl", "unrealized_pnl", "market_price", "market_value", "valuation_quality", "valuation_at", "position_version", "portfolio_version", "source_ledger_transaction_id", "source_sequence", "updated_at"],
+      "properties": {
+        "dto_type": {"const": "POSITION"},
+        "schema_version": {"const": 1},
+        "position_id": {"$ref": "#/$defs/uuid"},
+        "account_id": {"type": "string", "minLength": 1, "maxLength": 128},
+        "scope_id": {"type": "string", "minLength": 1, "maxLength": 128},
+        "instrument_id": {"type": "string", "minLength": 1, "maxLength": 64},
+        "currency": {"$ref": "#/$defs/currency"},
+        "side": {"enum": ["FLAT", "LONG"]},
+        "quantity": {"type": "integer", "minimum": 0},
+        "available_quantity": {"type": "integer", "minimum": 0},
+        "availability_policy_version": {"enum": ["IMMEDIATE_V1", "T_PLUS_ONE_V1"]},
+        "cost_basis_total": {"$ref": "#/$defs/nonNegativeDecimal"},
+        "average_cost": {"anyOf": [{"$ref": "#/$defs/positiveDecimal"}, {"type": "null"}]},
+        "cost_basis_method": {"const": "WEIGHTED_AVERAGE_V1"},
+        "realized_pnl": {"$ref": "#/$defs/decimal"},
+        "unrealized_pnl": {"anyOf": [{"$ref": "#/$defs/decimal"}, {"type": "null"}]},
+        "market_price": {"anyOf": [{"$ref": "#/$defs/positiveDecimal"}, {"type": "null"}]},
+        "market_value": {"anyOf": [{"$ref": "#/$defs/nonNegativeDecimal"}, {"type": "null"}]},
+        "valuation_quality": {"enum": ["FRESH", "STALE", "MISSING"]},
+        "valuation_at": {"anyOf": [{"$ref": "#/$defs/timestamp"}, {"type": "null"}]},
+        "position_version": {"type": "integer", "minimum": 0},
+        "portfolio_version": {"type": "integer", "minimum": 0},
+        "source_ledger_transaction_id": {"anyOf": [{"$ref": "#/$defs/uuid"}, {"type": "null"}]},
+        "source_sequence": {"type": "integer", "minimum": 0},
+        "updated_at": {"$ref": "#/$defs/timestamp"}
+      },
+      "allOf": [
+        {"if": {"properties": {"side": {"const": "FLAT"}}, "required": ["side"]}, "then": {"properties": {"quantity": {"const": 0}, "available_quantity": {"const": 0}, "cost_basis_total": {"const": "0"}, "average_cost": {"type": "null"}}}},
+        {"if": {"properties": {"side": {"const": "LONG"}}, "required": ["side"]}, "then": {"properties": {"quantity": {"minimum": 1}, "average_cost": {"$ref": "#/$defs/positiveDecimal"}}}},
+        {"if": {"properties": {"valuation_quality": {"const": "MISSING"}}, "required": ["valuation_quality"]}, "then": {"properties": {"market_price": {"type": "null"}, "market_value": {"type": "null"}, "unrealized_pnl": {"type": "null"}, "valuation_at": {"type": "null"}}}}
+      ]
+    },
+    "positionState": {
+      "allOf": [
+        {"$ref": "#/$defs/position"},
+        {"properties": {"dto_type": {"const": "POSITION"}}}
+      ]
+    },
+    "projectionEffect": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["quantity_delta", "gross", "released_cost", "expense_total", "trade_pnl", "net_realized_pnl_increment"],
+      "properties": {
+        "quantity_delta": {"type": "integer", "not": {"const": 0}},
+        "gross": {"$ref": "#/$defs/nonNegativeDecimal"},
+        "released_cost": {"$ref": "#/$defs/nonNegativeDecimal"},
+        "expense_total": {"$ref": "#/$defs/nonNegativeDecimal"},
+        "trade_pnl": {"$ref": "#/$defs/decimal"},
+        "net_realized_pnl_increment": {"$ref": "#/$defs/decimal"}
+      }
+    },
+    "positionChange": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["dto_type", "schema_version", "before", "after", "effect", "source_ledger_transaction_id", "source_sequence", "projected_at"],
+      "properties": {
+        "dto_type": {"const": "POSITION_PROJECTION_CHANGE"},
+        "schema_version": {"const": 1},
+        "before": {"$ref": "#/$defs/positionState"},
+        "after": {"$ref": "#/$defs/positionState"},
+        "effect": {"$ref": "#/$defs/projectionEffect"},
+        "source_ledger_transaction_id": {"$ref": "#/$defs/uuid"},
+        "source_sequence": {"type": "integer", "minimum": 1},
+        "projected_at": {"$ref": "#/$defs/timestamp"}
+      }
+    },
+    "money": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["currency", "amount"],
+      "properties": {"currency": {"$ref": "#/$defs/currency"}, "amount": {"$ref": "#/$defs/decimal"}}
+    },
+    "checkpoint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["stream_id", "last_sequence", "last_transaction_id", "last_transaction_checksum"],
+      "properties": {
+        "stream_id": {"type": "string", "minLength": 1, "maxLength": 128},
+        "last_sequence": {"type": "integer", "minimum": 0},
+        "last_transaction_id": {"anyOf": [{"$ref": "#/$defs/uuid"}, {"type": "null"}]},
+        "last_transaction_checksum": {"anyOf": [{"$ref": "#/$defs/hash"}, {"type": "null"}]}
+      }
+    },
+    "portfolioSnapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["dto_type", "schema_version", "snapshot_id", "portfolio_id", "account_id", "scope_id", "portfolio_version", "cash", "positions", "market_value", "total_equity", "realized_pnl", "unrealized_pnl", "quality", "risk_usable", "valuation_time", "source_checkpoint", "checksum_algorithm", "checksum", "created_at"],
+      "properties": {
+        "dto_type": {"const": "PORTFOLIO_SNAPSHOT"},
+        "schema_version": {"const": 1},
+        "snapshot_id": {"$ref": "#/$defs/uuid"},
+        "portfolio_id": {"$ref": "#/$defs/uuid"},
+        "account_id": {"type": "string", "minLength": 1, "maxLength": 128},
+        "scope_id": {"type": "string", "minLength": 1, "maxLength": 128},
+        "portfolio_version": {"type": "integer", "minimum": 0},
+        "cash": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/money"}},
+        "positions": {"type": "array", "items": {"$ref": "#/$defs/positionState"}},
+        "market_value": {"type": ["string", "null"], "pattern": "^(0|[1-9][0-9]{0,17})(\\.[0-9]{1,8})?$"},
+        "total_equity": {"type": ["string", "null"], "pattern": "^-?(0|[1-9][0-9]{0,17})(\\.[0-9]{1,8})?$"},
+        "realized_pnl": {"$ref": "#/$defs/decimal"},
+        "unrealized_pnl": {"anyOf": [{"$ref": "#/$defs/decimal"}, {"type": "null"}]},
+        "quality": {"enum": ["COMPLETE", "PARTIAL_STALE", "UNAVAILABLE"]},
+        "risk_usable": {"type": "boolean"},
+        "valuation_time": {"$ref": "#/$defs/timestamp"},
+        "source_checkpoint": {"$ref": "#/$defs/checkpoint"},
+        "checksum_algorithm": {"const": "SHA-256_CANONICAL_JSON_V1"},
+        "checksum": {"$ref": "#/$defs/hash"},
+        "created_at": {"$ref": "#/$defs/timestamp"}
+      }
+    },
+    "replayRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["dto_type", "schema_version", "portfolio_id", "mode", "snapshot_id", "start_sequence", "end_sequence", "expected_checksum", "requested_at"],
+      "properties": {
+        "dto_type": {"const": "REPLAY_REQUEST"},
+        "schema_version": {"const": 1},
+        "portfolio_id": {"$ref": "#/$defs/uuid"},
+        "mode": {"enum": ["SNAPSHOT_PLUS_LEDGER", "FULL_LEDGER"]},
+        "snapshot_id": {"anyOf": [{"$ref": "#/$defs/uuid"}, {"type": "null"}]},
+        "start_sequence": {"type": "integer", "minimum": 1},
+        "end_sequence": {"type": ["integer", "null"], "minimum": 1},
+        "expected_checksum": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"},
+        "requested_at": {"$ref": "#/$defs/timestamp"}
+      }
+    },
+    "replayResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["dto_type", "schema_version", "status", "portfolio_id", "last_sequence", "expected_checksum", "actual_checksum", "snapshot_status", "failure_code", "evidence_id", "completed_at"],
+      "properties": {
+        "dto_type": {"const": "REPLAY_RESULT"},
+        "schema_version": {"const": 1},
+        "status": {"enum": ["VERIFIED", "FALLBACK_FULL_REPLAY", "REJECTED"]},
+        "portfolio_id": {"$ref": "#/$defs/uuid"},
+        "last_sequence": {"type": "integer", "minimum": 0},
+        "expected_checksum": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"},
+        "actual_checksum": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"},
+        "snapshot_status": {"enum": ["VALID", "ABSENT", "INVALID_DISCARDED", "INCOMPATIBLE_DISCARDED"]},
+        "failure_code": {"enum": [null, "QQ-STORAGE-7003", "QQ-RECOVERY-8003", "QQ-STORAGE-7010"]},
+        "evidence_id": {"$ref": "#/$defs/uuid"},
+        "completed_at": {"$ref": "#/$defs/timestamp"}
+      }
+    }
+  }
+}

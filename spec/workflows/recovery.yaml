@@ -20,6 +20,17 @@ workflow:
         - restore_identity_state_facts_conflicts_sequences_and_mappings
         - compare_rebuilt_state_with_orders_projection
         - rebuild_projection_from_journal_when_projection_mismatch
+    - id: restore_portfolio_snapshot_and_ledger
+      owner: PortfolioProjection
+      failure: HALTED_IF_LEDGER_OR_REPLAY_INVALID
+      portfolio_restore:
+        - load_highest_supported_snapshot_not_above_ledger_head
+        - verify_snapshot_checksum_schema_checkpoint_and_transaction_checksum
+        - record_QQ-STORAGE-7003_and_discard_invalid_or_incompatible_snapshot_for_attempt
+        - fallback_to_full_ledger_replay_when_snapshot_absent_or_discarded
+        - replay_strictly_contiguous_internal_ledger_sequence
+        - verify_position_portfolio_versions_and_final_checksum
+        - record_QQ-RECOVERY-8003_open_case_and_keep_barrier_closed_on_mismatch
     - {id: connect_broker, owner: BrokerGateway, failure: SAFE}
     - {id: query_open_orders, owner: Reconciliation, failure: SAFE}
     - {id: query_trades_overlap_window, owner: Reconciliation, failure: SAFE}
@@ -44,9 +55,15 @@ workflow:
     - valid_fencing_token
     - recovery_report_persisted
     - order_journal_versions_and_checksums_verified
+    - portfolio_ledger_sequence_versions_and_checksums_verified
     - no_critical_order_outbox_dead_letter
   order_failure_rules:
     invalid_snapshot: "diagnose QQ-STORAGE-7003, discard snapshot for this recovery attempt, and replay full Journal"
     journal_gap_or_corruption: "QQ-RECOVERY-8002 + HALTED; never open barrier"
     orders_projection_mismatch: "call OrderRepository.rebuild_projection_from_journal with expected journal head checksum, preserve evidence, open case"
     outbox_publish_uncertain: "retain same message_id and allow duplicate publication"
+  portfolio_failure_rules:
+    invalid_or_incompatible_snapshot: "diagnose QQ-STORAGE-7003, discard snapshot for this attempt, and replay full AccountLedger"
+    lower_snapshot_after_invalid: forbidden_in_same_recovery_attempt
+    ledger_gap_or_checksum_mismatch: "QQ-RECOVERY-8003 + HALTED; never open barrier"
+    broker_position_difference: "append Reconciliation evidence/Case only; never overwrite internal projection"

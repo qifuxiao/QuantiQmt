@@ -2,7 +2,8 @@
 
 ## Identifier
 
-- MUST 使用规范小写 UUID 字符串作为内部 ID；V1 生成算法为 UUID4。
+- MUST 使用规范小写 UUID 字符串作为内部 ID；无派生身份规范时 V1 生成算法为 UUID4。
+- 只有登记在 manifest 的契约可以指定 UUID5 派生身份。V1 Ledger transaction/entry 与 Reconciliation Case 的固定 namespace、canonical name 和算法由 `PORTS-LEDGER-PORTFOLIO` 冻结；实现者不得选择 namespace 或改用 UUID4。
 - MUST 在构造时验证格式；相同文本具有值相等和稳定 hash。
 - MUST NOT 把数据库自增 ID、Broker ID 或策略名称混作内部 ID。
 - Broker/client/trade ID 是独立受限字符串值对象，不假设 UUID。
@@ -44,6 +45,12 @@
 - 有符号持仓变化使用 PositionDelta，不能用负 Order Quantity。
 - lot_size 取整默认向零；不足最小单位产生 NoAction/Dust，而非四舍五入扩大风险。
 - 未来支持小数资产时发布新 Quantity 契约版本，不改变 V1 含义。
+
+## Ledger / Portfolio precision
+
+- `CONTRACT-LEDGER-ACCOUNTING-V1`、`CONTRACT-PORTFOLIO-PROJECTION-V1` 和 `CONTRACT-RECONCILIATION-V1` 的金额、价格、费用、税费、成本与 PnL 字段只接受普通十进制字符串，不接受 JSON number/float。
+- CNY 最终 Ledger Money 使用 scale 2、最小单位 `0.01` 和 `ROUND_HALF_EVEN`；单位成本保留 scale 8。量化残差必须按规范显式入账，禁止丢弃或改写既有分录。
+- V1 Position quantity/available quantity 是非负整数且 `available <= quantity`；负持仓/小数资产必须发布新契约版本。
 
 ## Ratio / Weight
 

@@ -1,0 +1,19 @@
+{
+  "cases": [
+    {
+      "name": "position_version_regression",
+      "error_match": "position version",
+      "changes": {"dtos.1.after.position_version": 1}
+    },
+    {
+      "name": "invalid_snapshot_checksum",
+      "error_match": "snapshot checksum",
+      "changes": {"dtos.3.checksum": "0000000000000000000000000000000000000000000000000000000000000000"}
+    },
+    {
+      "name": "replay_checksum_mismatch",
+      "error_match": "replay checksum",
+      "changes": {"dtos.5.actual_checksum": "0000000000000000000000000000000000000000000000000000000000000000"}
+    }
+  ]
+}

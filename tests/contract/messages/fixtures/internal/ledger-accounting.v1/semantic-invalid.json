@@ -1,0 +1,30 @@
+{
+  "cases": [
+    {
+      "name": "unbalanced_transaction",
+      "error_match": "unbalanced",
+      "changes": {"dtos.5.entries.2.amount": "1000.99"}
+    },
+    {
+      "name": "currency_mismatch",
+      "error_match": "currency mismatch",
+      "changes": {"dtos.5.entries.2.currency": "USD"}
+    },
+    {
+      "name": "duplicate_identity_conflict",
+      "error_match": "fingerprint conflict",
+      "append_copy_index": 5,
+      "changes": {"dtos.8.source_trade.price": "11.00", "dtos.8.source_fingerprint": "3f126db28143f233bd4c14d514cb6534d8ccd53ad6eb8ab4d6fad75c3e60177d"}
+    },
+    {
+      "name": "missing_ledger_account",
+      "error_match": "account missing",
+      "changes": {"dtos.5.entries.0.ledger_account_id": "99999999-1111-4111-8111-999999999999"}
+    },
+    {
+      "name": "ledger_checksum_mismatch",
+      "error_match": "transaction checksum",
+      "changes": {"dtos.5.transaction_checksum": "0000000000000000000000000000000000000000000000000000000000000000"}
+    }
+  ]
+}

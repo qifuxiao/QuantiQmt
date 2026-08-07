@@ -1,5 +1,5 @@
 catalog:
-  version: 3
+  version: 4
   format: "QQ-{DOMAIN}-{NUMBER}"
   ranges:
     COMMON: [1000, 1999]
@@ -104,6 +104,22 @@ errors:
     name: UNIQUE_IDENTIFIER_COLLISION
     category: CONFLICT
     retry: regenerate_before_side_effect_then_bounded_retry
+  - code: QQ-STORAGE-7007
+    name: LEDGER_ACCOUNT_UNAVAILABLE
+    category: DATA_QUALITY
+    retry: after_account_configuration_repair
+  - code: QQ-STORAGE-7008
+    name: LEDGER_SCOPE_CURRENCY_MISMATCH
+    category: DATA_QUALITY
+    retry: never_same_payload
+  - code: QQ-STORAGE-7009
+    name: ACCOUNTING_IDENTITY_CONFLICT
+    category: CONFLICT
+    retry: reconciliation_case
+  - code: QQ-STORAGE-7010
+    name: PROJECTION_VERSION_OR_SEQUENCE_REGRESSION
+    category: CONFLICT
+    retry: verified_replay_after_reread
   - code: QQ-RECOVERY-8001
     name: RECONCILIATION_DIFFERENCE
     category: CONFLICT
@@ -112,6 +128,26 @@ errors:
     name: ORDER_JOURNAL_CORRUPTED
     category: DATA_QUALITY
     retry: never_until_operator_repair
+  - code: QQ-RECOVERY-8003
+    name: PORTFOLIO_REPLAY_MISMATCH
+    category: DATA_QUALITY
+    retry: full_verified_ledger_replay_then_case
+  - code: QQ-RECOVERY-8004
+    name: RECONCILIATION_TRANSITION_INVALID
+    category: BUSINESS
+    retry: never_same_transition
+  - code: QQ-RECOVERY-8005
+    name: REPAIR_AUTHORIZATION_OR_EVIDENCE_STALE
+    category: SECURITY
+    retry: fresh_evidence_and_new_authorization
+  - code: QQ-RECOVERY-8006
+    name: REPAIR_HISTORY_MUTATION_FORBIDDEN
+    category: SECURITY
+    retry: never
+  - code: QQ-RECOVERY-8007
+    name: REPAIR_OUTCOME_UNKNOWN
+    category: UNKNOWN_OUTCOME
+    retry: reconcile_same_command_not_reapply
 governance:
   reuse_code: forbidden
   unknown_outcome_auto_retry: forbidden
@@ -119,4 +155,5 @@ governance:
 compatibility:
   version_2_additive_codes: [QQ-OMS-5001, QQ-STORAGE-7001, QQ-STORAGE-7003, QQ-STORAGE-7004, QQ-STORAGE-7006, QQ-RECOVERY-8002]
   version_3_additive_codes: [QQ-RISK-4003, QQ-RISK-4004, QQ-RISK-4005, QQ-RISK-4006, QQ-RISK-4007, QQ-RISK-4008, QQ-RISK-4009, QQ-RISK-4010, QQ-RISK-4011]
+  version_4_additive_codes: [QQ-STORAGE-7007, QQ-STORAGE-7008, QQ-STORAGE-7009, QQ-STORAGE-7010, QQ-RECOVERY-8003, QQ-RECOVERY-8004, QQ-RECOVERY-8005, QQ-RECOVERY-8006, QQ-RECOVERY-8007]
   existing_code_meanings_changed: false

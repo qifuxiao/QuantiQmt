@@ -1,0 +1,14 @@
+{
+  "cases": [
+    {
+      "name": "float_pnl",
+      "dto_index": 2,
+      "changes": {"dtos.2.after.realized_pnl": 195.5}
+    },
+    {
+      "name": "flat_position_has_cost",
+      "dto_index": 2,
+      "changes": {"dtos.2.after.cost_basis_total": "1.00"}
+    }
+  ]
+}

@@ -1,6 +1,6 @@
 catalog:
   id: CONTRACT-CATALOG
-  version: 3
+  version: 4
   status: accepted
 messages:
   - {name: strategy.submit_order_intent.v1, kind: command, owner: OrderApplication, schema: commands/strategy.submit_order_intent.v1.schema.json, status: active}
@@ -42,3 +42,11 @@ rules:
   active_requires_schema: true
   published_name_reuse: forbidden
   planned_message_must_be_activated_by_spec_change_task: true
+internal_contracts:
+  - {id: CONTRACT-LEDGER-ACCOUNTING-V1, schema: ledger/ledger-accounting.v1.schema.json, status: draft, owner: AccountLedger}
+  - {id: CONTRACT-PORTFOLIO-PROJECTION-V1, schema: portfolio/portfolio-projection.v1.schema.json, status: draft, owner: PortfolioProjection}
+  - {id: CONTRACT-RECONCILIATION-V1, schema: reconciliation/reconciliation.v1.schema.json, status: draft, owner: Reconciliation}
+internal_rules:
+  schema_required: true
+  schema_and_semantic_validation_required: true
+  dto_type_reuse: forbidden

@@ -1,0 +1,14 @@
+{
+  "cases": [
+    {
+      "name": "float_amount",
+      "dto_index": 5,
+      "changes": {"dtos.5.entries.0.amount": 1000.0}
+    },
+    {
+      "name": "illegal_debit_credit",
+      "dto_index": 5,
+      "changes": {"dtos.5.entries.0.direction": "LEFT"}
+    }
+  ]
+}

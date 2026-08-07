@@ -1,17 +1,78 @@
 workflow:
   id: WF-TRADE-ACCOUNTING
   input: broker.trade_reported.v1
-  correlation_key: trade_id
+  input_dto: CONTRACT-LEDGER-ACCOUNTING-V1.TradeAccountingRequest
+  outputs:
+    ledger: CONTRACT-LEDGER-ACCOUNTING-V1.LedgerTransaction
+    result: CONTRACT-LEDGER-ACCOUNTING-V1.PostResult
+    position: CONTRACT-PORTFOLIO-PROJECTION-V1.PositionProjectionChange
+  correlation_key: broker_account_trading_day_trade_id
+  bounded_deadline_required: true
   steps:
-    - {id: validate_and_deduplicate_trade, owner: OMS, unique_key: "broker+account+trading_day+trade_id"}
+    - id: validate_and_deduplicate_trade
+      owner: OMS
+      unique_key: "broker+account+trading_day+trade_id"
+      fingerprint: sha256_canonical_validated_broker_trade_payload
+      same_fingerprint: duplicate_no_op
+      different_fingerprint: QQ-STORAGE-7009_open_reconciliation_case
     - {id: update_order_and_publish_trade_recorded, owner: OMS, transaction: "Order + Trade + Outbox"}
-    - {id: post_balanced_ledger_transaction, owner: AccountLedger, failure: HALTED_AND_P0}
-    - {id: update_position_projection, owner: PortfolioProjection, duplicate_safe: true}
+    - id: resolve_account_currency_and_internal_order
+      owner: AccountLedger
+      unresolved: fail_closed_and_reconciliation_evidence
+    - id: build_deterministic_balanced_transaction
+      owner: AccountLedger
+      contract: CONTRACT-LEDGER-ACCOUNTING-V1
+      cost_basis_method: WEIGHTED_AVERAGE_V1
+      rounding_policy: CURRENCY_MINOR_UNIT_HALF_EVEN_V1
+      failure: QQ-STORAGE-7005_or_specific_validation_code
+    - id: append_ledger_and_outbox
+      owner: AccountLedger
+      transaction: "Inbox + LedgerTransaction + LedgerEntries + Outbox + Audit"
+      expected_sequence: required
+      uncertain_commit: query_same_transaction_and_idempotency_identity
+      partial_write: rollback_all
+    - id: update_position_projection
+      owner: PortfolioProjection
+      transaction: "ProjectionJournal + Position CAS + Portfolio CAS + Checkpoint + Outbox"
+      duplicate_safe: true
+      versions: increment_exactly_once
+      sequence: contiguous_internal_ledger_sequence
     - {id: publish_risk_snapshot_change, owner: PortfolioProjection}
   invariants:
     - broker_fact_is_never_rolled_back
     - ledger_debits_equal_credits_per_currency
     - downstream_failure_replays_from_inbox
+    - ledger_and_projection_history_are_append_only
+    - broker_position_never_overwrites_internal_projection
+    - decimal_float_is_forbidden
+    - duplicate_trade_never_increments_ledger_position_or_portfolio_version
+  identity:
+    transaction_namespace_uuid: 6ea9f94d-16c3-5c7a-8c4f-ec1883388613
+    transaction_id: uuid5_namespace_and_canonical_trade_identity
+    entry_id: uuid5_transaction_id_and_canonical_zero_based_entry_ordinal
+    idempotency_key: "broker|account_id|trading_day|trade_id"
+  arrival:
+    broker_sequence: reconciliation_evidence_not_posting_order
+    unseen_out_of_order_trade: post_at_next_internal_ledger_sequence
+    unresolved_order_or_mapping: do_not_post_open_or_update_case
+    close_exceeds_internal_position: do_not_post_QQ-RECOVERY-8001
+  posting:
+    buy: [debit_position_cost, debit_nonzero_commission_fee_tax, credit_cash_total]
+    sell: [debit_cash_net, debit_nonzero_commission_fee_tax, credit_released_position_cost, post_trade_pnl_directionally]
+    zero_components: omitted
+    full_close: quantity_zero_cost_zero_average_cost_null
+    realized_pnl: cumulative_trade_pnl_minus_commission_fee_tax
+  availability:
+    policy_source: versioned_account_instrument_configuration
+    implementation_default: forbidden
+    IMMEDIATE_V1: "BUY and SELL apply quantity delta to available quantity; SELL requires sufficient availability"
+    T_PLUS_ONE_V1: "BUY leaves availability unchanged; SELL decrements availability; verified session release is separately checkpointed and idempotent"
+    broker_available_quantity: reconciliation_evidence_only
+  retry:
+    semantic_failure: never
+    version_conflict: reread_then_bounded_retry_with_same_input_and_deadline
+    rolled_back_dependency_failure: bounded_same_identity_retry
+    commit_unknown: query_same_identity_never_generate_replacement
   order_merge:
     fact_identity: "broker+account_id+trading_day+trade_id"
     fact_identity_required: true
