@@ -1,10 +1,10 @@
 ---
 id: TASK-018
 title: Complete Ledger, Portfolio, and Reconciliation L4 contracts
-status: active
+status: completed
 depends_on: [TASK-046]
 spec_refs: [INV-CONSISTENCY, STORAGE-SOT, STORAGE-LEDGER-PORTFOLIO, SM-ACCOUNT, SM-PORTFOLIO, SM-RECONCILIATION-CASE, CONTRACT-BROKER-TRADE-V1, CONTRACT-LEDGER-TRADE-POSTED-V1, CONTRACT-PORTFOLIO-POSITION-CHANGED-V1, CONTRACT-LEDGER-ACCOUNTING-V1, CONTRACT-PORTFOLIO-PROJECTION-V1, CONTRACT-RECONCILIATION-V1, PORTS-LEDGER-PORTFOLIO, REPO-LEDGER-PORTFOLIO, WF-TRADE-ACCOUNTING, WF-RECONCILIATION-REPAIR]
-allowed_paths: [spec/manifest.yaml, spec/contracts/**, spec/interfaces/**, spec/state-machines/**, spec/workflows/**, spec/repositories/**, spec/storage/**, tests/contract/messages/**, tasks/backlog/TASK-007-ledger-portfolio.md, tasks/active/TASK-018-ledger-portfolio-contracts.md, tasks/index.yaml]
+allowed_paths: [spec/manifest.yaml, spec/contracts/**, spec/interfaces/**, spec/state-machines/**, spec/workflows/**, spec/repositories/**, spec/storage/**, tests/contract/messages/**, tasks/backlog/TASK-007-ledger-portfolio.md, tasks/active/TASK-018-ledger-portfolio-contracts.md, tasks/completed/TASK-018-ledger-portfolio-contracts.md, tasks/index.yaml]
 forbidden_paths: [src/**, tests/unit/**, tests/property/**, tests/integration/**, migrations/**]
 verification:
   commands:
@@ -12,11 +12,29 @@ verification:
     - poetry run pytest tests/spec tests/contract
 delivery:
   schema_version: 1
-  contract_status: draft
-  implementation_status: in_progress
+  contract_status: accepted
+  implementation_status: merged
   acceptance_status: passed
-  review_status: pending
+  review_status: approved
   release_status: prohibited
+  completion_evidence:
+    mode: governance_closeout_after_independent_review
+    change_pr: https://github.com/qifuxiao/QuantiQmt/pull/70
+    reviewed_head_sha: 847e4f01d20008cf542b04f368208483ca08509d
+    review_verdict: APPROVE
+    reviewer: qifuxiao
+    evidence_url: https://github.com/qifuxiao/QuantiQmt/pull/70#pullrequestreview-4898813275
+    merge_commit_sha: e23a48767af138a061146f510e58885343c9e3a7
+    ci_evidence: >-
+      Reviewed Head 847e4f01d20008cf542b04f368208483ca08509d passed 4/4 GitHub CI:
+      quality jobs 93515143258 and 93515129866; persistence-postgresql jobs
+      93515143227 and 93515129870.
+    human_authorization_evidence: >-
+      2026-08-11 human authorization added
+      tasks/completed/TASK-018-ledger-portfolio-contracts.md exactly to TASK-018 allowed_paths
+      solely to record PR #70 formal Review, CI, and merge evidence and perform the
+      TASK-018 active-to-completed closeout; it does not activate or unlock TASK-007,
+      TASK-019, TASK-020, TASK-022, or any other task and does not authorize release.
 ---
 
 # Objective
@@ -66,6 +84,13 @@ delivery:
 - TASK-018 remains active with draft/in-progress/pending/prohibited delivery; these fixes are awaiting independent Review and contain no runtime or migration implementation.
 - Review P1 after head `32acd040cb97d62d9a29996cd04a6a983b88dc8c` is covered by a TRADE-only resolved Order UUID gate: public Broker v1 remains nullable/optional, while internal request/transaction Schema and semantic validation reject missing, null, non-canonical, invalid, or unresolved Order identity. `WF-TRADE-ACCOUNTING` machine-freezes reconciliation-only output and forbids Ledger/Portfolio output for unresolved trades; repair routes remain independent of Broker Order identity.
 - Review P2 after head `9889d8afbda743ac729d4e26224f3eadc67d0bed` adds a complete sequence-4 `COMPENSATING_FACT` fixture with canonical identity/checksum chain and balanced entries. Direct Schema/semantic tests cover the valid route plus source-Trade injection, fact/kind mismatch, missing/null compensation identity, checksum mismatch and unbalanced entries; no frozen contract semantics changed.
+
+## Closeout evidence
+
+- PR #70 was independently reviewed and formally approved by `qifuxiao` at reviewed Head `847e4f01d20008cf542b04f368208483ca08509d`: https://github.com/qifuxiao/QuantiQmt/pull/70#pullrequestreview-4898813275.
+- PR #70 merged as `e23a48767af138a061146f510e58885343c9e3a7`; the reviewed Head passed 4/4 GitHub CI checks (quality x2 and persistence-postgresql x2).
+- The independent Review recorded 324 passing specification/contract tests and all findings closed.
+- The 2026-08-11 human closeout authorization is limited to this governance transition. TASK-007 and TASK-019 remain blocked; TASK-020 and TASK-022 remain backlog/ready and unactivated; release remains prohibited.
 
 ## Review focus
 
