@@ -47,6 +47,24 @@ delivery:
 - `CONTRACT-RECONCILIATION-V1`、`SM-RECONCILIATION-CASE` 与 `WF-RECONCILIATION-REPAIR` 冻结 evidence/owner/deadline/approval/audit、fencing、append-only repair 和 UNKNOWN。
 - `tests/contract/messages/test_ledger_portfolio_contracts.py` 及三组 internal fixtures 机器验证正例覆盖和最低负例矩阵；TASK-007 保持 blocked 且引用全部冻结契约。
 
+## Round-two acceptance evidence
+
+- Account taxonomy and deterministic resolution are executable in JSON Schema and semantic fixtures, including inactive, duplicate, classification/type and instrument mismatch rejection.
+- Broker Trade source fingerprint, repair fingerprint, UTF-8/NFC canonical JSON, fixed reference vectors, fee policy and fixed entry ordinals are executable contract tests.
+- Explicit settlement-release request/result/Port semantics cover IMMEDIATE/T+1, verified calendar/checkpoint, CAS/fencing, duplicate, out-of-order, excess release and exact Position/Portfolio version increments.
+- V1 snapshot is single-currency; projection-state checksum excludes random/valuation envelope, is reconstructed from Ledger facts, and replay/invalid-snapshot fallback is machine verified.
+- Repair facts discriminate quantity, monetary and compensating facts from Trade, remain append-only/atomic, and bind approval/evidence/fencing and original UNKNOWN identity.
+- Each operation has a schema-exhaustive outcome/code/reconciliation matrix; `QQ-STORAGE-7006` retains its existing meaning and deterministic collision uses additive `QQ-STORAGE-7011`.
+- Fixture version chain is `3 -> 4 -> 5`; semantic/schema negative matrices reject every Review-requested prohibited state.
+
+## Review remediation evidence for head after 51011b395ea2950be21b2678ee6372b41492b0a6
+
+- `LedgerTransaction.transaction_kind` now provides schema-exclusive `TRADE`, `ADJUSTMENT`, and `COMPENSATING_FACT` routes. Repair facts bind canonical account, Case/version, repair command/fingerprint, action/fact/evidence, source checkpoint, authorization/fencing, and a verified repair-fact checksum; fixtures reject missing bindings, fabricated Trades, repair fields on Trades, and checksum mismatch.
+- Canonical `account_id` is used by source Trade, accounting request, account selections, Ledger accounts, transactions, repository uniqueness, storage and workflow. Contract fixtures independently reject request, selection, account and transaction mismatches and duplicate identities.
+- Source Trade now requires an independently typed fee amount/currency/rounding tuple. Fee is included in the source/request fingerprints and independently posted under `BROKER_CHARGES_V1`; fixtures reject missing/float/wrong-currency/wrong-rounding/policy-mismatched fees.
+- `LedgerEntry` is frozen as an embedded-only `LedgerTransaction.entries` structure and is not independently routed by the top-level Schema or Port DTO list.
+- TASK-018 remains active with draft/in-progress/pending/prohibited delivery; these fixes are awaiting independent Review and contain no runtime or migration implementation.
+
 ## Review focus
 
 - Ledger append-only 是否不可覆盖。

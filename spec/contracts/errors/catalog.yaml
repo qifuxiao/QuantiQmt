@@ -120,6 +120,22 @@ errors:
     name: PROJECTION_VERSION_OR_SEQUENCE_REGRESSION
     category: CONFLICT
     retry: verified_replay_after_reread
+  - code: QQ-STORAGE-7011
+    name: DETERMINISTIC_IDENTITY_COLLISION
+    category: DATA_QUALITY
+    retry: never_same_payload_open_reconciliation_case
+  - code: QQ-STORAGE-7012
+    name: LEDGER_POST_OUTCOME_UNKNOWN
+    category: UNKNOWN_OUTCOME
+    retry: reconcile_same_transaction_and_idempotency_key
+  - code: QQ-STORAGE-7013
+    name: PROJECTION_APPLY_OUTCOME_UNKNOWN
+    category: UNKNOWN_OUTCOME
+    retry: reconcile_same_projection_operation
+  - code: QQ-STORAGE-7014
+    name: SETTLEMENT_RELEASE_OUTCOME_UNKNOWN
+    category: UNKNOWN_OUTCOME
+    retry: reconcile_same_release_id_and_idempotency_key
   - code: QQ-RECOVERY-8001
     name: RECONCILIATION_DIFFERENCE
     category: CONFLICT
@@ -156,4 +172,5 @@ compatibility:
   version_2_additive_codes: [QQ-OMS-5001, QQ-STORAGE-7001, QQ-STORAGE-7003, QQ-STORAGE-7004, QQ-STORAGE-7006, QQ-RECOVERY-8002]
   version_3_additive_codes: [QQ-RISK-4003, QQ-RISK-4004, QQ-RISK-4005, QQ-RISK-4006, QQ-RISK-4007, QQ-RISK-4008, QQ-RISK-4009, QQ-RISK-4010, QQ-RISK-4011]
   version_4_additive_codes: [QQ-STORAGE-7007, QQ-STORAGE-7008, QQ-STORAGE-7009, QQ-STORAGE-7010, QQ-RECOVERY-8003, QQ-RECOVERY-8004, QQ-RECOVERY-8005, QQ-RECOVERY-8006, QQ-RECOVERY-8007]
+  version_5_additive_codes: [QQ-STORAGE-7011, QQ-STORAGE-7012, QQ-STORAGE-7013, QQ-STORAGE-7014]
   existing_code_meanings_changed: false

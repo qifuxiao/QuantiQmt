@@ -23,8 +23,12 @@ machine:
   invariants:
     - "projection is derivable from ledger and trade facts"
     - "only READY snapshots may approve increased risk"
-    - "position_version and portfolio_version never regress and increment exactly once per accepted source transaction"
+    - "position_version and portfolio_version never regress and increment exactly once per accepted Trade projection or settlement release"
     - "source ledger sequence is contiguous during verified replay"
+    - "settlement release has quantity_delta zero, preserves the verified Ledger checkpoint, and requires verified TradingCalendar/session evidence"
+    - "same settlement release identity is a no-op; conflict, out-of-order session, excess quantity, stale fencing or CAS mismatch is fail-closed"
+    - "COMPLETE/risk-usable snapshot has one currency and every Position valuation is FRESH"
+    - "projection-state checksum excludes random snapshot/valuation envelope and market-only fields"
     - "invalid snapshots are discarded and never silently accepted"
     - "Broker position is reconciliation evidence and never overwrites projection history"
   failures:

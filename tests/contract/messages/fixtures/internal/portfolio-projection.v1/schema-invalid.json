@@ -1,14 +1,10 @@
 {
   "cases": [
-    {
-      "name": "float_pnl",
-      "dto_index": 2,
-      "changes": {"dtos.2.after.realized_pnl": 195.5}
-    },
-    {
-      "name": "flat_position_has_cost",
-      "dto_index": 2,
-      "changes": {"dtos.2.after.cost_basis_total": "1.00"}
-    }
+    {"name":"float_pnl","dto_index":2,"changes":{"dtos.2.after.realized_pnl":77.25}},
+    {"name":"flat_position_has_cost","dto_index":0,"changes":{"dtos.0.before.cost_basis_total":"1.00"}},
+    {"name":"unverified_settlement_calendar","dto_index":4,"changes":{"dtos.4.calendar_evidence.verification_status":"UNVERIFIED"}},
+    {"name":"verified_replay_missing_checksum","dto_index":11,"changes":{"dtos.11.actual_projection_state_checksum":null}},
+    {"name":"complete_snapshot_not_risk_usable","dto_index":9,"changes":{"dtos.9.risk_usable":false}},
+    {"name":"settlement_release_changes_quantity","dto_index":5,"changes":{"dtos.5.effect.quantity_delta":1}}
   ]
 }

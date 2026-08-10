@@ -29,6 +29,8 @@ TASK-018 已在 draft 契约中冻结 Ledger account model、entry taxonomy、�
 
 ## Non-goals
 
+When a human later activates this task, implementation must use the frozen semantics without invention: exact active account selection by canonical `(scope_id, account_id, currency, account_type, instrument_id)`, authoritative Broker Trade/NFC fingerprints including independently typed fee evidence and fixed entry slots, explicit T+1 settlement-release DTO/result with unchanged Ledger checkpoint and exact version increments, single-currency snapshots, Ledger-replayable projection-state checksum, and discriminated adjustment/compensating facts bound to Case/command/checksum without fake Trades. LedgerEntry remains embedded-only and the operation-specific Result/error matrices are authoritative. TASK-007 remains blocked and performs no work in TASK-018.
+
 - 不直接消费 Broker 持仓覆盖内部历史。
 - 不修改 OMS Order 状态。
 - 不实现 Strategy attribution 的业务策略规则，除非 TASK-018 已定义。

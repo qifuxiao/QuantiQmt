@@ -1,5 +1,6 @@
 {
-  "coverage": ["DIFFERENCE", "APPROVAL", "APPEND_ONLY_REPAIR", "AUDIT", "UNKNOWN"],
+  "coverage": ["DIFFERENCE", "P1_MANUAL_APPROVAL", "P2_AUTOMATIC_POLICY", "QUANTITY_CORRECTION", "MONETARY_ADJUSTMENT", "APPEND_ONLY_REPAIR", "AUDIT", "UNKNOWN"],
+  "reference_vectors": {"repair_command_fingerprint": "2cc382a6617fbdb022090c1782607b9aa6ba3cf2c8051cbc51d732b4898b2c8a"},
   "dtos": [
     {
       "dto_type": "RECONCILIATION_CASE",
@@ -27,7 +28,7 @@
         "evidence_id": "aaaaaaaa-3333-4333-8333-aaaaaaaaaaaa",
         "case_version": 3,
         "internal_snapshot_id": "99999999-9999-4999-8999-999999999999",
-        "internal_checksum": "321ebdc69cedc2275d812a6107f358d0f166f148c0f46d654ad75dfed8b0d777",
+        "internal_checksum": "f1397f6e29d477bbf70cbc2c6049e008d1dc7acc220e2671daaafc181e41c696",
         "internal_checkpoint": 2,
         "broker_snapshot_id": "broker-position-snapshot-42",
         "broker_observed_at": "2026-08-07T01:03:10Z",
@@ -53,6 +54,7 @@
       "transition_id": "aaaaaaaa-5555-4555-8555-aaaaaaaaaaaa",
       "case_id": "fcdc7233-da35-513d-8408-b837162f7158",
       "expected_case_version": 3,
+      "resulting_case_version": 4,
       "from_state": "APPROVED",
       "to_state": "APPLYING",
       "event": "Apply",
@@ -67,6 +69,7 @@
       "transition_id": "aaaaaaaa-6666-4666-8666-aaaaaaaaaaaa",
       "case_id": "fcdc7233-da35-513d-8408-b837162f7158",
       "expected_case_version": 4,
+      "resulting_case_version": 5,
       "from_state": "APPLYING",
       "to_state": "UNKNOWN",
       "event": "ApplyUncertain",
@@ -80,6 +83,7 @@
       "schema_version": 1,
       "command_id": "aaaaaaaa-7777-4777-8777-aaaaaaaaaaaa",
       "idempotency_key": "repair|fcdc7233-da35-513d-8408-b837162f7158|3",
+      "command_fingerprint": "2cc382a6617fbdb022090c1782607b9aa6ba3cf2c8051cbc51d732b4898b2c8a",
       "case_id": "fcdc7233-da35-513d-8408-b837162f7158",
       "case_key": {
         "broker": "qmt",
@@ -88,6 +92,7 @@
         "scope_id": "TRADING:acct-1",
         "reason_code": "POSITION_QUANTITY_MISMATCH"
       },
+      "case_severity": "P1",
       "expected_case_version": 3,
       "expected_portfolio_version": 2,
       "fencing_token": 9,
@@ -96,7 +101,7 @@
         "evidence_id": "aaaaaaaa-3333-4333-8333-aaaaaaaaaaaa",
         "case_version": 3,
         "internal_snapshot_id": "99999999-9999-4999-8999-999999999999",
-        "internal_checksum": "321ebdc69cedc2275d812a6107f358d0f166f148c0f46d654ad75dfed8b0d777",
+        "internal_checksum": "f1397f6e29d477bbf70cbc2c6049e008d1dc7acc220e2671daaafc181e41c696",
         "internal_checkpoint": 2,
         "broker_snapshot_id": "broker-position-snapshot-42",
         "broker_observed_at": "2026-08-07T01:03:10Z",
@@ -128,11 +133,49 @@
           "target": "LEDGER",
           "payload": {
             "fact_id": "bbbbbbbb-1111-4111-8111-bbbbbbbbbbbb",
-            "fact_type": "LEDGER_ADJUSTMENT",
+            "fact_type": "QUANTITY_CORRECTION",
             "reason_code": "APPROVED_POSITION_ADJUSTMENT",
+            "source_evidence": {
+              "evidence_id": "aaaaaaaa-3333-4333-8333-aaaaaaaaaaaa",
+              "internal_checkpoint": 2,
+              "broker_snapshot_id": "broker-position-snapshot-42",
+              "broker_sequence": 42
+            },
+            "quantity_correction": {
+              "instrument_id": "600000.XSHG",
+              "currency": "CNY",
+              "quantity_delta": -10,
+              "cost_basis_delta": "-100.00"
+            },
+            "monetary_adjustment": null,
+            "compensates_fact_id": null,
             "entries": [
               {"ledger_account_id": "22222222-2222-4222-8222-222222222222", "direction": "CREDIT", "amount": "100.00", "currency": "CNY", "instrument_id": "600000.XSHG"},
               {"ledger_account_id": "55555555-5555-4555-8555-555555555555", "direction": "DEBIT", "amount": "100.00", "currency": "CNY", "instrument_id": null}
+            ]
+          },
+          "expected_source_version": 2
+        },
+        {
+          "action_id": "bbbbbbbb-3333-4333-8333-bbbbbbbbbbbb",
+          "operation": "APPEND_ADJUSTMENT",
+          "target": "LEDGER",
+          "payload": {
+            "fact_id": "bbbbbbbb-4444-4444-8444-bbbbbbbbbbbb",
+            "fact_type": "MONETARY_ADJUSTMENT",
+            "reason_code": "APPROVED_CASH_ADJUSTMENT",
+            "source_evidence": {
+              "evidence_id": "aaaaaaaa-3333-4333-8333-aaaaaaaaaaaa",
+              "internal_checkpoint": 2,
+              "broker_snapshot_id": "broker-position-snapshot-42",
+              "broker_sequence": 42
+            },
+            "quantity_correction": null,
+            "monetary_adjustment": {"currency": "CNY", "amount_delta": "2.00"},
+            "compensates_fact_id": null,
+            "entries": [
+              {"ledger_account_id": "11111111-1111-4111-8111-111111111111", "direction": "DEBIT", "amount": "2.00", "currency": "CNY", "instrument_id": null},
+              {"ledger_account_id": "55555555-5555-4555-8555-555555555555", "direction": "CREDIT", "amount": "2.00", "currency": "CNY", "instrument_id": null}
             ]
           },
           "expected_source_version": 2
@@ -145,14 +188,26 @@
       "dto_type": "REPAIR_RESULT",
       "schema_version": 1,
       "command_id": "aaaaaaaa-7777-4777-8777-aaaaaaaaaaaa",
+      "idempotency_key": "repair|fcdc7233-da35-513d-8408-b837162f7158|3",
+      "command_fingerprint": "2cc382a6617fbdb022090c1782607b9aa6ba3cf2c8051cbc51d732b4898b2c8a",
       "case_id": "fcdc7233-da35-513d-8408-b837162f7158",
       "outcome": "UNKNOWN",
-      "case_version": 4,
+      "case_version": 5,
       "appended_fact_ids": [],
       "failure_code": "QQ-RECOVERY-8007",
       "reconciliation_required": true,
       "audit_id": "bbbbbbbb-2222-4222-8222-bbbbbbbbbbbb",
       "completed_at": "2026-08-07T01:04:02Z"
+    },
+    {
+      "dto_type":"REPAIR_COMMAND","schema_version":1,"command_id":"bbbbbbbb-5555-4555-8555-bbbbbbbbbbbb","idempotency_key":"repair|p2-auto|snapshot-invalid|3","command_fingerprint":"cec064dd63d809b2a2ad959ffb3377897449c8abfbbc2672c3902e445744bbe5","case_id":"fcdc7233-da35-513d-8408-b837162f7158",
+      "case_key":{"broker":"qmt","account_id":"acct-1","trading_day":"2026-08-07","scope_id":"TRADING:acct-1","reason_code":"POSITION_QUANTITY_MISMATCH"},
+      "case_severity":"P2","expected_case_version":3,"expected_portfolio_version":2,"fencing_token":10,"mode":"AUTOMATIC",
+      "evidence":{"evidence_id":"aaaaaaaa-3333-4333-8333-aaaaaaaaaaaa","case_version":3,"internal_snapshot_id":"99999999-9999-4999-8999-999999999999","internal_checksum":"f1397f6e29d477bbf70cbc2c6049e008d1dc7acc220e2671daaafc181e41c696","internal_checkpoint":2,"broker_snapshot_id":"broker-position-snapshot-42","broker_observed_at":"2026-08-07T01:03:10Z","broker_sequence":42,"captured_at":"2026-08-07T01:03:11Z","expires_at":"2026-08-07T01:08:11Z"},
+      "authorization":{"principal_id":"reconciliation-engine","role":"RECONCILIATION_ENGINE","authorized":true,"policy_version":"repair-policy-v1","fencing_token":10,"authorized_at":"2026-08-07T01:03:59Z"},
+      "approval":null,
+      "actions":[{"action_id":"bbbbbbbb-6666-4666-8666-bbbbbbbbbbbb","operation":"APPEND_ADJUSTMENT","target":"LEDGER","payload":{"fact_id":"bbbbbbbb-7777-4777-8777-bbbbbbbbbbbb","fact_type":"MONETARY_ADJUSTMENT","reason_code":"POLICY_WHITELISTED_ADJUSTMENT","source_evidence":{"evidence_id":"aaaaaaaa-3333-4333-8333-aaaaaaaaaaaa","internal_checkpoint":2,"broker_snapshot_id":"broker-position-snapshot-42","broker_sequence":42},"quantity_correction":null,"monetary_adjustment":{"currency":"CNY","amount_delta":"1.00"},"compensates_fact_id":null,"entries":[{"ledger_account_id":"11111111-1111-4111-8111-111111111111","direction":"DEBIT","amount":"1.00","currency":"CNY","instrument_id":null},{"ledger_account_id":"55555555-5555-4555-8555-555555555555","direction":"CREDIT","amount":"1.00","currency":"CNY","instrument_id":null}]},"expected_source_version":2}],
+      "deadline_at":"2026-08-07T01:05:00Z","requested_at":"2026-08-07T01:04:01Z"
     }
   ]
 }

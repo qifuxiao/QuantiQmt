@@ -26,7 +26,9 @@ machine:
     - "P0 and P1 cannot transition directly from OPEN to RESOLVED"
     - "repair never deletes or overwrites historical facts"
     - "every transition increments case_version exactly once and appends immutable audit evidence"
+    - "CaseTransition.resulting_case_version equals expected_case_version plus one and RepairResult.case_version equals the last committed transition version"
     - "UNKNOWN is fail-closed and can only leave after same-command outcome reconciliation"
+    - "UNKNOWN RepairResult uses QQ-RECOVERY-8007, reconciliation_required true, and the original command/idempotency/fingerprint identity"
     - "approval, evidence, expected versions, authorization and fencing are validated before APPLYING"
   failures:
     illegal_transition: QQ-RECOVERY-8004

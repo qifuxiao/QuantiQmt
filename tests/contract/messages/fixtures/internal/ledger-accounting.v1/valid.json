@@ -1,168 +1,65 @@
 {
-  "coverage": ["BUY", "COMMISSION", "TAX", "PARTIAL_CLOSE"],
+  "coverage": ["BUY", "COMMISSION", "FEE", "TAX", "PARTIAL_CLOSE", "OUT_OF_ORDER", "ADJUSTMENT_FACT"],
+  "reference_vectors": {
+    "source_fingerprint": "11ee92a96f046450e076b88c6594af8ac331beb8dec5b0450d643225547ebe2b",
+    "unicode_nfc_source_fingerprint": "d117c067e0990754b0467d0c2ff619a976e4921dff312657d6de39605c10e68d",
+    "accounting_request_fingerprint": "e8c1aeabf0aaeffcd662e78d163ca989f5e5f6205d6d80dddbc44d1e3977df4d"
+  },
   "dtos": [
+    {"dto_type":"LEDGER_ACCOUNT","schema_version":1,"ledger_account_id":"11111111-1111-4111-8111-111111111111","account_code":"CASH.CNY","classification":"ASSET","account_type":"CASH","normal_balance":"DEBIT","scope_id":"TRADING:acct-1","account_id":"acct-1","currency":"CNY","instrument_id":null,"active":true,"created_at":"2026-08-07T01:00:00Z"},
+    {"dto_type":"LEDGER_ACCOUNT","schema_version":1,"ledger_account_id":"22222222-2222-4222-8222-222222222222","account_code":"POSITION.600000.XSHG.CNY","classification":"ASSET","account_type":"POSITION_COST","normal_balance":"DEBIT","scope_id":"TRADING:acct-1","account_id":"acct-1","currency":"CNY","instrument_id":"600000.XSHG","active":true,"created_at":"2026-08-07T01:00:00Z"},
+    {"dto_type":"LEDGER_ACCOUNT","schema_version":1,"ledger_account_id":"33333333-3333-4333-8333-333333333333","account_code":"EXPENSE.COMMISSION.CNY","classification":"EXPENSE","account_type":"COMMISSION_EXPENSE","normal_balance":"DEBIT","scope_id":"TRADING:acct-1","account_id":"acct-1","currency":"CNY","instrument_id":null,"active":true,"created_at":"2026-08-07T01:00:00Z"},
+    {"dto_type":"LEDGER_ACCOUNT","schema_version":1,"ledger_account_id":"44444444-4444-4444-8444-444444444444","account_code":"EXPENSE.TAX.CNY","classification":"EXPENSE","account_type":"TAX_EXPENSE","normal_balance":"DEBIT","scope_id":"TRADING:acct-1","account_id":"acct-1","currency":"CNY","instrument_id":null,"active":true,"created_at":"2026-08-07T01:00:00Z"},
+    {"dto_type":"LEDGER_ACCOUNT","schema_version":1,"ledger_account_id":"55555555-5555-4555-8555-555555555555","account_code":"INCOME.REALIZED_PNL.CNY","classification":"INCOME","account_type":"REALIZED_PNL","normal_balance":"CREDIT","scope_id":"TRADING:acct-1","account_id":"acct-1","currency":"CNY","instrument_id":null,"active":true,"created_at":"2026-08-07T01:00:00Z"},
+    {"dto_type":"LEDGER_ACCOUNT","schema_version":1,"ledger_account_id":"66666666-1111-4666-8666-111111111111","account_code":"EXPENSE.FEE.CNY","classification":"EXPENSE","account_type":"FEE_EXPENSE","normal_balance":"DEBIT","scope_id":"TRADING:acct-1","account_id":"acct-1","currency":"CNY","instrument_id":null,"active":true,"created_at":"2026-08-07T01:00:00Z"},
     {
-      "dto_type": "LEDGER_ACCOUNT",
-      "schema_version": 1,
-      "ledger_account_id": "11111111-1111-4111-8111-111111111111",
-      "account_code": "CASH.CNY",
-      "classification": "ASSET",
-      "account_type": "CASH",
-      "normal_balance": "DEBIT",
-      "scope_id": "TRADING:acct-1",
-      "trading_account_id": "acct-1",
-      "currency": "CNY",
-      "instrument_id": null,
-      "active": true,
-      "created_at": "2026-08-07T01:00:00Z"
-    },
-    {
-      "dto_type": "LEDGER_ACCOUNT",
-      "schema_version": 1,
-      "ledger_account_id": "22222222-2222-4222-8222-222222222222",
-      "account_code": "POSITION.600000.XSHG.CNY",
-      "classification": "ASSET",
-      "account_type": "POSITION_COST",
-      "normal_balance": "DEBIT",
-      "scope_id": "TRADING:acct-1",
-      "trading_account_id": "acct-1",
-      "currency": "CNY",
-      "instrument_id": "600000.XSHG",
-      "active": true,
-      "created_at": "2026-08-07T01:00:00Z"
-    },
-    {
-      "dto_type": "LEDGER_ACCOUNT",
-      "schema_version": 1,
-      "ledger_account_id": "33333333-3333-4333-8333-333333333333",
-      "account_code": "EXPENSE.COMMISSION.CNY",
-      "classification": "EXPENSE",
-      "account_type": "COMMISSION_EXPENSE",
-      "normal_balance": "DEBIT",
-      "scope_id": "TRADING:acct-1",
-      "trading_account_id": "acct-1",
-      "currency": "CNY",
-      "instrument_id": null,
-      "active": true,
-      "created_at": "2026-08-07T01:00:00Z"
-    },
-    {
-      "dto_type": "LEDGER_ACCOUNT",
-      "schema_version": 1,
-      "ledger_account_id": "44444444-4444-4444-8444-444444444444",
-      "account_code": "EXPENSE.TAX.CNY",
-      "classification": "EXPENSE",
-      "account_type": "TAX_EXPENSE",
-      "normal_balance": "DEBIT",
-      "scope_id": "TRADING:acct-1",
-      "trading_account_id": "acct-1",
-      "currency": "CNY",
-      "instrument_id": null,
-      "active": true,
-      "created_at": "2026-08-07T01:00:00Z"
-    },
-    {
-      "dto_type": "LEDGER_ACCOUNT",
-      "schema_version": 1,
-      "ledger_account_id": "55555555-5555-4555-8555-555555555555",
-      "account_code": "INCOME.REALIZED_PNL.CNY",
-      "classification": "INCOME",
-      "account_type": "REALIZED_PNL",
-      "normal_balance": "CREDIT",
-      "scope_id": "TRADING:acct-1",
-      "trading_account_id": "acct-1",
-      "currency": "CNY",
-      "instrument_id": null,
-      "active": true,
-      "created_at": "2026-08-07T01:00:00Z"
-    },
-    {
-      "dto_type": "LEDGER_TRANSACTION",
-      "schema_version": 1,
-      "transaction_id": "d7efec15-2bd2-5461-8ea9-363ae4cee625",
-      "idempotency_key": "qmt|acct-1|2026-08-07|trade-buy-1",
-      "source_trade": {
-        "broker": "qmt",
-        "account_id": "acct-1",
-        "trading_day": "2026-08-07",
-        "trade_id": "trade-buy-1",
-        "order_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
-        "instrument_id": "600000.XSHG",
-        "side": "BUY",
-        "position_effect": "OPEN",
-        "price": "10.00",
-        "quantity": 100,
-        "commission": "1.00",
-        "tax": "0",
-        "trade_time": "2026-08-07T01:01:00Z",
-        "received_at": "2026-08-07T01:01:01Z",
-        "broker_sequence": 10
-      },
-      "source_fingerprint": "95e033fee14fd2e1b96fcdb6c086394ae5e7a0c80af4ffe4cc79657204f22f4f",
-      "scope_id": "TRADING:acct-1",
-      "currency": "CNY",
-      "entries": [
-        {"entry_id": "c70c23e0-48d3-5464-a27b-fd2fb583e1f5", "ledger_account_id": "22222222-2222-4222-8222-222222222222", "entry_type": "POSITION_COST", "direction": "DEBIT", "amount": "1000.00", "currency": "CNY", "instrument_id": "600000.XSHG", "occurred_at": "2026-08-07T01:01:00Z"},
-        {"entry_id": "e96ef6ef-25b5-59d8-b996-ed8c02998d36", "ledger_account_id": "33333333-3333-4333-8333-333333333333", "entry_type": "COMMISSION", "direction": "DEBIT", "amount": "1.00", "currency": "CNY", "instrument_id": null, "occurred_at": "2026-08-07T01:01:00Z"},
-        {"entry_id": "94e40e6c-fc0f-5a76-a396-783abd346bcf", "ledger_account_id": "11111111-1111-4111-8111-111111111111", "entry_type": "CASH", "direction": "CREDIT", "amount": "1001.00", "currency": "CNY", "instrument_id": null, "occurred_at": "2026-08-07T01:01:00Z"}
+      "dto_type":"TRADE_ACCOUNTING_REQUEST","schema_version":1,
+      "source_trade":{"broker":"qmt","account_id":"acct-1","trading_day":"2026-08-07","trade_id":"trade-buy-1","order_id":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa","client_order_id":"client-buy-1","broker_order_id":"broker-buy-1","instrument_id":"600000.XSHG","side":"BUY","position_effect":"OPEN","price":"10.00","quantity":100,"commission":"1.00","fee":{"amount":"0.25","currency":"CNY","rounding_policy_version":"CURRENCY_MINOR_UNIT_HALF_EVEN_V1"},"tax":"0","trade_time":"2026-08-07T01:01:00Z","broker_sequence":10,"received_at":"2026-08-07T01:01:01Z"},
+      "source_fingerprint":"11ee92a96f046450e076b88c6594af8ac331beb8dec5b0450d643225547ebe2b","request_fingerprint":"e8c1aeabf0aaeffcd662e78d163ca989f5e5f6205d6d80dddbc44d1e3977df4d","idempotency_key":"qmt|acct-1|2026-08-07|trade-buy-1","scope_id":"TRADING:acct-1","account_id":"acct-1","currency":"CNY","cost_basis_method":"WEIGHTED_AVERAGE_V1","accounting_policy_version":"TRADE_ACCOUNTING_V1","rounding_policy_version":"CURRENCY_MINOR_UNIT_HALF_EVEN_V1","account_mapping_version":"ledger-map-v3",
+      "fee_policy":{"version":"BROKER_CHARGES_V1","commission_source":"BROKER_TRADE_REPORTED","commission_amount":"1.00","tax_source":"BROKER_TRADE_REPORTED","tax_amount":"0","fee_source":"BROKER_TRADE_REPORTED","fee_amount":"0.25","fee_currency":"CNY","fee_rounding_policy_version":"CURRENCY_MINOR_UNIT_HALF_EVEN_V1","policy_fingerprint":"2222222222222222222222222222222222222222222222222222222222222222"},
+      "account_selections":[
+        {"scope_id":"TRADING:acct-1","account_id":"acct-1","currency":"CNY","account_type":"POSITION_COST","instrument_id":"600000.XSHG","ledger_account_id":"22222222-2222-4222-8222-222222222222","account_classification":"ASSET","account_normal_balance":"DEBIT","account_active":true},
+        {"scope_id":"TRADING:acct-1","account_id":"acct-1","currency":"CNY","account_type":"COMMISSION_EXPENSE","instrument_id":null,"ledger_account_id":"33333333-3333-4333-8333-333333333333","account_classification":"EXPENSE","account_normal_balance":"DEBIT","account_active":true},
+        {"scope_id":"TRADING:acct-1","account_id":"acct-1","currency":"CNY","account_type":"FEE_EXPENSE","instrument_id":null,"ledger_account_id":"66666666-1111-4666-8666-111111111111","account_classification":"EXPENSE","account_normal_balance":"DEBIT","account_active":true},
+        {"scope_id":"TRADING:acct-1","account_id":"acct-1","currency":"CNY","account_type":"CASH","instrument_id":null,"ledger_account_id":"11111111-1111-4111-8111-111111111111","account_classification":"ASSET","account_normal_balance":"DEBIT","account_active":true}
       ],
-      "ledger_sequence": 1,
-      "previous_transaction_checksum": null,
-      "transaction_checksum": "635c62de9bfc83f9fcd4ec7137b303d9abb702a4fe33b488a3251b2d9317eb18",
-      "correlation_id": "corr-trade-buy-1",
-      "causation_id": "broker-message-buy-1",
-      "recorded_at": "2026-08-07T01:01:01Z",
-      "posted_at": "2026-08-07T01:01:02Z"
+      "requested_at":"2026-08-07T01:01:01Z"
     },
     {
-      "dto_type": "LEDGER_TRANSACTION",
-      "schema_version": 1,
-      "transaction_id": "268b0047-e3a7-5cbb-abc7-35185170b3c8",
-      "idempotency_key": "qmt|acct-1|2026-08-07|trade-sell-1",
-      "source_trade": {
-        "broker": "qmt",
-        "account_id": "acct-1",
-        "trading_day": "2026-08-07",
-        "trade_id": "trade-sell-1",
-        "order_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
-        "instrument_id": "600000.XSHG",
-        "side": "SELL",
-        "position_effect": "CLOSE",
-        "price": "12.00",
-        "quantity": 40,
-        "commission": "1.00",
-        "tax": "0.50",
-        "trade_time": "2026-08-07T01:02:00Z",
-        "received_at": "2026-08-07T01:02:02Z",
-        "broker_sequence": 12
-      },
-      "source_fingerprint": "5c72ebdb7d907e8addbd5113c1029f32f299e6a55ae12f289de021fdf458d4fd",
-      "scope_id": "TRADING:acct-1",
-      "currency": "CNY",
-      "entries": [
-        {"entry_id": "3b04efce-13d8-57c2-92ed-453c74d5cc69", "ledger_account_id": "11111111-1111-4111-8111-111111111111", "entry_type": "CASH", "direction": "DEBIT", "amount": "478.50", "currency": "CNY", "instrument_id": null, "occurred_at": "2026-08-07T01:02:00Z"},
-        {"entry_id": "78a41680-684d-5413-b635-4cc1acf41191", "ledger_account_id": "33333333-3333-4333-8333-333333333333", "entry_type": "COMMISSION", "direction": "DEBIT", "amount": "1.00", "currency": "CNY", "instrument_id": null, "occurred_at": "2026-08-07T01:02:00Z"},
-        {"entry_id": "817c7abf-0af4-52a6-bf2f-b57d63a33d61", "ledger_account_id": "44444444-4444-4444-8444-444444444444", "entry_type": "TAX", "direction": "DEBIT", "amount": "0.50", "currency": "CNY", "instrument_id": null, "occurred_at": "2026-08-07T01:02:00Z"},
-        {"entry_id": "b01726b1-34c9-57c7-b974-cb2e531ec992", "ledger_account_id": "22222222-2222-4222-8222-222222222222", "entry_type": "POSITION_COST", "direction": "CREDIT", "amount": "400.00", "currency": "CNY", "instrument_id": "600000.XSHG", "occurred_at": "2026-08-07T01:02:00Z"},
-        {"entry_id": "1943190b-21ee-59af-81a7-b6a22589e40f", "ledger_account_id": "55555555-5555-4555-8555-555555555555", "entry_type": "REALIZED_PNL", "direction": "CREDIT", "amount": "80.00", "currency": "CNY", "instrument_id": null, "occurred_at": "2026-08-07T01:02:00Z"}
+      "dto_type":"LEDGER_TRANSACTION","schema_version":1,"transaction_id":"d7efec15-2bd2-5461-8ea9-363ae4cee625","idempotency_key":"qmt|acct-1|2026-08-07|trade-buy-1","transaction_kind":"TRADE",
+      "source_trade":{"broker":"qmt","account_id":"acct-1","trading_day":"2026-08-07","trade_id":"trade-buy-1","order_id":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa","client_order_id":"client-buy-1","broker_order_id":"broker-buy-1","instrument_id":"600000.XSHG","side":"BUY","position_effect":"OPEN","price":"10.00","quantity":100,"commission":"1.00","fee":{"amount":"0.25","currency":"CNY","rounding_policy_version":"CURRENCY_MINOR_UNIT_HALF_EVEN_V1"},"tax":"0","trade_time":"2026-08-07T01:01:00Z","broker_sequence":10,"received_at":"2026-08-07T01:01:01Z"},
+      "source_fingerprint":"11ee92a96f046450e076b88c6594af8ac331beb8dec5b0450d643225547ebe2b","scope_id":"TRADING:acct-1","account_id":"acct-1","currency":"CNY","accounting_policy_version":"TRADE_ACCOUNTING_V1","rounding_policy_version":"CURRENCY_MINOR_UNIT_HALF_EVEN_V1","fee_policy_version":"BROKER_CHARGES_V1",
+      "entries":[
+        {"entry_id":"c70c23e0-48d3-5464-a27b-fd2fb583e1f5","entry_ordinal":0,"ledger_account_id":"22222222-2222-4222-8222-222222222222","entry_type":"POSITION_COST","direction":"DEBIT","amount":"1000.00","currency":"CNY","instrument_id":"600000.XSHG","occurred_at":"2026-08-07T01:01:00Z"},
+        {"entry_id":"e96ef6ef-25b5-59d8-b996-ed8c02998d36","entry_ordinal":1,"ledger_account_id":"33333333-3333-4333-8333-333333333333","entry_type":"COMMISSION","direction":"DEBIT","amount":"1.00","currency":"CNY","instrument_id":null,"occurred_at":"2026-08-07T01:01:00Z"},
+        {"entry_id":"94e40e6c-fc0f-5a76-a396-783abd346bcf","entry_ordinal":2,"ledger_account_id":"66666666-1111-4666-8666-111111111111","entry_type":"FEE","direction":"DEBIT","amount":"0.25","currency":"CNY","instrument_id":null,"occurred_at":"2026-08-07T01:01:00Z"},
+        {"entry_id":"6b655945-645e-542d-89ea-9ad4eb0fef8d","entry_ordinal":4,"ledger_account_id":"11111111-1111-4111-8111-111111111111","entry_type":"CASH","direction":"CREDIT","amount":"1001.25","currency":"CNY","instrument_id":null,"occurred_at":"2026-08-07T01:01:00Z"}
       ],
-      "ledger_sequence": 2,
-      "previous_transaction_checksum": "635c62de9bfc83f9fcd4ec7137b303d9abb702a4fe33b488a3251b2d9317eb18",
-      "transaction_checksum": "89907a42aeb94a0c2a49ab2cf7cc2733a95afc6853f44ffa766136e15e339408",
-      "correlation_id": "corr-trade-sell-1",
-      "causation_id": "broker-message-sell-1",
-      "recorded_at": "2026-08-07T01:02:02Z",
-      "posted_at": "2026-08-07T01:02:03Z"
+      "ledger_sequence":1,"previous_transaction_checksum":null,"transaction_checksum":"514a2616df00a374376db8975b1622ef231cbb644ae22b072852ff622f24c7be","correlation_id":"corr-trade-buy-1","causation_id":"broker-message-buy-1","recorded_at":"2026-08-07T01:01:01Z","posted_at":"2026-08-07T01:01:02Z"
     },
     {
-      "dto_type": "POST_RESULT",
-      "schema_version": 1,
-      "outcome": "DUPLICATE",
-      "transaction_id": "268b0047-e3a7-5cbb-abc7-35185170b3c8",
-      "ledger_sequence": 2,
-      "failure_code": null,
-      "detail": null,
-      "retryable": false
-    }
+      "dto_type":"LEDGER_TRANSACTION","schema_version":1,"transaction_id":"268b0047-e3a7-5cbb-abc7-35185170b3c8","idempotency_key":"qmt|acct-1|2026-08-07|trade-sell-1","transaction_kind":"TRADE",
+      "source_trade":{"broker":"qmt","account_id":"acct-1","trading_day":"2026-08-07","trade_id":"trade-sell-1","order_id":"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb","client_order_id":null,"broker_order_id":"broker-sell-1","instrument_id":"600000.XSHG","side":"SELL","position_effect":"CLOSE","price":"12.00","quantity":40,"commission":"1.00","fee":{"amount":"0","currency":"CNY","rounding_policy_version":"CURRENCY_MINOR_UNIT_HALF_EVEN_V1"},"tax":"0.50","trade_time":"2026-08-07T01:02:00Z","broker_sequence":8,"received_at":"2026-08-07T01:02:02Z"},
+      "source_fingerprint":"12d233bd4362c9eb0bbe016f6a30b98060a2fdea4e80c9d9c0ab47c769b21210","scope_id":"TRADING:acct-1","account_id":"acct-1","currency":"CNY","accounting_policy_version":"TRADE_ACCOUNTING_V1","rounding_policy_version":"CURRENCY_MINOR_UNIT_HALF_EVEN_V1","fee_policy_version":"BROKER_CHARGES_V1",
+      "entries":[
+        {"entry_id":"3b04efce-13d8-57c2-92ed-453c74d5cc69","entry_ordinal":0,"ledger_account_id":"11111111-1111-4111-8111-111111111111","entry_type":"CASH","direction":"DEBIT","amount":"478.50","currency":"CNY","instrument_id":null,"occurred_at":"2026-08-07T01:02:00Z"},
+        {"entry_id":"78a41680-684d-5413-b635-4cc1acf41191","entry_ordinal":1,"ledger_account_id":"33333333-3333-4333-8333-333333333333","entry_type":"COMMISSION","direction":"DEBIT","amount":"1.00","currency":"CNY","instrument_id":null,"occurred_at":"2026-08-07T01:02:00Z"},
+        {"entry_id":"b01726b1-34c9-57c7-b974-cb2e531ec992","entry_ordinal":3,"ledger_account_id":"44444444-4444-4444-8444-444444444444","entry_type":"TAX","direction":"DEBIT","amount":"0.50","currency":"CNY","instrument_id":null,"occurred_at":"2026-08-07T01:02:00Z"},
+        {"entry_id":"1943190b-21ee-59af-81a7-b6a22589e40f","entry_ordinal":4,"ledger_account_id":"22222222-2222-4222-8222-222222222222","entry_type":"POSITION_COST","direction":"CREDIT","amount":"400.00","currency":"CNY","instrument_id":"600000.XSHG","occurred_at":"2026-08-07T01:02:00Z"},
+        {"entry_id":"2626b9f9-deaf-5b3b-950c-a7bb0ccf235c","entry_ordinal":5,"ledger_account_id":"55555555-5555-4555-8555-555555555555","entry_type":"REALIZED_PNL","direction":"CREDIT","amount":"80.00","currency":"CNY","instrument_id":null,"occurred_at":"2026-08-07T01:02:00Z"}
+      ],
+      "ledger_sequence":2,"previous_transaction_checksum":"514a2616df00a374376db8975b1622ef231cbb644ae22b072852ff622f24c7be","transaction_checksum":"18111c860342dcf65c7e6d9909b03a4a9b9a5f781e374a85190cacbd3d17ecea","correlation_id":"corr-trade-sell-1","causation_id":"broker-message-sell-1","recorded_at":"2026-08-07T01:02:02Z","posted_at":"2026-08-07T01:02:03Z"
+    },
+    {
+      "dto_type":"LEDGER_TRANSACTION","schema_version":1,"transaction_id":"b2b9c310-31fd-5260-9ed9-47abad836942","idempotency_key":"repair|fcdc7233-da35-513d-8408-b837162f7158|aaaaaaaa-9999-4999-8999-aaaaaaaaaaaa","transaction_kind":"ADJUSTMENT",
+      "adjustment_source":{"fact_id":"bbbbbbbb-1111-4111-8111-bbbbbbbbbbbb","fact_type":"QUANTITY_CORRECTION","account_id":"acct-1","case_id":"fcdc7233-da35-513d-8408-b837162f7158","case_version":2,"command_id":"aaaaaaaa-7777-4777-8777-aaaaaaaaaaaa","command_fingerprint":"dbf39a2f43e8f371cab67315abbf57de4ad7af3a22db749d0660d932f595df1f","action_id":"aaaaaaaa-9999-4999-8999-aaaaaaaaaaaa","evidence_id":"aaaaaaaa-3333-4333-8333-aaaaaaaaaaaa","source_checkpoint":2,"authorization_fingerprint":"3333333333333333333333333333333333333333333333333333333333333333","fencing_token":9,"reason_code":"APPROVED_POSITION_ADJUSTMENT","repair_fact_checksum":"9e2218f900cd9db19f71ce46a2f37421ef72d4f2af3ee4fe36ce52e9a08fedaf","compensates_transaction_id":null,"quantity_correction":{"instrument_id":"600000.XSHG","currency":"CNY","quantity_delta":-10,"cost_basis_delta":"-100.00"},"monetary_adjustment":null},
+      "source_fingerprint":"6420ffac0144bf8b2f40263c8a4326d3100d82ad39165993769ced543a2ff9bd","scope_id":"TRADING:acct-1","account_id":"acct-1","currency":"CNY","accounting_policy_version":"REPAIR_FACT_V1","rounding_policy_version":"CURRENCY_MINOR_UNIT_HALF_EVEN_V1","fee_policy_version":null,
+      "entries":[
+        {"entry_id":"204ba5c5-347b-5121-b082-a3dabc3117a1","entry_ordinal":0,"ledger_account_id":"55555555-5555-4555-8555-555555555555","entry_type":"REALIZED_PNL","direction":"DEBIT","amount":"100.00","currency":"CNY","instrument_id":null,"occurred_at":"2026-08-07T01:04:01Z"},
+        {"entry_id":"a97ba6c3-a269-5750-8358-4969f878f357","entry_ordinal":1,"ledger_account_id":"22222222-2222-4222-8222-222222222222","entry_type":"POSITION_COST","direction":"CREDIT","amount":"100.00","currency":"CNY","instrument_id":"600000.XSHG","occurred_at":"2026-08-07T01:04:01Z"}
+      ],
+      "ledger_sequence":3,"previous_transaction_checksum":"18111c860342dcf65c7e6d9909b03a4a9b9a5f781e374a85190cacbd3d17ecea","transaction_checksum":"e3a56366137fe63a57a5c4c99cd51a6f1d44b7a5a9f97bf6422406baf698dc44","correlation_id":"recon-corr-1","causation_id":"aaaaaaaa-7777-4777-8777-aaaaaaaaaaaa","recorded_at":"2026-08-07T01:04:01Z","posted_at":"2026-08-07T01:04:02Z"
+    },
+    {"dto_type":"POST_RESULT","schema_version":1,"operation_id":"268b0047-e3a7-5cbb-abc7-35185170b3c8","idempotency_key":"qmt|acct-1|2026-08-07|trade-sell-1","outcome":"DUPLICATE","transaction_id":"268b0047-e3a7-5cbb-abc7-35185170b3c8","ledger_sequence":2,"failure_code":null,"detail":null,"retryable":false,"reconciliation_required":false}
   ]
 }

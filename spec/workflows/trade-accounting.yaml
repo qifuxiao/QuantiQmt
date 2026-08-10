@@ -12,12 +12,16 @@ workflow:
     - id: validate_and_deduplicate_trade
       owner: OMS
       unique_key: "broker+account+trading_day+trade_id"
-      fingerprint: sha256_canonical_validated_broker_trade_payload
+      fingerprint: sha256_canonical_authoritative_broker_trade_projection_with_explicit_nulls_and_unicode_nfc
+      fingerprint_fields: [account_id, broker, broker_order_id, broker_sequence, client_order_id, commission, fee, instrument_id, order_id, position_effect, price, quantity, received_at, side, tax, trade_id, trade_time, trading_day]
       same_fingerprint: duplicate_no_op
       different_fingerprint: QQ-STORAGE-7009_open_reconciliation_case
     - {id: update_order_and_publish_trade_recorded, owner: OMS, transaction: "Order + Trade + Outbox"}
     - id: resolve_account_currency_and_internal_order
       owner: AccountLedger
+      selection_key: [scope_id, currency, account_type, instrument_id]
+      required_cardinality: exactly_one_active_taxonomy_valid_account_per_key
+      frozen_versions: [account_mapping_version, accounting_policy_version, fee_policy_version, rounding_policy_version]
       unresolved: fail_closed_and_reconciliation_evidence
     - id: build_deterministic_balanced_transaction
       owner: AccountLedger
@@ -30,6 +34,7 @@ workflow:
       transaction: "Inbox + LedgerTransaction + LedgerEntries + Outbox + Audit"
       expected_sequence: required
       uncertain_commit: query_same_transaction_and_idempotency_identity
+      uncertain_result: UNKNOWN_QQ-STORAGE-7012_reconciliation_required
       partial_write: rollback_all
     - id: update_position_projection
       owner: PortfolioProjection
@@ -37,6 +42,15 @@ workflow:
       duplicate_safe: true
       versions: increment_exactly_once
       sequence: contiguous_internal_ledger_sequence
+      uncertain_result: UNKNOWN_QQ-STORAGE-7013_reconciliation_required
+    - id: release_t_plus_one_availability
+      owner: PortfolioProjection
+      input: CONTRACT-PORTFOLIO-PROJECTION-V1.SettlementReleaseRequest
+      result: CONTRACT-PORTFOLIO-PROJECTION-V1.SettlementReleaseResult
+      guards: [verified_calendar_version_and_session, unchanged_ledger_checkpoint, exact_position_and_portfolio_cas, valid_fencing, release_not_above_unavailable]
+      effect: quantity_delta_zero_available_quantity_increase_versions_plus_one_checkpoint_unchanged
+      duplicate: return_original_without_version_increment
+      uncertain_result: UNKNOWN_QQ-STORAGE-7014_query_same_release_identity
     - {id: publish_risk_snapshot_change, owner: PortfolioProjection}
   invariants:
     - broker_fact_is_never_rolled_back
@@ -50,7 +64,11 @@ workflow:
     transaction_namespace_uuid: 6ea9f94d-16c3-5c7a-8c4f-ec1883388613
     transaction_id: uuid5_namespace_and_canonical_trade_identity
     entry_id: uuid5_transaction_id_and_canonical_zero_based_entry_ordinal
+    buy_entry_slots: {POSITION_COST: 0, COMMISSION: 1, FEE: 2, TAX: 3, CASH: 4, ROUNDING_RESIDUAL: 5}
+    sell_entry_slots: {CASH: 0, COMMISSION: 1, FEE: 2, TAX: 3, POSITION_COST: 4, REALIZED_PNL: 5, ROUNDING_RESIDUAL: 6}
     idempotency_key: "broker|account_id|trading_day|trade_id"
+    settlement_release_id: 'UUID5(position_id, "settlement:" + trading_day + ":" + availability_policy_version)'
+    settlement_request_fingerprint: canonical_business_calendar_checkpoint_versions_excluding_request_and_deadline_times
   arrival:
     broker_sequence: reconciliation_evidence_not_posting_order
     unseen_out_of_order_trade: post_at_next_internal_ledger_sequence
@@ -59,14 +77,16 @@ workflow:
   posting:
     buy: [debit_position_cost, debit_nonzero_commission_fee_tax, credit_cash_total]
     sell: [debit_cash_net, debit_nonzero_commission_fee_tax, credit_released_position_cost, post_trade_pnl_directionally]
-    zero_components: omitted
+    zero_components: omitted_without_renumbering_fixed_entry_slots
+    fee_source: authoritative_broker_trade_fee_amount_currency_and_rounding_policy
+    fee_policy: BROKER_CHARGES_V1
     full_close: quantity_zero_cost_zero_average_cost_null
     realized_pnl: cumulative_trade_pnl_minus_commission_fee_tax
   availability:
     policy_source: versioned_account_instrument_configuration
     implementation_default: forbidden
     IMMEDIATE_V1: "BUY and SELL apply quantity delta to available quantity; SELL requires sufficient availability"
-    T_PLUS_ONE_V1: "BUY leaves availability unchanged; SELL decrements availability; verified session release is separately checkpointed and idempotent"
+    T_PLUS_ONE_V1: "BUY leaves availability unchanged; SELL decrements availability; verified release preserves the Ledger checkpoint and increments Position/Portfolio versions exactly once"
     broker_available_quantity: reconciliation_evidence_only
   retry:
     semantic_failure: never

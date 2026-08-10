@@ -5,6 +5,9 @@
   "oneOf": [
     {"$ref": "#/$defs/position"},
     {"$ref": "#/$defs/positionChange"},
+    {"$ref": "#/$defs/projectionResult"},
+    {"$ref": "#/$defs/settlementReleaseRequest"},
+    {"$ref": "#/$defs/settlementReleaseResult"},
     {"$ref": "#/$defs/portfolioSnapshot"},
     {"$ref": "#/$defs/replayRequest"},
     {"$ref": "#/$defs/replayResult"}
@@ -51,49 +54,11 @@
       "allOf": [
         {"if": {"properties": {"side": {"const": "FLAT"}}, "required": ["side"]}, "then": {"properties": {"quantity": {"const": 0}, "available_quantity": {"const": 0}, "cost_basis_total": {"const": "0"}, "average_cost": {"type": "null"}}}},
         {"if": {"properties": {"side": {"const": "LONG"}}, "required": ["side"]}, "then": {"properties": {"quantity": {"minimum": 1}, "average_cost": {"$ref": "#/$defs/positiveDecimal"}}}},
-        {"if": {"properties": {"valuation_quality": {"const": "MISSING"}}, "required": ["valuation_quality"]}, "then": {"properties": {"market_price": {"type": "null"}, "market_value": {"type": "null"}, "unrealized_pnl": {"type": "null"}, "valuation_at": {"type": "null"}}}}
+        {"if": {"properties": {"valuation_quality": {"const": "MISSING"}}, "required": ["valuation_quality"]}, "then": {"properties": {"market_price": {"type": "null"}, "market_value": {"type": "null"}, "unrealized_pnl": {"type": "null"}, "valuation_at": {"type": "null"}}}},
+        {"if": {"properties": {"valuation_quality": {"const": "FRESH"}}, "required": ["valuation_quality"]}, "then": {"properties": {"market_price": {"$ref": "#/$defs/positiveDecimal"}, "market_value": {"$ref": "#/$defs/nonNegativeDecimal"}, "unrealized_pnl": {"$ref": "#/$defs/decimal"}, "valuation_at": {"$ref": "#/$defs/timestamp"}}}}
       ]
     },
-    "positionState": {
-      "allOf": [
-        {"$ref": "#/$defs/position"},
-        {"properties": {"dto_type": {"const": "POSITION"}}}
-      ]
-    },
-    "projectionEffect": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["quantity_delta", "gross", "released_cost", "expense_total", "trade_pnl", "net_realized_pnl_increment"],
-      "properties": {
-        "quantity_delta": {"type": "integer", "not": {"const": 0}},
-        "gross": {"$ref": "#/$defs/nonNegativeDecimal"},
-        "released_cost": {"$ref": "#/$defs/nonNegativeDecimal"},
-        "expense_total": {"$ref": "#/$defs/nonNegativeDecimal"},
-        "trade_pnl": {"$ref": "#/$defs/decimal"},
-        "net_realized_pnl_increment": {"$ref": "#/$defs/decimal"}
-      }
-    },
-    "positionChange": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["dto_type", "schema_version", "before", "after", "effect", "source_ledger_transaction_id", "source_sequence", "projected_at"],
-      "properties": {
-        "dto_type": {"const": "POSITION_PROJECTION_CHANGE"},
-        "schema_version": {"const": 1},
-        "before": {"$ref": "#/$defs/positionState"},
-        "after": {"$ref": "#/$defs/positionState"},
-        "effect": {"$ref": "#/$defs/projectionEffect"},
-        "source_ledger_transaction_id": {"$ref": "#/$defs/uuid"},
-        "source_sequence": {"type": "integer", "minimum": 1},
-        "projected_at": {"$ref": "#/$defs/timestamp"}
-      }
-    },
-    "money": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["currency", "amount"],
-      "properties": {"currency": {"$ref": "#/$defs/currency"}, "amount": {"$ref": "#/$defs/decimal"}}
-    },
+    "positionState": {"$ref": "#/$defs/position"},
     "checkpoint": {
       "type": "object",
       "additionalProperties": false,
@@ -103,12 +68,167 @@
         "last_sequence": {"type": "integer", "minimum": 0},
         "last_transaction_id": {"anyOf": [{"$ref": "#/$defs/uuid"}, {"type": "null"}]},
         "last_transaction_checksum": {"anyOf": [{"$ref": "#/$defs/hash"}, {"type": "null"}]}
+      },
+      "allOf": [
+        {"if": {"properties": {"last_sequence": {"const": 0}}, "required": ["last_sequence"]}, "then": {"properties": {"last_transaction_id": {"type": "null"}, "last_transaction_checksum": {"type": "null"}}}}
+      ]
+    },
+    "projectionEffect": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["effect_type", "quantity_delta", "available_quantity_delta", "gross", "released_cost", "expense_total", "trade_pnl", "net_realized_pnl_increment"],
+      "properties": {
+        "effect_type": {"enum": ["TRADE", "SETTLEMENT_RELEASE"]},
+        "quantity_delta": {"type": "integer"},
+        "available_quantity_delta": {"type": "integer"},
+        "gross": {"$ref": "#/$defs/nonNegativeDecimal"},
+        "released_cost": {"$ref": "#/$defs/nonNegativeDecimal"},
+        "expense_total": {"$ref": "#/$defs/nonNegativeDecimal"},
+        "trade_pnl": {"$ref": "#/$defs/decimal"},
+        "net_realized_pnl_increment": {"$ref": "#/$defs/decimal"}
+      },
+      "oneOf": [
+        {"properties": {"effect_type": {"const": "TRADE"}, "quantity_delta": {"not": {"const": 0}}}},
+        {"properties": {"effect_type": {"const": "SETTLEMENT_RELEASE"}, "quantity_delta": {"const": 0}, "available_quantity_delta": {"type": "integer", "minimum": 1}, "gross": {"const": "0"}, "released_cost": {"const": "0"}, "expense_total": {"const": "0"}, "trade_pnl": {"const": "0"}, "net_realized_pnl_increment": {"const": "0"}}}
+      ]
+    },
+    "positionChange": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["dto_type", "schema_version", "source_kind", "before", "after", "effect", "source_ledger_transaction_id", "source_settlement_release_id", "source_sequence", "projected_at"],
+      "properties": {
+        "dto_type": {"const": "POSITION_PROJECTION_CHANGE"},
+        "schema_version": {"const": 1},
+        "source_kind": {"enum": ["TRADE", "SETTLEMENT_RELEASE"]},
+        "before": {"$ref": "#/$defs/positionState"},
+        "after": {"$ref": "#/$defs/positionState"},
+        "effect": {"$ref": "#/$defs/projectionEffect"},
+        "source_ledger_transaction_id": {"anyOf": [{"$ref": "#/$defs/uuid"}, {"type": "null"}]},
+        "source_settlement_release_id": {"anyOf": [{"$ref": "#/$defs/uuid"}, {"type": "null"}]},
+        "source_sequence": {"type": "integer", "minimum": 0},
+        "projected_at": {"$ref": "#/$defs/timestamp"}
+      },
+      "oneOf": [
+        {"properties": {"source_kind": {"const": "TRADE"}, "effect": {"properties": {"effect_type": {"const": "TRADE"}}}, "source_ledger_transaction_id": {"$ref": "#/$defs/uuid"}, "source_settlement_release_id": {"type": "null"}, "source_sequence": {"minimum": 1}}},
+        {"properties": {"source_kind": {"const": "SETTLEMENT_RELEASE"}, "effect": {"properties": {"effect_type": {"const": "SETTLEMENT_RELEASE"}}}, "source_ledger_transaction_id": {"type": "null"}, "source_settlement_release_id": {"$ref": "#/$defs/uuid"}}}
+      ]
+    },
+    "projectionResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["dto_type", "schema_version", "operation_id", "idempotency_key", "outcome", "position_id", "position_version", "portfolio_version", "source_sequence", "failure_code", "reconciliation_required"],
+      "properties": {
+        "dto_type": {"const": "PROJECTION_RESULT"},
+        "schema_version": {"const": 1},
+        "operation_id": {"$ref": "#/$defs/uuid"},
+        "idempotency_key": {"type": "string", "minLength": 1, "maxLength": 256},
+        "outcome": {"enum": ["APPLIED", "DUPLICATE", "REJECTED", "UNKNOWN"]},
+        "position_id": {"$ref": "#/$defs/uuid"},
+        "position_version": {"type": ["integer", "null"], "minimum": 0},
+        "portfolio_version": {"type": ["integer", "null"], "minimum": 0},
+        "source_sequence": {"type": "integer", "minimum": 0},
+        "failure_code": {"enum": [null, "QQ-COMMON-1003", "QQ-STORAGE-7009", "QQ-STORAGE-7010", "QQ-STORAGE-7013", "QQ-RECOVERY-8001"]},
+        "reconciliation_required": {"type": "boolean"}
+      },
+      "oneOf": [
+        {"properties": {"outcome": {"enum": ["APPLIED", "DUPLICATE"]}, "position_version": {"type": "integer"}, "portfolio_version": {"type": "integer"}, "failure_code": {"type": "null"}, "reconciliation_required": {"const": false}}},
+        {"properties": {"outcome": {"const": "REJECTED"}, "failure_code": {"enum": ["QQ-COMMON-1003", "QQ-STORAGE-7009", "QQ-STORAGE-7010", "QQ-RECOVERY-8001"]}, "reconciliation_required": {"const": false}}},
+        {"properties": {"outcome": {"const": "UNKNOWN"}, "position_version": {"type": "null"}, "portfolio_version": {"type": "null"}, "failure_code": {"const": "QQ-STORAGE-7013"}, "reconciliation_required": {"const": true}}}
+      ]
+    },
+    "calendarEvidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["calendar_id", "calendar_version", "session_id", "trading_day", "previous_trading_day", "verification_status", "evidence_checksum", "verified_at"],
+      "properties": {
+        "calendar_id": {"type": "string", "minLength": 1, "maxLength": 64},
+        "calendar_version": {"type": "string", "minLength": 1, "maxLength": 64},
+        "session_id": {"type": "string", "minLength": 1, "maxLength": 128},
+        "trading_day": {"type": "string", "format": "date"},
+        "previous_trading_day": {"type": "string", "format": "date"},
+        "verification_status": {"const": "VERIFIED"},
+        "evidence_checksum": {"$ref": "#/$defs/hash"},
+        "verified_at": {"$ref": "#/$defs/timestamp"}
+      }
+    },
+    "settlementReleaseRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["dto_type", "schema_version", "release_id", "idempotency_key", "request_fingerprint", "position_id", "portfolio_id", "account_id", "scope_id", "currency", "trading_day", "availability_policy_version", "quantity_to_release", "source_checkpoint", "expected_position_version", "expected_portfolio_version", "fencing_token", "calendar_evidence", "requested_at", "deadline_at"],
+      "properties": {
+        "dto_type": {"const": "SETTLEMENT_RELEASE_REQUEST"},
+        "schema_version": {"const": 1},
+        "release_id": {"$ref": "#/$defs/uuid"},
+        "idempotency_key": {"type": "string", "minLength": 1, "maxLength": 256},
+        "request_fingerprint": {"$ref": "#/$defs/hash"},
+        "position_id": {"$ref": "#/$defs/uuid"},
+        "portfolio_id": {"$ref": "#/$defs/uuid"},
+        "account_id": {"type": "string", "minLength": 1, "maxLength": 128},
+        "scope_id": {"type": "string", "minLength": 1, "maxLength": 128},
+        "currency": {"$ref": "#/$defs/currency"},
+        "trading_day": {"type": "string", "format": "date"},
+        "availability_policy_version": {"const": "T_PLUS_ONE_V1"},
+        "quantity_to_release": {"type": "integer", "minimum": 1},
+        "source_checkpoint": {"$ref": "#/$defs/checkpoint"},
+        "expected_position_version": {"type": "integer", "minimum": 0},
+        "expected_portfolio_version": {"type": "integer", "minimum": 0},
+        "fencing_token": {"type": "integer", "minimum": 1},
+        "calendar_evidence": {"$ref": "#/$defs/calendarEvidence"},
+        "requested_at": {"$ref": "#/$defs/timestamp"},
+        "deadline_at": {"$ref": "#/$defs/timestamp"}
+      }
+    },
+    "settlementReleaseResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["dto_type", "schema_version", "release_id", "idempotency_key", "request_fingerprint", "outcome", "position_id", "released_quantity", "position_version", "portfolio_version", "source_checkpoint", "failure_code", "reconciliation_required", "completed_at"],
+      "properties": {
+        "dto_type": {"const": "SETTLEMENT_RELEASE_RESULT"},
+        "schema_version": {"const": 1},
+        "release_id": {"$ref": "#/$defs/uuid"},
+        "idempotency_key": {"type": "string", "minLength": 1, "maxLength": 256},
+        "request_fingerprint": {"$ref": "#/$defs/hash"},
+        "outcome": {"enum": ["RELEASED", "DUPLICATE", "REJECTED", "UNKNOWN"]},
+        "position_id": {"$ref": "#/$defs/uuid"},
+        "released_quantity": {"type": ["integer", "null"], "minimum": 1},
+        "position_version": {"type": ["integer", "null"], "minimum": 0},
+        "portfolio_version": {"type": ["integer", "null"], "minimum": 0},
+        "source_checkpoint": {"$ref": "#/$defs/checkpoint"},
+        "failure_code": {"enum": [null, "QQ-COMMON-1003", "QQ-STORAGE-7001", "QQ-STORAGE-7010", "QQ-STORAGE-7014", "QQ-RECOVERY-8001", "QQ-RECOVERY-8005"]},
+        "reconciliation_required": {"type": "boolean"},
+        "completed_at": {"$ref": "#/$defs/timestamp"}
+      },
+      "oneOf": [
+        {"properties": {"outcome": {"enum": ["RELEASED", "DUPLICATE"]}, "released_quantity": {"type": "integer"}, "position_version": {"type": "integer"}, "portfolio_version": {"type": "integer"}, "failure_code": {"type": "null"}, "reconciliation_required": {"const": false}}},
+        {"properties": {"outcome": {"const": "REJECTED"}, "released_quantity": {"type": "null"}, "failure_code": {"enum": ["QQ-COMMON-1003", "QQ-STORAGE-7001", "QQ-STORAGE-7010", "QQ-RECOVERY-8001", "QQ-RECOVERY-8005"]}, "reconciliation_required": {"const": false}}},
+        {"properties": {"outcome": {"const": "UNKNOWN"}, "released_quantity": {"type": "null"}, "position_version": {"type": "null"}, "portfolio_version": {"type": "null"}, "failure_code": {"const": "QQ-STORAGE-7014"}, "reconciliation_required": {"const": true}}}
+      ]
+    },
+    "money": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["currency", "amount"],
+      "properties": {"currency": {"$ref": "#/$defs/currency"}, "amount": {"$ref": "#/$defs/decimal"}}
+    },
+    "marketObservation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["observation_id", "provider", "version", "instrument_id", "currency", "price", "quality", "observed_at"],
+      "properties": {
+        "observation_id": {"$ref": "#/$defs/uuid"},
+        "provider": {"type": "string", "minLength": 1, "maxLength": 64},
+        "version": {"type": "string", "minLength": 1, "maxLength": 64},
+        "instrument_id": {"type": "string", "minLength": 1, "maxLength": 64},
+        "currency": {"$ref": "#/$defs/currency"},
+        "price": {"anyOf": [{"$ref": "#/$defs/positiveDecimal"}, {"type": "null"}]},
+        "quality": {"enum": ["FRESH", "STALE", "MISSING"]},
+        "observed_at": {"anyOf": [{"$ref": "#/$defs/timestamp"}, {"type": "null"}]}
       }
     },
     "portfolioSnapshot": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["dto_type", "schema_version", "snapshot_id", "portfolio_id", "account_id", "scope_id", "portfolio_version", "cash", "positions", "market_value", "total_equity", "realized_pnl", "unrealized_pnl", "quality", "risk_usable", "valuation_time", "source_checkpoint", "checksum_algorithm", "checksum", "created_at"],
+      "required": ["dto_type", "schema_version", "snapshot_id", "portfolio_id", "account_id", "scope_id", "snapshot_currency", "portfolio_version", "cash", "positions", "market_observations", "market_value", "total_equity", "realized_pnl", "unrealized_pnl", "quality", "risk_usable", "valuation_time", "source_checkpoint", "projection_state_checksum_algorithm", "projection_state_checksum", "created_at"],
       "properties": {
         "dto_type": {"const": "PORTFOLIO_SNAPSHOT"},
         "schema_version": {"const": 1},
@@ -116,9 +236,11 @@
         "portfolio_id": {"$ref": "#/$defs/uuid"},
         "account_id": {"type": "string", "minLength": 1, "maxLength": 128},
         "scope_id": {"type": "string", "minLength": 1, "maxLength": 128},
+        "snapshot_currency": {"$ref": "#/$defs/currency"},
         "portfolio_version": {"type": "integer", "minimum": 0},
         "cash": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/money"}},
         "positions": {"type": "array", "items": {"$ref": "#/$defs/positionState"}},
+        "market_observations": {"type": "array", "items": {"$ref": "#/$defs/marketObservation"}},
         "market_value": {"type": ["string", "null"], "pattern": "^(0|[1-9][0-9]{0,17})(\\.[0-9]{1,8})?$"},
         "total_equity": {"type": ["string", "null"], "pattern": "^-?(0|[1-9][0-9]{0,17})(\\.[0-9]{1,8})?$"},
         "realized_pnl": {"$ref": "#/$defs/decimal"},
@@ -127,44 +249,59 @@
         "risk_usable": {"type": "boolean"},
         "valuation_time": {"$ref": "#/$defs/timestamp"},
         "source_checkpoint": {"$ref": "#/$defs/checkpoint"},
-        "checksum_algorithm": {"const": "SHA-256_CANONICAL_JSON_V1"},
-        "checksum": {"$ref": "#/$defs/hash"},
+        "projection_state_checksum_algorithm": {"const": "SHA-256_CANONICAL_JSON_NFC_V1"},
+        "projection_state_checksum": {"$ref": "#/$defs/hash"},
         "created_at": {"$ref": "#/$defs/timestamp"}
-      }
+      },
+      "allOf": [
+        {"if": {"properties": {"quality": {"const": "COMPLETE"}}, "required": ["quality"]}, "then": {"properties": {"risk_usable": {"const": true}, "market_value": {"$ref": "#/$defs/nonNegativeDecimal"}, "total_equity": {"$ref": "#/$defs/decimal"}, "unrealized_pnl": {"$ref": "#/$defs/decimal"}}}},
+        {"if": {"properties": {"quality": {"enum": ["PARTIAL_STALE", "UNAVAILABLE"]}}, "required": ["quality"]}, "then": {"properties": {"risk_usable": {"const": false}}}}
+      ]
     },
     "replayRequest": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["dto_type", "schema_version", "portfolio_id", "mode", "snapshot_id", "start_sequence", "end_sequence", "expected_checksum", "requested_at"],
+      "required": ["dto_type", "schema_version", "operation_id", "idempotency_key", "portfolio_id", "mode", "snapshot_id", "start_sequence", "end_sequence", "expected_projection_state_checksum", "requested_at"],
       "properties": {
         "dto_type": {"const": "REPLAY_REQUEST"},
         "schema_version": {"const": 1},
+        "operation_id": {"$ref": "#/$defs/uuid"},
+        "idempotency_key": {"type": "string", "minLength": 1, "maxLength": 256},
         "portfolio_id": {"$ref": "#/$defs/uuid"},
         "mode": {"enum": ["SNAPSHOT_PLUS_LEDGER", "FULL_LEDGER"]},
         "snapshot_id": {"anyOf": [{"$ref": "#/$defs/uuid"}, {"type": "null"}]},
         "start_sequence": {"type": "integer", "minimum": 1},
         "end_sequence": {"type": ["integer", "null"], "minimum": 1},
-        "expected_checksum": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"},
+        "expected_projection_state_checksum": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"},
         "requested_at": {"$ref": "#/$defs/timestamp"}
       }
     },
     "replayResult": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["dto_type", "schema_version", "status", "portfolio_id", "last_sequence", "expected_checksum", "actual_checksum", "snapshot_status", "failure_code", "evidence_id", "completed_at"],
+      "required": ["dto_type", "schema_version", "operation_id", "idempotency_key", "status", "portfolio_id", "last_sequence", "expected_projection_state_checksum", "actual_projection_state_checksum", "snapshot_status", "failure_code", "reconciliation_required", "evidence_id", "completed_at"],
       "properties": {
         "dto_type": {"const": "REPLAY_RESULT"},
         "schema_version": {"const": 1},
+        "operation_id": {"$ref": "#/$defs/uuid"},
+        "idempotency_key": {"type": "string", "minLength": 1, "maxLength": 256},
         "status": {"enum": ["VERIFIED", "FALLBACK_FULL_REPLAY", "REJECTED"]},
         "portfolio_id": {"$ref": "#/$defs/uuid"},
         "last_sequence": {"type": "integer", "minimum": 0},
-        "expected_checksum": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"},
-        "actual_checksum": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"},
+        "expected_projection_state_checksum": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"},
+        "actual_projection_state_checksum": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"},
         "snapshot_status": {"enum": ["VALID", "ABSENT", "INVALID_DISCARDED", "INCOMPATIBLE_DISCARDED"]},
-        "failure_code": {"enum": [null, "QQ-STORAGE-7003", "QQ-RECOVERY-8003", "QQ-STORAGE-7010"]},
+        "failure_code": {"enum": [null, "QQ-COMMON-1003", "QQ-STORAGE-7003", "QQ-RECOVERY-8003", "QQ-STORAGE-7010"]},
+        "reconciliation_required": {"type": "boolean"},
         "evidence_id": {"$ref": "#/$defs/uuid"},
         "completed_at": {"$ref": "#/$defs/timestamp"}
-      }
+      },
+      "oneOf": [
+        {"properties": {"status": {"const": "VERIFIED"}, "expected_projection_state_checksum": {"$ref": "#/$defs/hash"}, "actual_projection_state_checksum": {"$ref": "#/$defs/hash"}, "failure_code": {"type": "null"}, "reconciliation_required": {"const": false}}},
+        {"properties": {"status": {"const": "FALLBACK_FULL_REPLAY"}, "actual_projection_state_checksum": {"$ref": "#/$defs/hash"}, "snapshot_status": {"enum": ["INVALID_DISCARDED", "INCOMPATIBLE_DISCARDED"]}, "failure_code": {"const": "QQ-STORAGE-7003"}, "reconciliation_required": {"const": false}}},
+        {"properties": {"status": {"const": "REJECTED"}, "failure_code": {"enum": ["QQ-COMMON-1003", "QQ-STORAGE-7010"]}, "reconciliation_required": {"const": false}}},
+        {"properties": {"status": {"const": "REJECTED"}, "failure_code": {"const": "QQ-RECOVERY-8003"}, "reconciliation_required": {"const": true}}}
+      ]
     }
   }
 }

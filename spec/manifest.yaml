@@ -165,15 +165,15 @@ catalogs:
 
 change:
   id: SPEC-0.9.0-LEDGER-PORTFOLIO-RECONCILIATION-CONTRACTS
-  compatibility: additive_internal_contracts_public_v1_messages_unchanged_runtime_and_database_implementation_deferred
+  compatibility: additive_internal_contracts_and_optional_public_v1_fee_fields_runtime_and_database_implementation_deferred
   previous_version: 0.8.0
-  public_message_schema_changes: none
+  public_message_schema_changes: "additive optional fee evidence on broker.trade_reported.v1 and ledger.trade_posted.v1; existing payloads remain schema-valid, but Ledger accounting requires normalized explicit fee evidence and fails closed for historical unbound input"
   storage_schema_changes: "preserves the 0.8.0 additive OrderRegistration broker/capability binding owned by TASK-048; adds normative initial Ledger, Portfolio projection/snapshot and Reconciliation logical storage contract; TASK-018 creates no migration and no database object"
-  error_catalog_change: "additive version 4 Ledger, projection replay and repair failure codes; existing meanings unchanged"
+  error_catalog_change: "additive version 4 Ledger/replay/repair codes plus version 5 deterministic-collision and per-operation UNKNOWN codes QQ-STORAGE-7011..7014; QQ-STORAGE-7006 and all existing meanings unchanged"
   runtime_code_change: "TASK-048 remains required for OrderRegistration binding; Ledger/Portfolio/Reconciliation runtime is required only when TASK-007 or another human-authorized successor implements these contracts; TASK-018 changes no runtime code"
   review_change: none
-  contract_change: "freezes Ledger accounts/double-entry posting, deterministic Trade accounting, weighted-average cost/PnL projection, snapshot/replay/checksum, Reconciliation Case/repair, repository and atomic storage DTOs"
-  semantic_validation_change: "requires machine validation for balance, account/currency/scope binding, deterministic identity, duplicate conflicts, monotonic versions/sequences, checksum, state transitions, evidence/approval/fencing and append-only repairs"
+  contract_change: "freezes exhaustive Ledger account taxonomy/resolution, canonical account_id and independently typed commission/fee/tax, authoritative Trade fingerprint/canonical JSON, fixed entry slots, weighted-average projection and explicit T+1 release, single-currency snapshot and replayable state checksum, top-level LedgerTransaction routes with embedded-only entries, discriminated repair facts bound to Case/command/checksum, and exhaustive operation result matrices"
+  semantic_validation_change: "requires machine validation for balance, canonical account identity across source/request/account/transaction, active unique account selection, independently typed fee currency/rounding and posting, source/repair fingerprints and NFC vectors, repair Case/command/checksum bindings, exact weighted average and versions, release calendar/checkpoint/CAS, snapshot currency/quality/checksum, state transitions/version chain, P0/P1 approval, UNKNOWN result identity/code and append-only repair facts"
   internal_contracts_added: [CONTRACT-LEDGER-ACCOUNTING-V1, CONTRACT-PORTFOLIO-PROJECTION-V1, CONTRACT-RECONCILIATION-V1, PORTS-LEDGER-PORTFOLIO, REPO-LEDGER-PORTFOLIO, STORAGE-LEDGER-PORTFOLIO, WF-RECONCILIATION-REPAIR]
   public_contracts_added: []
   task_queue_change: "TASK-018 remains active/draft pending independent Review; TASK-007 remains blocked and is constrained to the frozen contracts; no task is activated"
@@ -191,14 +191,14 @@ change:
     - deploy_compatible_writers_then_readers_then_projection_consumers
   migration:
     runtime_data: "TASK-048 must preserve legacy OrderRegistration values as explicitly unbound and cannot dispatch them without auditable binding; none in TASK-018 because no Ledger/Portfolio/Reconciliation runtime or persisted rows exist on the audited base"
-    public_events: "existing broker.trade_reported.v1, ledger.trade_posted.v1 and portfolio.position_changed.v1 schemas and names are unchanged"
+    public_events: "deploy additive optional fee-aware schemas/readers before fee-emitting writers; old payloads remain schema-valid, while a future Ledger writer must normalize explicit fee evidence or quarantine historical unbound input rather than infer a fee"
     storage: "no migration is created or authorized here; a future persistent implementation must use an independently authorized expand-only migration before deployment and must never infer or overwrite historical facts"
     task_queue: "TASK-007 remains blocked with its existing dependencies/status; TASK-019 and other downstream tasks remain blocked; this change activates none"
     historical_evidence: "Broker observations may seed reconciliation evidence only and cannot backfill internal Ledger/Portfolio authority"
     destructive_backfill: forbidden
   rollback:
     runtime_data: not_applicable_no_runtime_change
-    public_events: not_applicable_public_v1_unchanged
+    public_events: "stop fee-emitting writers before reverting readers; never erase fee evidence already published or persisted"
     task_queue: "keep TASK-007 and downstream tasks blocked; do not activate any task"
     contracts: "before any runtime adoption, revert only the unimplemented 0.9.0 registrations/specs/tests; never delete persisted OrderRegistration binding or Ledger, projection, Case, repair or audit history; after adoption stop writers/readers under human rollback authorization"
     storage: "no database rollback in TASK-018; future rollback preserves all append-only facts and disables incompatible writers"

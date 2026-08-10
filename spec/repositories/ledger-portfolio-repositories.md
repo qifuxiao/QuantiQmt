@@ -18,13 +18,13 @@ External Broker/Event Backbone/Redis calls are forbidden inside Repository trans
 3. insert exactly one `ledger_transactions` row and all balanced `ledger_entries` rows;
 4. insert the active public `ledger.trade_posted.v1` Outbox projection and audit evidence.
 
-The Repository validates all accounts exist, are active, share transaction scope/currency and match entry instruments. It groups entries by `(scope_id, currency)` and verifies exact Decimal debit/credit equality after the frozen rounding policy. Failure occurs before append.
+Before building or appending, `resolve_accounts` resolves every required `(scope_id, currency, account_type, instrument_id)` key against the frozen `account_mapping_version`. The Repository requires exactly one active taxonomy-valid row per key and compares all selected IDs/attributes back to `TradeAccountingRequest.account_selections` in the write transaction. Missing, inactive, duplicate, type/classification/normal-balance or instrument mismatch is fail-closed. It then groups entries by `(scope_id, currency)` and verifies exact Decimal debit/credit equality after the frozen rounding policy. Failure occurs before append.
 
-The unique Trade key is `(broker, trading_account_id, trading_day, trade_id)`. Same key/fingerprint returns the committed `PostResult(outcome=DUPLICATE)` without mutation. Same key/different fingerprint is `QQ-STORAGE-7009`. `transaction_id`, `entry_id` and `(scope_id, ledger_sequence)` are independently unique; a collision inconsistent with the deterministic algorithm is `QQ-STORAGE-7006`, never an idempotent success.
+The unique Trade key is `(broker, account_id, trading_day, trade_id)`. `source_trade.account_id`, request `account_id`, selected Ledger accounts and persisted transaction `account_id` MUST be identical; there is no alternate account alias or implicit mapping. Same key/fingerprint returns the committed `PostResult(outcome=DUPLICATE)` without mutation. Same key/different fingerprint is `QQ-STORAGE-7009`. `transaction_id`, `entry_id` and `(scope_id, ledger_sequence)` are independently unique; a collision inconsistent with the frozen deterministic algorithm is `QQ-STORAGE-7011`, never an idempotent success. `QQ-STORAGE-7006` remains limited to regeneratable random/candidate IDs before side effects and is not returned by deterministic Ledger append.
 
-A CAS mismatch is `QQ-COMMON-1003`; the Application may reread the stream and retry the unchanged input within its original deadline. An uncertain commit is queried by transaction/idempotency identity before any retry. The Repository never changes a deterministic ID or appends a second transaction to escape uncertainty.
+A CAS mismatch is `QQ-COMMON-1003`; the Application may reread the stream and retry the unchanged input within its original deadline. An uncertain commit returns `UNKNOWN/QQ-STORAGE-7012` with the same transaction/idempotency identity and is queried before any retry. The Repository never changes a deterministic ID or appends a second transaction to escape uncertainty.
 
-`append_adjustment` has all Ledger rules plus a required approved/fresh `RepairCommand`. It atomically binds the transaction to `case_id`, `command_id`, evidence ID and audit ID. Only a new adjustment/compensating transaction may be inserted. UPDATE/DELETE of any historical Ledger row is forbidden.
+`append_adjustment` has all Ledger rules plus a required approved/fresh `RepairCommand`. It atomically binds a discriminated `ADJUSTMENT`/`COMPENSATING_FACT` transaction to unique `(case_id, case_version, command_id, action_id, fact_id)`, canonical `account_id`, command fingerprint, evidence ID, source checkpoint, authorization fingerprint, fencing token, repair-fact checksum and audit ID. It accepts quantity correction and monetary adjustment facts without `source_trade`; a fabricated Trade or mismatched checksum is invalid. Only new facts/transactions/entries may be inserted. UPDATE/DELETE of any historical Ledger row is forbidden.
 
 ## Portfolio projection
 
@@ -36,13 +36,13 @@ A CAS mismatch is `QQ-COMMON-1003`; the Application may reread the stream and re
 - compare-and-swaps affected current position and Portfolio rows;
 - inserts `portfolio.position_changed.v1` Outbox evidence.
 
-The same `source_ledger_transaction_id` with the same fingerprint is a no-op returning the existing version. A different fingerprint is `QQ-STORAGE-7009`. Sequence gap/regression, position/Portfolio version mismatch or stale repair fencing is fail-closed; no projection row, checkpoint or Outbox message changes.
+The same `source_ledger_transaction_id` with the same fingerprint is a no-op returning the existing `ProjectionResult`. A different fingerprint is `QQ-STORAGE-7009`. Sequence gap/regression, position/Portfolio version mismatch or stale repair fencing is fail-closed; no projection row, checkpoint or Outbox message changes. An uncertain projection commit is `UNKNOWN/QQ-STORAGE-7013`, queried by the same projection operation identity.
 
-Availability uses the immutable Position `availability_policy_version`. `IMMEDIATE_V1` applies the Trade delta to quantity and availability together. `T_PLUS_ONE_V1` never increases availability on same-day BUY; its TradingCalendar-confirmed session release is an idempotent atomic append to `portfolio_settlement_releases` plus Position/Portfolio CAS, audit and Outbox. A SELL exceeding internal available quantity or a release without a verified prior Ledger checkpoint is rejected before mutation. Broker-reported availability cannot invoke either mutation.
+Availability uses the immutable Position `availability_policy_version`. `IMMEDIATE_V1` applies the Trade delta to quantity and availability together. `T_PLUS_ONE_V1` never increases availability on same-day BUY. `release_settlement` validates the exact TradingCalendar version/session evidence, unchanged source checkpoint, expected Position/Portfolio versions, fencing token and `quantity_to_release <= quantity - available_quantity`; it atomically inserts one release identity, applies `quantity_delta=0`, increases availability, increments both versions exactly once, preserves the Ledger checkpoint, and writes audit/Outbox. Same release identity/fingerprint returns its original result without another increment; conflict/out-of-order/unverified/excess/stale CAS is rejected before mutation. Uncertain commit is `UNKNOWN/QQ-STORAGE-7014` and is queried by the same release/idempotency identity. Broker-reported availability cannot invoke either mutation.
 
 Current projections are rebuildable from Ledger. `replay` MUST NOT mutate Ledger or Broker facts. Rebuild replacement is allowed only for the derived current projection after full checksum/sequence verification and uses a single atomic swap guarded by the expected old projection version/checksum. A mismatch opens/updates a Case and returns `QQ-RECOVERY-8003`.
 
-`write_snapshot` writes only a checksum-valid snapshot for an already committed Portfolio version/checkpoint. Snapshot failure does not roll back Ledger/Portfolio facts. Invalid snapshots remain diagnostic evidence and are never returned as valid.
+`write_snapshot` first rejects any position/cash/market observation outside the single `snapshot_currency`, then writes only a valid `projection_state_checksum` for an already committed Portfolio version/checkpoint. The checksum covers only Ledger-replayable state; snapshot/valuation envelope and versioned market observations are stored separately. Snapshot failure does not roll back Ledger/Portfolio facts. Invalid snapshots remain diagnostic evidence and are never returned as valid.
 
 ## Reconciliation Case and repair
 
@@ -72,6 +72,11 @@ Every included write commits or all roll back. Reuse of the same idempotency key
 | missing/inactive Ledger account | `QQ-STORAGE-7007` | none |
 | currency/scope/instrument mismatch | `QQ-STORAGE-7008` | none |
 | unbalanced transaction/residual too large | `QQ-STORAGE-7005` | none |
+| close/release exceeds verified internal availability or reconciliation difference | `QQ-RECOVERY-8001` | none; Case/evidence only |
+| deterministic UUID5 collision | `QQ-STORAGE-7011` | none; Case/evidence only |
+| Ledger post commit uncertain | `QQ-STORAGE-7012`, `UNKNOWN` | query same transaction/idempotency identity |
+| projection commit uncertain | `QQ-STORAGE-7013`, `UNKNOWN` | query same projection identity |
+| settlement release commit uncertain | `QQ-STORAGE-7014`, `UNKNOWN` | query same release/idempotency identity |
 | invalid snapshot with intact Ledger | `QQ-STORAGE-7003`, full replay | diagnostic evidence only |
 | Ledger gap or replay mismatch | `QQ-RECOVERY-8003` | barrier closed; Case/evidence only |
 | illegal Case transition | `QQ-RECOVERY-8004` | none |
