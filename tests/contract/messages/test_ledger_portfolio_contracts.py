@@ -306,6 +306,18 @@ def _ledger_checksum(transaction: dict[str, Any]) -> str:
     return hashlib.sha256(serialized.encode()).hexdigest()
 
 
+def _require_resolved_order_id(source_trade: dict[str, Any]) -> None:
+    order_id = source_trade.get("order_id")
+    if not isinstance(order_id, str):
+        raise ValueError("resolved internal order identity is required")
+    try:
+        parsed = uuid.UUID(order_id)
+    except ValueError as error:
+        raise ValueError("resolved internal order identity is invalid") from error
+    if str(parsed) != order_id:
+        raise ValueError("resolved internal order identity is not canonical")
+
+
 def _validate_ledger_semantics(document: dict[str, Any]) -> None:
     account_items = [item for item in document["dtos"] if item["dto_type"] == "LEDGER_ACCOUNT"]
     accounts = {item["ledger_account_id"]: item for item in account_items}
@@ -325,6 +337,7 @@ def _validate_ledger_semantics(document: dict[str, Any]) -> None:
     for request in (
         dto for dto in document["dtos"] if dto["dto_type"] == "TRADE_ACCOUNTING_REQUEST"
     ):
+        _require_resolved_order_id(request["source_trade"])
         if request["account_id"] != request["source_trade"]["account_id"]:
             raise ValueError("request account identity mismatch")
         fee = request["source_trade"]["fee"]
@@ -391,6 +404,7 @@ def _validate_ledger_semantics(document: dict[str, Any]) -> None:
         if dto["dto_type"] != "LEDGER_TRANSACTION":
             continue
         if dto["transaction_kind"] == "TRADE":
+            _require_resolved_order_id(dto["source_trade"])
             if dto["account_id"] != dto["source_trade"]["account_id"]:
                 raise ValueError("transaction account identity mismatch")
             transaction_id = _trade_identity(dto["source_trade"])

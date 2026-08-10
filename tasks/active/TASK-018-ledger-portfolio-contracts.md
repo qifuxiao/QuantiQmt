@@ -64,6 +64,7 @@ delivery:
 - Source Trade now requires an independently typed fee amount/currency/rounding tuple. Fee is included in the source/request fingerprints and independently posted under `BROKER_CHARGES_V1`; fixtures reject missing/float/wrong-currency/wrong-rounding/policy-mismatched fees.
 - `LedgerEntry` is frozen as an embedded-only `LedgerTransaction.entries` structure and is not independently routed by the top-level Schema or Port DTO list.
 - TASK-018 remains active with draft/in-progress/pending/prohibited delivery; these fixes are awaiting independent Review and contain no runtime or migration implementation.
+- Review P1 after head `32acd040cb97d62d9a29996cd04a6a983b88dc8c` is covered by a TRADE-only resolved Order UUID gate: public Broker v1 remains nullable/optional, while internal request/transaction Schema and semantic validation reject missing, null, non-canonical, invalid, or unresolved Order identity. `WF-TRADE-ACCOUNTING` machine-freezes reconciliation-only output and forbids Ledger/Portfolio output for unresolved trades; repair routes remain independent of Broker Order identity.
 
 ## Review focus
 

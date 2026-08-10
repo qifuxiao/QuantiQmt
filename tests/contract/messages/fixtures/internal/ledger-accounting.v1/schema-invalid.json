@@ -12,6 +12,9 @@
     {"name":"repair_missing_command","dto_index":9,"changes":{},"remove_paths":["dtos.9.adjustment_source.command_id"],"expected_validator":"required"},
     {"name":"repair_missing_checksum","dto_index":9,"changes":{},"remove_paths":["dtos.9.adjustment_source.repair_fact_checksum"],"expected_validator":"required"},
     {"name":"trade_carries_repair_source","dto_index":7,"changes":{"dtos.7.adjustment_source":{} }},
-    {"name":"repair_fabricates_source_trade","dto_index":9,"changes":{"dtos.9.source_trade":{} }}
+    {"name":"repair_fabricates_source_trade","dto_index":9,"changes":{"dtos.9.source_trade":{} }},
+    {"name":"trade_order_id_missing","dto_index":7,"changes":{},"remove_paths":["dtos.7.source_trade.order_id"],"expected_validator":"required"},
+    {"name":"trade_order_id_null","dto_index":7,"changes":{"dtos.7.source_trade.order_id":null}},
+    {"name":"trade_order_id_not_internal_uuid","dto_index":7,"changes":{"dtos.7.source_trade.order_id":"legacy-order-id"}}
   ]
 }

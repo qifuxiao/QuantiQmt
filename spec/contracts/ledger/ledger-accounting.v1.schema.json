@@ -36,7 +36,7 @@
         "account_id": {"type": "string", "minLength": 1, "maxLength": 128},
         "trading_day": {"type": "string", "format": "date"},
         "trade_id": {"type": "string", "minLength": 1, "maxLength": 128},
-        "order_id": {"type": ["string", "null"], "maxLength": 128},
+        "order_id": {"$ref": "#/$defs/uuid"},
         "client_order_id": {"type": ["string", "null"], "maxLength": 128},
         "broker_order_id": {"type": "string", "minLength": 1, "maxLength": 128},
         "instrument_id": {"type": "string", "minLength": 1, "maxLength": 64},

@@ -19,10 +19,15 @@ workflow:
     - {id: update_order_and_publish_trade_recorded, owner: OMS, transaction: "Order + Trade + Outbox"}
     - id: resolve_account_currency_and_internal_order
       owner: AccountLedger
+      resolved_order_id: required_canonical_internal_order_uuid
+      unresolved_conditions: [order_id_missing, order_id_null, order_id_invalid_uuid, order_id_not_found]
+      unresolved_reason: TRADE_MISSING_INTERNAL
+      unresolved_effect: append_reconciliation_evidence_or_case_only
+      forbidden_outputs_when_unresolved: [TRADE_ACCOUNTING_REQUEST, LEDGER_TRANSACTION, LEDGER_ENTRY, POSITION_PROJECTION_CHANGE]
       selection_key: [scope_id, currency, account_type, instrument_id]
       required_cardinality: exactly_one_active_taxonomy_valid_account_per_key
       frozen_versions: [account_mapping_version, accounting_policy_version, fee_policy_version, rounding_policy_version]
-      unresolved: fail_closed_and_reconciliation_evidence
+      unresolved: fail_closed_before_accounting_or_projection
     - id: build_deterministic_balanced_transaction
       owner: AccountLedger
       contract: CONTRACT-LEDGER-ACCOUNTING-V1

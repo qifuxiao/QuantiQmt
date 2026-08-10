@@ -77,7 +77,7 @@ storage:
         account_id: {type: varchar, max_length: 128, nullable: false}
         trading_day: {type: date, nullable: true}
         trade_id: {type: varchar, max_length: 128, nullable: true}
-        order_id: {type: varchar, max_length: 128, nullable: true}
+        order_id: {type: uuid, nullable: true, required_when: transaction_kind_is_TRADE, forbidden_when: transaction_kind_is_repair}
         client_order_id: {type: varchar, max_length: 128, nullable: true}
         broker_order_id: {type: varchar, max_length: 128, nullable: true}
         idempotency_key: {type: varchar, max_length: 256, nullable: false}
@@ -101,7 +101,7 @@ storage:
         - [idempotency_key]
         - [scope_id, ledger_sequence]
         - {columns: [case_id, command_id, transaction_id], when: transaction_kind_is_repair}
-      checks: [trade_source_xor_repair_source, policy_matches_transaction_kind]
+      checks: [trade_source_xor_repair_source, policy_matches_transaction_kind, trade_order_id_is_resolved_internal_uuid, repair_has_no_order_id]
       mutation: [INSERT]
       append_only: true
     ledger_entries:

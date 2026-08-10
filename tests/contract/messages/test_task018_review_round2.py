@@ -527,3 +527,76 @@ def test_ledger_entry_is_only_an_embedded_transaction_structure() -> None:
     assert not validator.is_valid(transaction["entries"][0])
     ports = (ROOT / "spec/interfaces/ledger-portfolio-ports.md").read_text(encoding="utf-8")
     assert "LedgerEntry is an embedded-only structure" in ports
+
+
+def test_resolved_internal_order_identity_gates_trade_accounting_only() -> None:
+    public_validator = _validator("events/broker.trade_reported.v1.schema.json")
+    public_trade = _load(FIXTURES.parent / "broker.trade_reported.v1" / "minimal.valid.json")
+    assert "order_id" not in public_trade
+    public_validator.validate(public_trade)
+    public_with_null_order = deepcopy(public_trade)
+    public_with_null_order["order_id"] = None
+    public_validator.validate(public_with_null_order)
+
+    internal_validator = _validator("ledger/ledger-accounting.v1.schema.json")
+    fixture = _load(FIXTURES / "ledger-accounting.v1/valid.json")
+    trade = next(
+        dto
+        for dto in fixture["dtos"]
+        if dto["dto_type"] == "LEDGER_TRANSACTION" and dto["transaction_kind"] == "TRADE"
+    )
+    assert trade["source_trade"]["order_id"] == "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+    internal_validator.validate(trade)
+    _validate_ledger_semantics(fixture)
+
+    for invalid_order_id in (None, "legacy-order-id", "AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA"):
+        invalid = deepcopy(trade)
+        invalid["source_trade"]["order_id"] = invalid_order_id
+        assert not internal_validator.is_valid(invalid), invalid_order_id
+
+    missing = deepcopy(trade)
+    missing["source_trade"].pop("order_id")
+    assert not internal_validator.is_valid(missing)
+
+    semantic_invalid = deepcopy(fixture)
+    next(
+        dto
+        for dto in semantic_invalid["dtos"]
+        if dto["dto_type"] == "LEDGER_TRANSACTION" and dto["transaction_kind"] == "TRADE"
+    )["source_trade"]["order_id"] = None
+    with pytest.raises(ValueError, match="resolved internal order identity"):
+        _validate_ledger_semantics(semantic_invalid)
+
+    adjustment = next(
+        dto
+        for dto in fixture["dtos"]
+        if dto["dto_type"] == "LEDGER_TRANSACTION" and dto["transaction_kind"] == "ADJUSTMENT"
+    )
+    assert "source_trade" not in adjustment
+    internal_validator.validate(adjustment)
+
+
+def test_unresolved_broker_trade_is_reconciliation_only() -> None:
+    workflow = yaml.safe_load(
+        (ROOT / "spec/workflows/trade-accounting.yaml").read_text(encoding="utf-8")
+    )["workflow"]
+    resolution = next(
+        step
+        for step in workflow["steps"]
+        if step["id"] == "resolve_account_currency_and_internal_order"
+    )
+    assert resolution["resolved_order_id"] == "required_canonical_internal_order_uuid"
+    assert resolution["unresolved_conditions"] == [
+        "order_id_missing",
+        "order_id_null",
+        "order_id_invalid_uuid",
+        "order_id_not_found",
+    ]
+    assert resolution["unresolved_reason"] == "TRADE_MISSING_INTERNAL"
+    assert resolution["unresolved_effect"] == "append_reconciliation_evidence_or_case_only"
+    assert resolution["forbidden_outputs_when_unresolved"] == [
+        "TRADE_ACCOUNTING_REQUEST",
+        "LEDGER_TRANSACTION",
+        "LEDGER_ENTRY",
+        "POSITION_PROJECTION_CHANGE",
+    ]
