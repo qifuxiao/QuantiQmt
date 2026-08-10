@@ -1,0 +1,319 @@
+storage:
+  id: STORAGE-LEDGER-PORTFOLIO
+  version: 1
+  implementation_status: contract_only_no_migration
+  authority:
+    ledger_history: ledger_transactions_and_entries
+    trade_identity: broker_trade_fact
+    portfolio_current: rebuildable_from_ledger
+    portfolio_snapshot: rebuildable_acceleration
+    projection_state_checksum: ledger_replayable_state_only
+    reconciliation_evidence: append_only_case_evidence
+    broker_snapshot: evidence_only_never_internal_overwrite
+  canonical_json:
+    encoding: utf-8
+    object_keys: lexicographic
+    whitespace: none
+    unicode_normalization: NFC
+    decimal: unchanged_plain_string
+    timestamp: utc_z_rfc3339
+    float: forbidden
+    negative_zero: forbidden
+  identity:
+    trade_namespace_uuid: 6ea9f94d-16c3-5c7a-8c4f-ec1883388613
+    transaction_id: uuid5_namespace_and_canonical_trade_identity
+    entry_id: uuid5_transaction_id_and_canonical_entry_ordinal
+    repair_fact_namespace_uuid: 8b7f1c2a-7c49-5b44-9dc8-5d0e11d3e760
+    repair_transaction_id: uuid5_namespace_and_canonical_case_command_action_fact_identity
+    settlement_release_id: 'UUID5(position_id, "settlement:" + trading_day + ":" + availability_policy_version)'
+    reconciliation_case_namespace_uuid: a679b9f2-0619-58dd-8a36-d5bb7c211540
+    reconciliation_case_id: uuid5_namespace_and_canonical_case_key
+  decimal:
+    input_max_scale: 8
+    CNY:
+      ledger_scale: 2
+      minimum_unit: "0.01"
+      rounding: ROUND_HALF_EVEN
+    average_cost_scale: 8
+    residual:
+      below_minimum_unit: explicit_rounding_residual_entry
+      at_or_above_minimum_unit: QQ-STORAGE-7005
+  checksum:
+    algorithm: sha256
+    representation: lowercase_hex
+    transaction_input: canonical_json(transaction_without_transaction_checksum)
+    chain_input: "previous_transaction_checksum + newline + canonical_transaction"
+    genesis_previous_component: "0000000000000000000000000000000000000000000000000000000000000000"
+    projection_state_input:
+      fields: [schema_version, portfolio_id, account_id, scope_id, snapshot_currency, portfolio_version, cash, ledger_derived_positions, realized_pnl, source_checkpoint]
+      excludes: [snapshot_id, created_at, valuation_time, updated_at, market_observations, market_price, market_value, total_equity, unrealized_pnl, valuation_quality]
+      ordering: {cash: currency, positions: [account_id, instrument_id, currency]}
+  tables:
+    ledger_accounts:
+      primary_key: [ledger_account_id]
+      columns:
+        ledger_account_id: {type: uuid, nullable: false}
+        account_code: {type: varchar, max_length: 64, nullable: false}
+        classification: {type: enum, values: [ASSET, LIABILITY, EQUITY, INCOME, EXPENSE], nullable: false}
+        account_type: {type: enum, values: [CASH, POSITION_COST, COMMISSION_EXPENSE, FEE_EXPENSE, TAX_EXPENSE, REALIZED_PNL, ROUNDING_RESIDUAL, CAPITAL], nullable: false}
+        normal_balance: {type: enum, values: [DEBIT, CREDIT], nullable: false}
+        scope_id: {type: varchar, max_length: 128, nullable: false}
+        account_id: {type: varchar, max_length: 128, nullable: false}
+        currency: {type: char, length: 3, nullable: false}
+        instrument_id: {type: varchar, max_length: 64, nullable: true}
+        active: {type: boolean, nullable: false}
+        created_at: {type: timestamptz, nullable: false}
+      unique:
+        - [scope_id, currency, account_code]
+        - {columns: [scope_id, account_id, currency, account_type, instrument_id], nulls: NOT_DISTINCT, purpose: deterministic_active_selection}
+      checks: [account_type_classification_normal_balance_instrument_taxonomy]
+      immutable_after_insert: [ledger_account_id, account_code, classification, account_type, normal_balance, scope_id, account_id, currency, instrument_id, created_at]
+    ledger_transactions:
+      primary_key: [transaction_id]
+      columns:
+        transaction_id: {type: uuid, nullable: false}
+        schema_version: {type: integer, const: 1}
+        broker: {type: varchar, max_length: 64, nullable: true}
+        account_id: {type: varchar, max_length: 128, nullable: false}
+        trading_day: {type: date, nullable: true}
+        trade_id: {type: varchar, max_length: 128, nullable: true}
+        order_id: {type: uuid, nullable: true, required_when: transaction_kind_is_TRADE, forbidden_when: transaction_kind_is_repair}
+        client_order_id: {type: varchar, max_length: 128, nullable: true}
+        broker_order_id: {type: varchar, max_length: 128, nullable: true}
+        idempotency_key: {type: varchar, max_length: 256, nullable: false}
+        source_fingerprint: {type: char, length: 64, nullable: false}
+        scope_id: {type: varchar, max_length: 128, nullable: false}
+        currency: {type: char, length: 3, nullable: false}
+        ledger_sequence: {type: bigint, minimum: 1, nullable: false}
+        previous_transaction_checksum: {type: char, length: 64, nullable: true}
+        transaction_checksum: {type: char, length: 64, nullable: false}
+        transaction_kind: {type: enum, values: [TRADE, ADJUSTMENT, COMPENSATING_FACT], nullable: false}
+        accounting_policy_version: {type: varchar, max_length: 64, nullable: false}
+        fee_policy_version: {type: varchar, max_length: 64, nullable: true}
+        case_id: {type: uuid, nullable: true}
+        command_id: {type: uuid, nullable: true}
+        correlation_id: {type: varchar, max_length: 64, nullable: false}
+        causation_id: {type: varchar, max_length: 64, nullable: true}
+        recorded_at: {type: timestamptz, nullable: false}
+        posted_at: {type: timestamptz, nullable: false}
+      unique:
+        - {columns: [broker, account_id, trading_day, trade_id], when: transaction_kind_is_TRADE}
+        - [idempotency_key]
+        - [scope_id, ledger_sequence]
+        - {columns: [case_id, command_id, transaction_id], when: transaction_kind_is_repair}
+      checks: [trade_source_xor_repair_source, policy_matches_transaction_kind, trade_order_id_is_resolved_internal_uuid, repair_has_no_order_id]
+      mutation: [INSERT]
+      append_only: true
+    ledger_entries:
+      primary_key: [entry_id]
+      columns:
+        entry_id: {type: uuid, nullable: false}
+        transaction_id: {type: uuid, nullable: false}
+        entry_ordinal: {type: integer, minimum: 0, nullable: false}
+        ledger_account_id: {type: uuid, nullable: false}
+        entry_type: {type: enum, values: [CASH, POSITION_COST, COMMISSION, FEE, TAX, REALIZED_PNL, ROUNDING_RESIDUAL, CAPITAL], nullable: false}
+        direction: {type: enum, values: [DEBIT, CREDIT], nullable: false}
+        amount: {type: decimal_string, scale: currency_policy, nullable: false}
+        currency: {type: char, length: 3, nullable: false}
+        instrument_id: {type: varchar, max_length: 64, nullable: true}
+        occurred_at: {type: timestamptz, nullable: false}
+      unique: [[transaction_id, entry_ordinal]]
+      mutation: [INSERT]
+      append_only: true
+    ledger_repair_facts:
+      primary_key: [fact_id]
+      columns:
+        fact_id: {type: uuid, nullable: false}
+        transaction_id: {type: uuid, nullable: false}
+        fact_type: {type: enum, values: [QUANTITY_CORRECTION, MONETARY_ADJUSTMENT, COMPENSATING_FACT], nullable: false}
+        case_id: {type: uuid, nullable: false}
+        command_id: {type: uuid, nullable: false}
+        command_fingerprint: {type: char, length: 64, nullable: false}
+        action_id: {type: uuid, nullable: false}
+        evidence_id: {type: uuid, nullable: false}
+        account_id: {type: varchar, max_length: 128, nullable: false}
+        case_version: {type: bigint, minimum: 1, nullable: false}
+        source_checkpoint: {type: bigint, minimum: 0, nullable: false}
+        authorization_fingerprint: {type: char, length: 64, nullable: false}
+        fencing_token: {type: bigint, minimum: 1, nullable: false}
+        repair_fact_checksum: {type: char, length: 64, nullable: false}
+        compensates_transaction_id: {type: uuid, nullable: true}
+        fact_payload: {type: json, nullable: false}
+        created_at: {type: timestamptz, nullable: false}
+      unique: [[case_id, case_version, command_id, action_id, fact_id], [command_id, action_id], [transaction_id], [repair_fact_checksum]]
+      checks: [repair_fact_checksum_matches_canonical_fact, repair_account_matches_transaction_and_case]
+      mutation: [INSERT]
+      append_only: true
+    portfolio_projection_journal:
+      primary_key: [projection_entry_id]
+      columns:
+        projection_entry_id: {type: uuid, nullable: false}
+        portfolio_id: {type: uuid, nullable: false}
+        position_id: {type: uuid, nullable: false}
+        source_kind: {type: enum, values: [TRADE, SETTLEMENT_RELEASE], nullable: false}
+        source_ledger_transaction_id: {type: uuid, nullable: true}
+        source_settlement_release_id: {type: uuid, nullable: true}
+        source_fingerprint: {type: char, length: 64, nullable: false}
+        source_sequence: {type: bigint, minimum: 0, nullable: false}
+        position_version: {type: bigint, minimum: 1, nullable: false}
+        portfolio_version: {type: bigint, minimum: 1, nullable: false}
+        payload: {type: json, nullable: false}
+        projected_at: {type: timestamptz, nullable: false}
+      unique:
+        - [source_ledger_transaction_id]
+        - [source_settlement_release_id]
+        - [position_id, position_version]
+      checks: [exactly_one_source_identity, trade_advances_checkpoint, settlement_release_preserves_checkpoint]
+      mutation: [INSERT]
+      append_only: true
+    positions:
+      primary_key: [position_id]
+      authority: portfolio_projection_journal
+      columns:
+        position_id: {type: uuid, nullable: false}
+        portfolio_id: {type: uuid, nullable: false}
+        account_id: {type: varchar, max_length: 128, nullable: false}
+        scope_id: {type: varchar, max_length: 128, nullable: false}
+        instrument_id: {type: varchar, max_length: 64, nullable: false}
+        currency: {type: char, length: 3, nullable: false}
+        cost_basis_method: {type: enum, values: [WEIGHTED_AVERAGE_V1], nullable: false}
+        availability_policy_version: {type: enum, values: [IMMEDIATE_V1, T_PLUS_ONE_V1], nullable: false}
+        position_version: {type: bigint, minimum: 0, nullable: false}
+        portfolio_version: {type: bigint, minimum: 0, nullable: false}
+        source_sequence: {type: bigint, minimum: 0, nullable: false}
+        state_payload: {type: json, nullable: false}
+        updated_at: {type: timestamptz, nullable: false}
+      unique: [[portfolio_id, account_id, scope_id, instrument_id, currency, cost_basis_method, availability_policy_version]]
+      checks: [available_quantity_between_zero_and_quantity, side_matches_quantity, state_payload_versions_match_columns]
+      rebuild: atomic_swap_after_verified_full_replay_only
+    portfolio_settlement_releases:
+      primary_key: [release_id]
+      columns:
+        release_id: {type: uuid, nullable: false}
+        idempotency_key: {type: varchar, max_length: 256, nullable: false}
+        request_fingerprint: {type: char, length: 64, nullable: false}
+        portfolio_id: {type: uuid, nullable: false}
+        position_id: {type: uuid, nullable: false}
+        scope_id: {type: varchar, max_length: 128, nullable: false}
+        currency: {type: char, length: 3, nullable: false}
+        trading_day: {type: date, nullable: false}
+        availability_policy_version: {type: enum, values: [T_PLUS_ONE_V1], nullable: false}
+        source_sequence: {type: bigint, minimum: 0, nullable: false}
+        source_transaction_checksum: {type: char, length: 64, nullable: true}
+        expected_position_version: {type: bigint, minimum: 0, nullable: false}
+        expected_portfolio_version: {type: bigint, minimum: 0, nullable: false}
+        fencing_token: {type: bigint, minimum: 1, nullable: false}
+        calendar_id: {type: varchar, max_length: 64, nullable: false}
+        calendar_version: {type: varchar, max_length: 64, nullable: false}
+        calendar_session_id: {type: varchar, max_length: 128, nullable: false}
+        calendar_evidence_checksum: {type: char, length: 64, nullable: false}
+        released_quantity: {type: bigint, minimum: 1, nullable: false}
+        position_version: {type: bigint, minimum: 1, nullable: false}
+        portfolio_version: {type: bigint, minimum: 1, nullable: false}
+        created_at: {type: timestamptz, nullable: false}
+      unique: [[position_id, trading_day, availability_policy_version], [idempotency_key]]
+      checks: [calendar_verified, checkpoint_unchanged, released_not_above_unavailable, versions_increment_exactly_once]
+      mutation: [INSERT]
+      append_only: true
+    portfolio_snapshots:
+      primary_key: [snapshot_id]
+      columns:
+        snapshot_id: {type: uuid, nullable: false}
+        portfolio_id: {type: uuid, nullable: false}
+        account_id: {type: varchar, max_length: 128, nullable: false}
+        scope_id: {type: varchar, max_length: 128, nullable: false}
+        snapshot_currency: {type: char, length: 3, nullable: false}
+        schema_version: {type: integer, const: 1}
+        portfolio_version: {type: bigint, minimum: 0, nullable: false}
+        source_sequence: {type: bigint, minimum: 0, nullable: false}
+        source_transaction_checksum: {type: char, length: 64, nullable: true}
+        projection_state_payload: {type: json, nullable: false}
+        valuation_envelope_payload: {type: json, nullable: false}
+        projection_state_checksum: {type: char, length: 64, nullable: false}
+        created_at: {type: timestamptz, nullable: false}
+      unique: [[portfolio_id, portfolio_version]]
+      validity: [supported_schema_version, projection_state_checksum_matches, checkpoint_not_beyond_ledger_head, source_transaction_checksum_matches, single_snapshot_currency, quality_matches_market_observations]
+    reconciliation_cases:
+      primary_key: [case_id]
+      columns:
+        case_id: {type: uuid, nullable: false}
+        case_key_fingerprint: {type: char, length: 64, nullable: false}
+        case_version: {type: bigint, minimum: 1, nullable: false}
+        state: {type: reconciliation_case_state, nullable: false}
+        severity: {type: enum, values: [P0, P1, P2, P3], nullable: false}
+        current_evidence_id: {type: uuid, nullable: false}
+        owner: {type: varchar, max_length: 128, nullable: true}
+        deadline_at: {type: timestamptz, nullable: false}
+        current_payload: {type: json, nullable: false}
+        updated_at: {type: timestamptz, nullable: false}
+      unique: [[case_key_fingerprint]]
+      references: {state: SM-RECONCILIATION-CASE.states}
+    reconciliation_evidence:
+      primary_key: [evidence_id]
+      columns:
+        evidence_id: {type: uuid, nullable: false}
+        case_id: {type: uuid, nullable: false}
+        case_version: {type: bigint, minimum: 1, nullable: false}
+        payload: {type: json, nullable: false}
+        captured_at: {type: timestamptz, nullable: false}
+        expires_at: {type: timestamptz, nullable: false}
+      mutation: [INSERT]
+      append_only: true
+    reconciliation_transitions:
+      primary_key: [transition_id]
+      columns:
+        transition_id: {type: uuid, nullable: false}
+        case_id: {type: uuid, nullable: false}
+        case_version: {type: bigint, minimum: 1, nullable: false}
+        from_state: {type: reconciliation_case_state, nullable: false}
+        to_state: {type: reconciliation_case_state, nullable: false}
+        event: {type: varchar, max_length: 64, nullable: false}
+        evidence_id: {type: uuid, nullable: false}
+        actor_id: {type: varchar, max_length: 128, nullable: false}
+        occurred_at: {type: timestamptz, nullable: false}
+      unique: [[case_id, case_version]]
+      mutation: [INSERT]
+      append_only: true
+    repair_commands:
+      primary_key: [command_id]
+      columns:
+        command_id: {type: uuid, nullable: false}
+        idempotency_key: {type: varchar, max_length: 256, nullable: false}
+        command_fingerprint: {type: char, length: 64, nullable: false}
+        case_id: {type: uuid, nullable: false}
+        expected_case_version: {type: bigint, minimum: 1, nullable: false}
+        expected_portfolio_version: {type: bigint, minimum: 0, nullable: false}
+        fencing_token: {type: bigint, minimum: 1, nullable: false}
+        payload: {type: json, nullable: false}
+        outcome: {type: enum, values: [APPLIED, DUPLICATE, REJECTED, UNKNOWN], nullable: false}
+        result_payload: {type: json, nullable: false}
+        created_at: {type: timestamptz, nullable: false}
+        completed_at: {type: timestamptz, nullable: true}
+      unique: [[idempotency_key]]
+      fingerprint_projection:
+        includes: [schema_version, command_id, idempotency_key, case_id, case_key, case_severity, expected_case_version, expected_portfolio_version, fencing_token, mode, immutable_evidence_identity, authorization_binding, approval_binding, ordered_actions]
+        excludes: [requested_at, deadline_at, authorization_authorized_at, approval_approved_at, evidence_observation_capture_expiry_times, created_at, completed_at, command_fingerprint]
+  transaction_rules:
+    trade_post: [inbox_accept, ledger_stream_cas, transaction_insert, entries_insert, outbox_insert, audit_insert]
+    portfolio_project: [projection_journal_insert, position_cas, portfolio_cas, checkpoint_advance, outbox_insert]
+    settlement_release: [calendar_and_checkpoint_verify, release_idempotency_insert, position_cas, portfolio_cas, checkpoint_preserved, audit_insert, outbox_insert]
+    case_transition: [transition_insert, case_cas, audit_insert, outbox_insert]
+    repair_apply: [repair_idempotency_insert, repair_fact_insert, ledger_append, projection_apply, case_transition, audit_insert, outbox_insert]
+    atomic: true
+    partial_commit: forbidden
+    external_io_inside_transaction: forbidden
+  recovery:
+    snapshot_absent: full_ledger_replay
+    snapshot_invalid_or_incompatible: discard_for_attempt_then_full_ledger_replay
+    lower_snapshot_after_invalid: forbidden_in_same_attempt
+    ledger_sequence: strictly_contiguous
+    version_regression_or_gap: fail_closed_QQ_STORAGE_7010
+    replay_checksum_mismatch: fail_closed_QQ_RECOVERY_8003
+    repair_unknown: query_same_idempotency_key_and_reconcile
+    ledger_post_unknown: query_same_transaction_and_idempotency_key_QQ_STORAGE_7012
+    projection_unknown: query_same_projection_operation_QQ_STORAGE_7013
+    settlement_release_unknown: query_same_release_and_idempotency_key_QQ_STORAGE_7014
+  migration:
+    owned_by_task_018: false
+    required_follow_up: TASK-007_implementation_must_supply_expand_only_migration_before_deployment
+    destructive_backfill: forbidden

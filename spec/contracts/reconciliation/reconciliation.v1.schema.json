@@ -1,0 +1,281 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:quantiqmt:internal:reconciliation:v1",
+  "title": "ReconciliationContractV1",
+  "oneOf": [
+    {"$ref": "#/$defs/reconciliationCase"},
+    {"$ref": "#/$defs/caseTransition"},
+    {"$ref": "#/$defs/repairCommand"},
+    {"$ref": "#/$defs/repairResult"}
+  ],
+  "$defs": {
+    "uuid": {"type": "string", "format": "uuid", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"},
+    "timestamp": {"type": "string", "format": "date-time", "pattern": "Z$"},
+    "hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "currency": {"type": "string", "pattern": "^[A-Z]{3}$"},
+    "decimal": {"type": "string", "pattern": "^-?(0|[1-9][0-9]{0,17})(\\.[0-9]{1,8})?$", "not": {"pattern": "^-0(?:\\.0+)?$"}},
+    "nonZeroDecimal": {"type": "string", "pattern": "^-?(?=.*[1-9])(0|[1-9][0-9]{0,17})(\\.[0-9]{1,8})?$"},
+    "caseKey": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["broker", "account_id", "trading_day", "scope_id", "reason_code"],
+      "properties": {
+        "broker": {"type": "string", "minLength": 1, "maxLength": 64},
+        "account_id": {"type": "string", "minLength": 1, "maxLength": 128},
+        "trading_day": {"type": "string", "format": "date"},
+        "scope_id": {"type": "string", "minLength": 1, "maxLength": 128},
+        "reason_code": {"enum": ["CASH_MISMATCH", "POSITION_QUANTITY_MISMATCH", "POSITION_COST_MISMATCH", "TRADE_MISSING_INTERNAL", "TRADE_MISSING_BROKER", "LEDGER_BALANCE_INVALID", "SNAPSHOT_INVALID", "REPAIR_OUTCOME_UNKNOWN"]}
+      }
+    },
+    "differenceValue": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "value", "currency", "instrument_id"],
+      "properties": {
+        "kind": {"enum": ["MONEY", "QUANTITY", "TEXT"]},
+        "value": {"type": ["string", "null"], "maxLength": 256},
+        "currency": {"type": ["string", "null"], "pattern": "^[A-Z]{3}$"},
+        "instrument_id": {"type": ["string", "null"], "maxLength": 64}
+      }
+    },
+    "difference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["field", "internal_value", "broker_value", "delta"],
+      "properties": {
+        "field": {"enum": ["CASH", "POSITION_QUANTITY", "POSITION_COST", "TRADE", "LEDGER_BALANCE", "SNAPSHOT"]},
+        "internal_value": {"$ref": "#/$defs/differenceValue"},
+        "broker_value": {"$ref": "#/$defs/differenceValue"},
+        "delta": {"$ref": "#/$defs/differenceValue"}
+      }
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["evidence_id", "case_version", "internal_snapshot_id", "internal_checksum", "internal_checkpoint", "broker_snapshot_id", "broker_observed_at", "broker_sequence", "captured_at", "expires_at"],
+      "properties": {
+        "evidence_id": {"$ref": "#/$defs/uuid"},
+        "case_version": {"type": "integer", "minimum": 1},
+        "internal_snapshot_id": {"$ref": "#/$defs/uuid"},
+        "internal_checksum": {"$ref": "#/$defs/hash"},
+        "internal_checkpoint": {"type": "integer", "minimum": 0},
+        "broker_snapshot_id": {"type": "string", "minLength": 1, "maxLength": 128},
+        "broker_observed_at": {"$ref": "#/$defs/timestamp"},
+        "broker_sequence": {"type": ["integer", "null"], "minimum": 0},
+        "captured_at": {"$ref": "#/$defs/timestamp"},
+        "expires_at": {"$ref": "#/$defs/timestamp"}
+      }
+    },
+    "audit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["created_by", "created_at", "correlation_id", "causation_id", "last_transition_id", "updated_at"],
+      "properties": {
+        "created_by": {"type": "string", "minLength": 1, "maxLength": 128},
+        "created_at": {"$ref": "#/$defs/timestamp"},
+        "correlation_id": {"type": "string", "minLength": 1, "maxLength": 128},
+        "causation_id": {"type": ["string", "null"], "maxLength": 128},
+        "last_transition_id": {"anyOf": [{"$ref": "#/$defs/uuid"}, {"type": "null"}]},
+        "updated_at": {"$ref": "#/$defs/timestamp"}
+      }
+    },
+    "reconciliationCase": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["dto_type", "schema_version", "case_id", "case_key", "case_version", "state", "severity", "differences", "evidence", "owner", "deadline_at", "approval_required", "audit"],
+      "properties": {
+        "dto_type": {"const": "RECONCILIATION_CASE"},
+        "schema_version": {"const": 1},
+        "case_id": {"$ref": "#/$defs/uuid"},
+        "case_key": {"$ref": "#/$defs/caseKey"},
+        "case_version": {"type": "integer", "minimum": 1},
+        "state": {"enum": ["OPEN", "INVESTIGATING", "PROPOSED", "APPROVED", "REJECTED", "APPLYING", "UNKNOWN", "RESOLVED", "FAILED"]},
+        "severity": {"enum": ["P0", "P1", "P2", "P3"]},
+        "differences": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/difference"}},
+        "evidence": {"$ref": "#/$defs/evidence"},
+        "owner": {"type": ["string", "null"], "maxLength": 128},
+        "deadline_at": {"$ref": "#/$defs/timestamp"},
+        "approval_required": {"type": "boolean"},
+        "audit": {"$ref": "#/$defs/audit"}
+      },
+      "allOf": [
+        {"if": {"properties": {"severity": {"enum": ["P0", "P1"]}}, "required": ["severity"]}, "then": {"properties": {"approval_required": {"const": true}}}}
+      ]
+    },
+    "caseTransition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["dto_type", "schema_version", "transition_id", "case_id", "expected_case_version", "resulting_case_version", "from_state", "to_state", "event", "actor_id", "reason_code", "evidence_id", "occurred_at"],
+      "properties": {
+        "dto_type": {"const": "CASE_TRANSITION"},
+        "schema_version": {"const": 1},
+        "transition_id": {"$ref": "#/$defs/uuid"},
+        "case_id": {"$ref": "#/$defs/uuid"},
+        "expected_case_version": {"type": "integer", "minimum": 1},
+        "resulting_case_version": {"type": "integer", "minimum": 2},
+        "from_state": {"enum": ["OPEN", "INVESTIGATING", "PROPOSED", "APPROVED", "REJECTED", "APPLYING", "UNKNOWN", "RESOLVED", "FAILED"]},
+        "to_state": {"enum": ["OPEN", "INVESTIGATING", "PROPOSED", "APPROVED", "REJECTED", "APPLYING", "UNKNOWN", "RESOLVED", "FAILED"]},
+        "event": {"enum": ["Assign", "ProposeRepair", "Approve", "Reject", "Apply", "ApplyUncertain", "VerifyResolved", "ApplyFailed", "ReconcileOutcome", "Reinvestigate"]},
+        "actor_id": {"type": "string", "minLength": 1, "maxLength": 128},
+        "reason_code": {"type": "string", "minLength": 1, "maxLength": 128},
+        "evidence_id": {"$ref": "#/$defs/uuid"},
+        "occurred_at": {"$ref": "#/$defs/timestamp"}
+      }
+    },
+    "authorization": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["principal_id", "role", "authorized", "policy_version", "fencing_token", "authorized_at"],
+      "properties": {
+        "principal_id": {"type": "string", "minLength": 1, "maxLength": 128},
+        "role": {"enum": ["RECONCILIATION_ENGINE", "OPERATIONS_APPROVER", "RISK_APPROVER"]},
+        "authorized": {"type": "boolean"},
+        "policy_version": {"type": "string", "minLength": 1, "maxLength": 64},
+        "fencing_token": {"type": "integer", "minimum": 1},
+        "authorized_at": {"$ref": "#/$defs/timestamp"}
+      }
+    },
+    "approval": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["approval_id", "approver_id", "decision", "policy_version", "approved_case_version", "approved_evidence_id", "approved_at"],
+      "properties": {
+        "approval_id": {"$ref": "#/$defs/uuid"},
+        "approver_id": {"type": "string", "minLength": 1, "maxLength": 128},
+        "decision": {"const": "APPROVE"},
+        "policy_version": {"type": "string", "minLength": 1, "maxLength": 64},
+        "approved_case_version": {"type": "integer", "minimum": 1},
+        "approved_evidence_id": {"$ref": "#/$defs/uuid"},
+        "approved_at": {"$ref": "#/$defs/timestamp"}
+      }
+    },
+    "repairEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ledger_account_id", "direction", "amount", "currency", "instrument_id"],
+      "properties": {
+        "ledger_account_id": {"$ref": "#/$defs/uuid"},
+        "direction": {"enum": ["DEBIT", "CREDIT"]},
+        "amount": {"type": "string", "pattern": "^(?=.*[1-9])(0|[1-9][0-9]{0,17})(\\.[0-9]{1,8})?$"},
+        "currency": {"$ref": "#/$defs/currency"},
+        "instrument_id": {"type": ["string", "null"], "maxLength": 64}
+      }
+    },
+    "sourceEvidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["evidence_id", "internal_checkpoint", "broker_snapshot_id", "broker_sequence"],
+      "properties": {
+        "evidence_id": {"$ref": "#/$defs/uuid"},
+        "internal_checkpoint": {"type": "integer", "minimum": 0},
+        "broker_snapshot_id": {"type": "string", "minLength": 1, "maxLength": 128},
+        "broker_sequence": {"type": ["integer", "null"], "minimum": 0}
+      }
+    },
+    "repairFact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["fact_id", "fact_type", "reason_code", "source_evidence", "quantity_correction", "monetary_adjustment", "compensates_fact_id", "entries"],
+      "properties": {
+        "fact_id": {"$ref": "#/$defs/uuid"},
+        "fact_type": {"enum": ["QUANTITY_CORRECTION", "MONETARY_ADJUSTMENT", "COMPENSATING_FACT"]},
+        "reason_code": {"type": "string", "minLength": 1, "maxLength": 128},
+        "source_evidence": {"$ref": "#/$defs/sourceEvidence"},
+        "quantity_correction": {
+          "type": ["object", "null"],
+          "additionalProperties": false,
+          "required": ["instrument_id", "currency", "quantity_delta", "cost_basis_delta"],
+          "properties": {
+            "instrument_id": {"type": "string", "minLength": 1, "maxLength": 64},
+            "currency": {"$ref": "#/$defs/currency"},
+            "quantity_delta": {"type": "integer", "not": {"const": 0}},
+            "cost_basis_delta": {"$ref": "#/$defs/decimal"}
+          }
+        },
+        "monetary_adjustment": {
+          "type": ["object", "null"],
+          "additionalProperties": false,
+          "required": ["currency", "amount_delta"],
+          "properties": {"currency": {"$ref": "#/$defs/currency"}, "amount_delta": {"$ref": "#/$defs/nonZeroDecimal"}}
+        },
+        "compensates_fact_id": {"anyOf": [{"$ref": "#/$defs/uuid"}, {"type": "null"}]},
+        "entries": {"type": "array", "minItems": 2, "items": {"$ref": "#/$defs/repairEntry"}}
+      },
+      "oneOf": [
+        {"properties": {"fact_type": {"const": "QUANTITY_CORRECTION"}, "quantity_correction": {"type": "object"}, "monetary_adjustment": {"type": "null"}, "compensates_fact_id": {"type": "null"}}},
+        {"properties": {"fact_type": {"const": "MONETARY_ADJUSTMENT"}, "quantity_correction": {"type": "null"}, "monetary_adjustment": {"type": "object"}, "compensates_fact_id": {"type": "null"}}},
+        {"properties": {"fact_type": {"const": "COMPENSATING_FACT"}, "compensates_fact_id": {"$ref": "#/$defs/uuid"}}}
+      ]
+    },
+    "repairAction": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["action_id", "operation", "target", "payload", "expected_source_version"],
+      "properties": {
+        "action_id": {"$ref": "#/$defs/uuid"},
+        "operation": {"enum": ["APPEND_ADJUSTMENT", "APPEND_COMPENSATING_FACT"]},
+        "target": {"const": "LEDGER"},
+        "payload": {"$ref": "#/$defs/repairFact"},
+        "expected_source_version": {"type": "integer", "minimum": 0}
+      },
+      "allOf": [
+        {"if": {"properties": {"operation": {"const": "APPEND_COMPENSATING_FACT"}}, "required": ["operation"]}, "then": {"properties": {"payload": {"properties": {"fact_type": {"const": "COMPENSATING_FACT"}}}}}}
+      ]
+    },
+    "repairCommand": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["dto_type", "schema_version", "command_id", "idempotency_key", "command_fingerprint", "case_id", "case_key", "case_severity", "expected_case_version", "expected_portfolio_version", "fencing_token", "mode", "evidence", "authorization", "approval", "actions", "deadline_at", "requested_at"],
+      "properties": {
+        "dto_type": {"const": "REPAIR_COMMAND"},
+        "schema_version": {"const": 1},
+        "command_id": {"$ref": "#/$defs/uuid"},
+        "idempotency_key": {"type": "string", "minLength": 1, "maxLength": 256},
+        "command_fingerprint": {"$ref": "#/$defs/hash"},
+        "case_id": {"$ref": "#/$defs/uuid"},
+        "case_key": {"$ref": "#/$defs/caseKey"},
+        "case_severity": {"enum": ["P0", "P1", "P2", "P3"]},
+        "expected_case_version": {"type": "integer", "minimum": 1},
+        "expected_portfolio_version": {"type": "integer", "minimum": 0},
+        "fencing_token": {"type": "integer", "minimum": 1},
+        "mode": {"enum": ["AUTOMATIC", "MANUAL"]},
+        "evidence": {"$ref": "#/$defs/evidence"},
+        "authorization": {"$ref": "#/$defs/authorization"},
+        "approval": {"anyOf": [{"$ref": "#/$defs/approval"}, {"type": "null"}]},
+        "actions": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/repairAction"}},
+        "deadline_at": {"$ref": "#/$defs/timestamp"},
+        "requested_at": {"$ref": "#/$defs/timestamp"}
+      },
+      "oneOf": [
+        {"properties": {"case_severity": {"enum": ["P0", "P1"]}, "mode": {"const": "MANUAL"}, "approval": {"$ref": "#/$defs/approval"}}},
+        {"properties": {"case_severity": {"enum": ["P2", "P3"]}, "mode": {"const": "AUTOMATIC"}, "approval": {"type": "null"}}},
+        {"properties": {"case_severity": {"enum": ["P2", "P3"]}, "mode": {"const": "MANUAL"}, "approval": {"$ref": "#/$defs/approval"}}}
+      ]
+    },
+    "repairResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["dto_type", "schema_version", "command_id", "idempotency_key", "command_fingerprint", "case_id", "outcome", "case_version", "appended_fact_ids", "failure_code", "reconciliation_required", "audit_id", "completed_at"],
+      "properties": {
+        "dto_type": {"const": "REPAIR_RESULT"},
+        "schema_version": {"const": 1},
+        "command_id": {"$ref": "#/$defs/uuid"},
+        "idempotency_key": {"type": "string", "minLength": 1, "maxLength": 256},
+        "command_fingerprint": {"$ref": "#/$defs/hash"},
+        "case_id": {"$ref": "#/$defs/uuid"},
+        "outcome": {"enum": ["APPLIED", "DUPLICATE", "REJECTED", "UNKNOWN"]},
+        "case_version": {"type": "integer", "minimum": 1},
+        "appended_fact_ids": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/uuid"}},
+        "failure_code": {"enum": [null, "QQ-COMMON-1003", "QQ-STORAGE-7001", "QQ-STORAGE-7005", "QQ-RECOVERY-8001", "QQ-RECOVERY-8004", "QQ-RECOVERY-8005", "QQ-RECOVERY-8006", "QQ-RECOVERY-8007"]},
+        "reconciliation_required": {"type": "boolean"},
+        "audit_id": {"$ref": "#/$defs/uuid"},
+        "completed_at": {"$ref": "#/$defs/timestamp"}
+      },
+      "oneOf": [
+        {"properties": {"outcome": {"enum": ["APPLIED", "DUPLICATE"]}, "appended_fact_ids": {"minItems": 1}, "failure_code": {"type": "null"}, "reconciliation_required": {"const": false}}},
+        {"properties": {"outcome": {"const": "REJECTED"}, "appended_fact_ids": {"maxItems": 0}, "failure_code": {"enum": ["QQ-COMMON-1003", "QQ-STORAGE-7001", "QQ-STORAGE-7005", "QQ-RECOVERY-8001", "QQ-RECOVERY-8004", "QQ-RECOVERY-8005", "QQ-RECOVERY-8006"]}, "reconciliation_required": {"const": false}}},
+        {"properties": {"outcome": {"const": "UNKNOWN"}, "appended_fact_ids": {"maxItems": 0}, "failure_code": {"const": "QQ-RECOVERY-8007"}, "reconciliation_required": {"const": true}}}
+      ]
+    }
+  }
+}

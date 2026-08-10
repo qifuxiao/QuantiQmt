@@ -1,0 +1,13 @@
+{
+  "cases": [
+    {"name":"illegal_reconciliation_transition","error_match":"illegal reconciliation","changes":{"dtos.1.from_state":"OPEN","dtos.1.to_state":"RESOLVED"}},
+    {"name":"case_transition_version_gap","error_match":"transition version","changes":{"dtos.1.resulting_case_version":5}},
+    {"name":"unauthorized_repair","error_match":"not authorized","changes":{"dtos.3.authorization.authorized":false}},
+    {"name":"stale_fencing_version","error_match":"stale repair fencing","changes":{"dtos.3.fencing_token":8}},
+    {"name":"stale_case_version","error_match":"stale repair version","changes":{"dtos.3.expected_case_version":2}},
+    {"name":"stale_reconciliation_evidence","error_match":"evidence is stale","changes":{"dtos.3.evidence.expires_at":"2026-08-07T01:04:00Z"}},
+    {"name":"repair_result_version_chain_mismatch","error_match":"result case version","changes":{"dtos.4.case_version":4}},
+    {"name":"repair_result_identity_mismatch","error_match":"operation identity","changes":{"dtos.4.idempotency_key":"repair|different"}},
+    {"name":"duplicate_repair_command_conflict","error_match":"duplicate repair identity","append_copy_index":3,"changes":{"dtos.6.expected_portfolio_version":3,"dtos.6.command_fingerprint":"1962c4636583ae7bf8493962448629aa0bb7a299b798483dcbba6235de9a0bba"}}
+  ]
+}

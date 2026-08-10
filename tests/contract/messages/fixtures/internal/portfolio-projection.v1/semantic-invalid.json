@@ -1,0 +1,16 @@
+{
+  "cases": [
+    {"name":"position_version_regression","error_match":"position version","changes":{"dtos.1.after.position_version":1}},
+    {"name":"portfolio_version_not_incremented","error_match":"portfolio version","changes":{"dtos.1.after.portfolio_version":1}},
+    {"name":"weighted_average_cost_mismatch","error_match":"weighted average","changes":{"dtos.1.after.average_cost":"10.66666666"}},
+    {"name":"out_of_order_projection","error_match":"source sequence","changes":{"dtos.1.after.source_sequence":3,"dtos.1.source_sequence":3}},
+    {"name":"invalid_snapshot_checksum","error_match":"snapshot.*checksum","changes":{"dtos.9.projection_state_checksum":"ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"}},
+    {"name":"mixed_snapshot_currency","error_match":"mixed snapshot currency","changes":{"dtos.9.cash.0.currency":"USD"}},
+    {"name":"complete_snapshot_with_stale_position","error_match":"fresh valuations","changes":{"dtos.9.positions.0.valuation_quality":"STALE"}},
+    {"name":"complete_snapshot_with_missing_position","error_match":"fresh valuations","changes":{"dtos.9.positions.0.valuation_quality":"MISSING","dtos.9.positions.0.market_price":null,"dtos.9.positions.0.market_value":null,"dtos.9.positions.0.unrealized_pnl":null,"dtos.9.positions.0.valuation_at":null}},
+    {"name":"replay_checksum_mismatch","error_match":"replay checksum","changes":{"dtos.11.actual_projection_state_checksum":"ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"}},
+    {"name":"settlement_checkpoint_mismatch","error_match":"checkpoint mismatch","changes":{"dtos.4.source_checkpoint.last_sequence":2}},
+    {"name":"settlement_release_exceeds_unavailable","error_match":"exceeds unavailable","changes":{"dtos.4.quantity_to_release":101}},
+    {"name":"settlement_version_conflict","error_match":"position version conflict","changes":{"dtos.4.expected_position_version":0}}
+  ]
+}

@@ -1,8 +1,8 @@
 specification:
   name: quantiqmt
-  version: 0.8.0
+  version: 0.9.0
   status: accepted
-  updated: 2026-08-06
+  updated: 2026-08-07
   normative_root: spec
   explanatory_root: docs
 
@@ -77,6 +77,12 @@ catalogs:
       path: contracts/events/ledger.trade_posted.v1.schema.json
     - id: CONTRACT-PORTFOLIO-POSITION-CHANGED-V1
       path: contracts/events/portfolio.position_changed.v1.schema.json
+    - id: CONTRACT-LEDGER-ACCOUNTING-V1
+      path: contracts/ledger/ledger-accounting.v1.schema.json
+    - id: CONTRACT-PORTFOLIO-PROJECTION-V1
+      path: contracts/portfolio/portfolio-projection.v1.schema.json
+    - id: CONTRACT-RECONCILIATION-V1
+      path: contracts/reconciliation/reconciliation.v1.schema.json
     - id: CONTRACT-ERROR-CATALOG
       path: contracts/errors/catalog.yaml
   interfaces:
@@ -90,6 +96,8 @@ catalogs:
       path: interfaces/risk-ports.md
     - id: PORTS-BROKER-SIMULATOR
       path: interfaces/broker-simulator.md
+    - id: PORTS-LEDGER-PORTFOLIO
+      path: interfaces/ledger-portfolio-ports.md
   state_machines:
     - id: SM-ORDER
       path: state-machines/order.yaml
@@ -124,9 +132,13 @@ catalogs:
       path: workflows/order-commit.yaml
     - id: WF-OUTBOX-PUBLICATION
       path: workflows/outbox-publication.yaml
+    - id: WF-RECONCILIATION-REPAIR
+      path: workflows/reconciliation-repair.yaml
   repositories:
     - id: REPO-ORDER
       path: repositories/order-repository.md
+    - id: REPO-LEDGER-PORTFOLIO
+      path: repositories/ledger-portfolio-repositories.md
   storage:
     - id: STORAGE-SOT
       path: storage/source-of-truth.yaml
@@ -134,6 +146,8 @@ catalogs:
       path: storage/order-persistence.yaml
     - id: STORAGE-OUTBOX
       path: storage/outbox.yaml
+    - id: STORAGE-LEDGER-PORTFOLIO
+      path: storage/ledger-portfolio.yaml
   nfr:
     - id: NFR-PERFORMANCE
       path: nfr/performance.yaml
@@ -150,38 +164,42 @@ catalogs:
       path: reviews/IMPLEMENTATION-READINESS-0.7.md
 
 change:
-  id: SPEC-0.8.0-EXECUTION-BROKER-CONTRACTS
-  compatibility: additive_internal_contracts_public_messages_unchanged_runtime_and_storage_binding_deferred_to_task_048
-  previous_version: 0.7.1
-  public_message_schema_changes: none
-  storage_schema_changes: "required additive OrderRegistration broker/capability binding; implementation and expand-only migration are owned by blocked TASK-048"
-  error_catalog_change: none
-  runtime_code_change: "required in Order persistence DTO, serialization, Memory/PostgreSQL projections, Journal, Snapshot, and Recovery; owned by blocked TASK-048 and not implemented by TASK-017"
+  id: SPEC-0.9.0-LEDGER-PORTFOLIO-RECONCILIATION-CONTRACTS
+  compatibility: additive_internal_contracts_and_optional_public_v1_fee_fields_runtime_and_database_implementation_deferred
+  previous_version: 0.8.0
+  public_message_schema_changes: "additive optional fee evidence on broker.trade_reported.v1 and ledger.trade_posted.v1; existing payloads remain schema-valid, but Ledger accounting requires normalized explicit fee evidence and fails closed for historical unbound input"
+  storage_schema_changes: "preserves the 0.8.0 additive OrderRegistration broker/capability binding owned by TASK-048; adds normative initial Ledger, Portfolio projection/snapshot and Reconciliation logical storage contract; TASK-018 creates no migration and no database object"
+  error_catalog_change: "additive version 4 Ledger/replay/repair codes plus version 5 deterministic-collision and per-operation UNKNOWN codes QQ-STORAGE-7011..7014; QQ-STORAGE-7006 and all existing meanings unchanged"
+  runtime_code_change: "TASK-048 remains required for OrderRegistration binding; Ledger/Portfolio/Reconciliation runtime is required only when TASK-007 or another human-authorized successor implements these contracts; TASK-018 changes no runtime code"
   review_change: none
-  contract_change: "freezes ExecutionGateway/BrokerGateway DTOs including typed read failures and BrokerHealth, persisted capability-version binding, operation-specific results, plus deterministic Broker Simulator scenario DSL"
-  semantic_validation_change: "adds mandatory scenario/request operation, sequence/reference/fill-bound and capability regex/registered-ID validation before simulation; canonical UNKNOWN reconciliation rules remain fail-closed"
-  internal_contracts_added: [CONTRACT-EXECUTION-BROKER-GATEWAY-V1, CONTRACT-BROKER-SCENARIO-V1, PORTS-BROKER-SIMULATOR]
+  contract_change: "freezes exhaustive Ledger account taxonomy/resolution, canonical account_id and independently typed commission/fee/tax, authoritative Trade fingerprint/canonical JSON, fixed entry slots, weighted-average projection and explicit T+1 release, single-currency snapshot and replayable state checksum, top-level LedgerTransaction routes with embedded-only entries, discriminated repair facts bound to Case/command/checksum, and exhaustive operation result matrices"
+  semantic_validation_change: "requires machine validation for balance, canonical account identity across source/request/account/transaction, resolved canonical internal Order UUID before TRADE accounting, reconciliation-only handling for missing/null/invalid/unresolved Broker order identity, active unique account selection, independently typed fee currency/rounding and posting, source/repair fingerprints and NFC vectors, repair Case/command/checksum bindings, exact weighted average and versions, release calendar/checkpoint/CAS, snapshot currency/quality/checksum, state transitions/version chain, P0/P1 approval, UNKNOWN result identity/code and append-only repair facts"
+  internal_contracts_added: [CONTRACT-LEDGER-ACCOUNTING-V1, CONTRACT-PORTFOLIO-PROJECTION-V1, CONTRACT-RECONCILIATION-V1, PORTS-LEDGER-PORTFOLIO, REPO-LEDGER-PORTFOLIO, STORAGE-LEDGER-PORTFOLIO, WF-RECONCILIATION-REPAIR]
   public_contracts_added: []
-  task_queue_change: "TASK-017 remains active; TASK-048 owns runtime/storage compatibility and remains blocked on TASK-017; TASK-006 remains blocked on TASK-048 and other declared dependencies"
-  affected_tasks: [TASK-006, TASK-017, TASK-021, TASK-024, TASK-026, TASK-027, TASK-048]
+  task_queue_change: "TASK-018 remains active/draft pending independent Review; TASK-007 remains blocked and is constrained to the frozen contracts; no task is activated"
+  affected_tasks: [TASK-007, TASK-009, TASK-018, TASK-019, TASK-021, TASK-024, TASK-027]
   deployment_order:
     - independently_review_and_merge_task_017_contracts
-    - human_authorized_task_017_closeout_with_trusted_delivery_evidence
     - activate_implement_review_and_merge_task_048_order_registration_binding
-    - deploy_task_048_expand_only_storage_and_compatible_runtime_read_write_path
-    - verify_historical_registrations_remain_unbound_and_fail_closed_until_auditable_binding
-    - keep_task_006_blocked_until_task_005_task_017_and_task_048_are_trusted_completed
     - implement_task_006_only_against_the_versioned_contract_snapshot
+    - independently_review_and_merge_task_018_contracts
+    - human_authorized_task_018_closeout_with_trusted_delivery_evidence
+    - keep_TASK_007_blocked_until_all_direct_dependencies_are_trusted_completed
+    - human_authorize_runtime_and_if_needed_expand_only_migration_scope
+    - implement_TASK_007_only_against_SPEC_0_9_0_contracts
+    - verify_shadow_replay_balance_checksums_and_reconciliation_fail_closed_behavior
+    - deploy_compatible_writers_then_readers_then_projection_consumers
   migration:
-    runtime_data: "TASK-048 adds broker and broker_capability_version to runtime DTO and canonical persisted payloads; legacy missing values remain explicitly unbound and cannot dispatch"
-    public_events: not_applicable
-    storage: "TASK-048 supplies an expand-only migration and compatible readers/writers; no ambient capability backfill is permitted"
-    task_queue: "TASK-048 remains blocked on TASK-017; TASK-006 depends on TASK-048 and remains blocked; this PR activates neither task"
-    historical_evidence: "legacy registration bindings cannot be inferred from current adapter state; only auditable reconciliation evidence or explicit human authorization may bind them under TASK-048"
+    runtime_data: "TASK-048 must preserve legacy OrderRegistration values as explicitly unbound and cannot dispatch them without auditable binding; none in TASK-018 because no Ledger/Portfolio/Reconciliation runtime or persisted rows exist on the audited base"
+    public_events: "deploy additive optional fee-aware schemas/readers before fee-emitting writers; old payloads remain schema-valid, while a future Ledger writer must normalize explicit fee evidence or quarantine historical unbound input rather than infer a fee"
+    storage: "no migration is created or authorized here; a future persistent implementation must use an independently authorized expand-only migration before deployment and must never infer or overwrite historical facts"
+    task_queue: "TASK-007 remains blocked with its existing dependencies/status; TASK-019 and other downstream tasks remain blocked; this change activates none"
+    historical_evidence: "Broker observations may seed reconciliation evidence only and cannot backfill internal Ledger/Portfolio authority"
     destructive_backfill: forbidden
   rollback:
-    runtime_data: "stop or roll back new writers/readers while preserving broker binding and audit evidence; legacy rows remain unbound/fail-closed"
-    public_events: not_applicable
-    task_queue: "keep TASK-048 and TASK-006 blocked; do not activate any task"
-    contracts: "remove only the unimplemented 0.8.0 internal schema/interface registrations; public v1 broker/execution messages remain unchanged; never delete persisted binding or audit evidence"
+    runtime_data: not_applicable_no_runtime_change
+    public_events: "stop fee-emitting writers before reverting readers; never erase fee evidence already published or persisted"
+    task_queue: "keep TASK-007 and downstream tasks blocked; do not activate any task"
+    contracts: "before any runtime adoption, revert only the unimplemented 0.9.0 registrations/specs/tests; never delete persisted OrderRegistration binding or Ledger, projection, Case, repair or audit history; after adoption stop writers/readers under human rollback authorization"
+    storage: "no database rollback in TASK-018; future rollback preserves all append-only facts and disables incompatible writers"
     release: prohibited

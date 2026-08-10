@@ -1,0 +1,20 @@
+{
+  "cases": [
+    {"name":"unbalanced_transaction","error_match":"unbalanced","changes":{"dtos.7.entries.3.amount":"1001.24"}},
+    {"name":"currency_mismatch","error_match":"currency mismatch","changes":{"dtos.7.entries.3.currency":"USD"}},
+    {"name":"missing_ledger_account","error_match":"account missing","changes":{"dtos.7.entries.0.ledger_account_id":"99999999-1111-4111-8111-999999999999"}},
+    {"name":"inactive_cash_account","error_match":"account inactive","changes":{"dtos.0.active":false}},
+    {"name":"duplicate_account_selection","error_match":"duplicate account selection","append_copy_index":0,"changes":{"dtos.12.ledger_account_id":"99999999-2222-4222-8222-999999999999","dtos.12.account_code":"CASH.DUPLICATE.CNY"}},
+    {"name":"instrument_account_mismatch","error_match":"instrument mismatch","changes":{"dtos.7.entries.0.instrument_id":"000001.XSHE"}},
+    {"name":"account_type_mismatch","error_match":"account type mismatch","changes":{"dtos.7.entries.1.ledger_account_id":"66666666-1111-4666-8666-111111111111"}},
+    {"name":"ledger_checksum_mismatch","error_match":"transaction checksum","changes":{"dtos.7.transaction_checksum":"ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"}},
+    {"name":"duplicate_identity_conflict","error_match":"fingerprint conflict","append_copy_index":7,"changes":{"dtos.12.source_trade.price":"11.00","dtos.12.source_fingerprint":"5e8df57589a1fe0d2dcb897983b85cfcbd9dda7896d3759815ce4e844be5d292"}},
+    {"name":"request_account_identity_mismatch","error_match":"request account identity","changes":{"dtos.6.account_id":"acct-other"}},
+    {"name":"transaction_account_identity_mismatch","error_match":"transaction account identity","changes":{"dtos.7.account_id":"acct-other"}},
+    {"name":"selection_account_identity_mismatch","error_match":"account selection account identity","changes":{"dtos.6.account_selections.0.account_id":"acct-other"}},
+    {"name":"ledger_account_identity_mismatch","error_match":"ledger account identity","changes":{"dtos.0.account_id":"acct-other"}},
+    {"name":"fee_currency_mismatch","error_match":"fee currency","changes":{"dtos.6.source_trade.fee.currency":"USD"}},
+    {"name":"fee_policy_amount_mismatch","error_match":"fee policy amount","changes":{"dtos.6.fee_policy.fee_amount":"0.24"}},
+    {"name":"repair_fact_checksum_mismatch","error_match":"repair fact checksum","changes":{"dtos.9.adjustment_source.repair_fact_checksum":"ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"}}
+  ]
+}

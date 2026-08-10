@@ -8,6 +8,7 @@ machine:
     APPROVED: {}
     REJECTED: {terminal: true}
     APPLYING: {}
+    UNKNOWN: {risk_usable: false}
     RESOLVED: {terminal: true}
     FAILED: {}
   transitions:
@@ -16,9 +17,21 @@ machine:
     - {from: PROPOSED, event: Approve, to: APPROVED, guard: approval_policy_passed}
     - {from: PROPOSED, event: Reject, to: REJECTED, guard: authorized_reviewer}
     - {from: APPROVED, event: Apply, to: APPLYING, guard: expected_versions_match}
+    - {from: APPLYING, event: ApplyUncertain, to: UNKNOWN, guard: commit_outcome_uncertain}
     - {from: APPLYING, event: VerifyResolved, to: RESOLVED, guard: reconciliation_clean}
     - {from: APPLYING, event: ApplyFailed, to: FAILED, guard: true}
+    - {from: UNKNOWN, event: ReconcileOutcome, to: INVESTIGATING, guard: authoritative_command_outcome_observed}
     - {from: FAILED, event: Reinvestigate, to: INVESTIGATING, guard: true}
   invariants:
     - "P0 and P1 cannot transition directly from OPEN to RESOLVED"
     - "repair never deletes or overwrites historical facts"
+    - "every transition increments case_version exactly once and appends immutable audit evidence"
+    - "CaseTransition.resulting_case_version equals expected_case_version plus one and RepairResult.case_version equals the last committed transition version"
+    - "UNKNOWN is fail-closed and can only leave after same-command outcome reconciliation"
+    - "UNKNOWN RepairResult uses QQ-RECOVERY-8007, reconciliation_required true, and the original command/idempotency/fingerprint identity"
+    - "approval, evidence, expected versions, authorization and fencing are validated before APPLYING"
+  failures:
+    illegal_transition: QQ-RECOVERY-8004
+    stale_or_unauthorized_repair: QQ-RECOVERY-8005
+    history_mutation_requested: QQ-RECOVERY-8006
+    apply_outcome_unknown: QQ-RECOVERY-8007

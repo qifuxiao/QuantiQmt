@@ -1,0 +1,270 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:quantiqmt:internal:ledger-accounting:v1",
+  "title": "LedgerAccountingContractV1",
+  "oneOf": [
+    {"$ref": "#/$defs/ledgerAccount"},
+    {"$ref": "#/$defs/tradeAccountingRequest"},
+    {"$ref": "#/$defs/ledgerTransaction"},
+    {"$ref": "#/$defs/postResult"}
+  ],
+  "$defs": {
+    "uuid": {"type": "string", "format": "uuid", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"},
+    "timestamp": {"type": "string", "format": "date-time", "pattern": "Z$"},
+    "currency": {"type": "string", "pattern": "^[A-Z]{3}$"},
+    "decimal": {"type": "string", "pattern": "^-?(0|[1-9][0-9]{0,17})(\\.[0-9]{1,8})?$", "not": {"pattern": "^-0(?:\\.0+)?$"}},
+    "nonNegativeDecimal": {"type": "string", "pattern": "^(0|[1-9][0-9]{0,17})(\\.[0-9]{1,8})?$"},
+    "positiveDecimal": {"type": "string", "pattern": "^(?=.*[1-9])(0|[1-9][0-9]{0,17})(\\.[0-9]{1,8})?$"},
+    "nonZeroDecimal": {"type": "string", "pattern": "^-?(?=.*[1-9])(0|[1-9][0-9]{0,17})(\\.[0-9]{1,8})?$"},
+    "hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "feeCharge": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["amount", "currency", "rounding_policy_version"],
+      "properties": {
+        "amount": {"$ref": "#/$defs/nonNegativeDecimal"},
+        "currency": {"$ref": "#/$defs/currency"},
+        "rounding_policy_version": {"const": "CURRENCY_MINOR_UNIT_HALF_EVEN_V1"}
+      }
+    },
+    "sourceTrade": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["account_id", "broker", "broker_order_id", "broker_sequence", "client_order_id", "commission", "fee", "instrument_id", "order_id", "position_effect", "price", "quantity", "received_at", "side", "tax", "trade_id", "trade_time", "trading_day"],
+      "properties": {
+        "broker": {"type": "string", "minLength": 1, "maxLength": 64},
+        "account_id": {"type": "string", "minLength": 1, "maxLength": 128},
+        "trading_day": {"type": "string", "format": "date"},
+        "trade_id": {"type": "string", "minLength": 1, "maxLength": 128},
+        "order_id": {"$ref": "#/$defs/uuid"},
+        "client_order_id": {"type": ["string", "null"], "maxLength": 128},
+        "broker_order_id": {"type": "string", "minLength": 1, "maxLength": 128},
+        "instrument_id": {"type": "string", "minLength": 1, "maxLength": 64},
+        "side": {"enum": ["BUY", "SELL"]},
+        "position_effect": {"enum": ["OPEN", "CLOSE", "AUTO"]},
+        "price": {"$ref": "#/$defs/positiveDecimal"},
+        "quantity": {"type": "integer", "minimum": 1},
+        "commission": {"anyOf": [{"$ref": "#/$defs/nonNegativeDecimal"}, {"type": "null"}]},
+        "fee": {"$ref": "#/$defs/feeCharge"},
+        "tax": {"anyOf": [{"$ref": "#/$defs/nonNegativeDecimal"}, {"type": "null"}]},
+        "trade_time": {"$ref": "#/$defs/timestamp"},
+        "broker_sequence": {"type": ["integer", "null"], "minimum": 0},
+        "received_at": {"$ref": "#/$defs/timestamp"}
+      }
+    },
+    "ledgerAccount": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["dto_type", "schema_version", "ledger_account_id", "account_code", "classification", "account_type", "normal_balance", "scope_id", "account_id", "currency", "instrument_id", "active", "created_at"],
+      "properties": {
+        "dto_type": {"const": "LEDGER_ACCOUNT"},
+        "schema_version": {"const": 1},
+        "ledger_account_id": {"$ref": "#/$defs/uuid"},
+        "account_code": {"type": "string", "pattern": "^[A-Z][A-Z0-9_.:-]{0,63}$"},
+        "classification": {"enum": ["ASSET", "EQUITY", "INCOME", "EXPENSE"]},
+        "account_type": {"enum": ["CASH", "POSITION_COST", "COMMISSION_EXPENSE", "FEE_EXPENSE", "TAX_EXPENSE", "REALIZED_PNL", "ROUNDING_RESIDUAL", "CAPITAL"]},
+        "normal_balance": {"enum": ["DEBIT", "CREDIT"]},
+        "scope_id": {"type": "string", "minLength": 1, "maxLength": 128},
+        "account_id": {"type": "string", "minLength": 1, "maxLength": 128},
+        "currency": {"$ref": "#/$defs/currency"},
+        "instrument_id": {"type": ["string", "null"], "minLength": 1, "maxLength": 64},
+        "active": {"type": "boolean"},
+        "created_at": {"$ref": "#/$defs/timestamp"}
+      },
+      "oneOf": [
+        {"properties": {"account_type": {"const": "CASH"}, "classification": {"const": "ASSET"}, "normal_balance": {"const": "DEBIT"}, "instrument_id": {"type": "null"}}},
+        {"properties": {"account_type": {"const": "POSITION_COST"}, "classification": {"const": "ASSET"}, "normal_balance": {"const": "DEBIT"}, "instrument_id": {"type": "string"}}},
+        {"properties": {"account_type": {"const": "COMMISSION_EXPENSE"}, "classification": {"const": "EXPENSE"}, "normal_balance": {"const": "DEBIT"}, "instrument_id": {"type": "null"}}},
+        {"properties": {"account_type": {"const": "FEE_EXPENSE"}, "classification": {"const": "EXPENSE"}, "normal_balance": {"const": "DEBIT"}, "instrument_id": {"type": "null"}}},
+        {"properties": {"account_type": {"const": "TAX_EXPENSE"}, "classification": {"const": "EXPENSE"}, "normal_balance": {"const": "DEBIT"}, "instrument_id": {"type": "null"}}},
+        {"properties": {"account_type": {"const": "REALIZED_PNL"}, "classification": {"const": "INCOME"}, "normal_balance": {"const": "CREDIT"}, "instrument_id": {"type": "null"}}},
+        {"properties": {"account_type": {"const": "ROUNDING_RESIDUAL"}, "classification": {"const": "EXPENSE"}, "normal_balance": {"const": "DEBIT"}, "instrument_id": {"type": "null"}}},
+        {"properties": {"account_type": {"const": "CAPITAL"}, "classification": {"const": "EQUITY"}, "normal_balance": {"const": "CREDIT"}, "instrument_id": {"type": "null"}}}
+      ]
+    },
+    "accountSelection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["scope_id", "account_id", "currency", "account_type", "instrument_id", "ledger_account_id", "account_classification", "account_normal_balance", "account_active"],
+      "properties": {
+        "scope_id": {"type": "string", "minLength": 1, "maxLength": 128},
+        "account_id": {"type": "string", "minLength": 1, "maxLength": 128},
+        "currency": {"$ref": "#/$defs/currency"},
+        "account_type": {"enum": ["CASH", "POSITION_COST", "COMMISSION_EXPENSE", "FEE_EXPENSE", "TAX_EXPENSE", "REALIZED_PNL", "ROUNDING_RESIDUAL"]},
+        "instrument_id": {"type": ["string", "null"], "minLength": 1, "maxLength": 64},
+        "ledger_account_id": {"$ref": "#/$defs/uuid"},
+        "account_classification": {"enum": ["ASSET", "INCOME", "EXPENSE"]},
+        "account_normal_balance": {"enum": ["DEBIT", "CREDIT"]},
+        "account_active": {"const": true}
+      },
+      "oneOf": [
+        {"properties": {"account_type": {"const": "CASH"}, "account_classification": {"const": "ASSET"}, "account_normal_balance": {"const": "DEBIT"}, "instrument_id": {"type": "null"}}},
+        {"properties": {"account_type": {"const": "POSITION_COST"}, "account_classification": {"const": "ASSET"}, "account_normal_balance": {"const": "DEBIT"}, "instrument_id": {"type": "string"}}},
+        {"properties": {"account_type": {"enum": ["COMMISSION_EXPENSE", "FEE_EXPENSE", "TAX_EXPENSE", "ROUNDING_RESIDUAL"]}, "account_classification": {"const": "EXPENSE"}, "account_normal_balance": {"const": "DEBIT"}, "instrument_id": {"type": "null"}}},
+        {"properties": {"account_type": {"const": "REALIZED_PNL"}, "account_classification": {"const": "INCOME"}, "account_normal_balance": {"const": "CREDIT"}, "instrument_id": {"type": "null"}}}
+      ]
+    },
+    "feePolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "commission_source", "commission_amount", "tax_source", "tax_amount", "fee_source", "fee_amount", "fee_currency", "fee_rounding_policy_version", "policy_fingerprint"],
+      "properties": {
+        "version": {"const": "BROKER_CHARGES_V1"},
+        "commission_source": {"const": "BROKER_TRADE_REPORTED"},
+        "commission_amount": {"$ref": "#/$defs/nonNegativeDecimal"},
+        "tax_source": {"const": "BROKER_TRADE_REPORTED"},
+        "tax_amount": {"$ref": "#/$defs/nonNegativeDecimal"},
+        "fee_source": {"const": "BROKER_TRADE_REPORTED"},
+        "fee_amount": {"$ref": "#/$defs/nonNegativeDecimal"},
+        "fee_currency": {"$ref": "#/$defs/currency"},
+        "fee_rounding_policy_version": {"const": "CURRENCY_MINOR_UNIT_HALF_EVEN_V1"},
+        "policy_fingerprint": {"$ref": "#/$defs/hash"}
+      }
+    },
+    "ledgerEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["entry_id", "entry_ordinal", "ledger_account_id", "entry_type", "direction", "amount", "currency", "instrument_id", "occurred_at"],
+      "properties": {
+        "entry_id": {"$ref": "#/$defs/uuid"},
+        "entry_ordinal": {"type": "integer", "minimum": 0, "maximum": 6},
+        "ledger_account_id": {"$ref": "#/$defs/uuid"},
+        "entry_type": {"enum": ["CASH", "POSITION_COST", "COMMISSION", "FEE", "TAX", "REALIZED_PNL", "ROUNDING_RESIDUAL", "CAPITAL"]},
+        "direction": {"enum": ["DEBIT", "CREDIT"]},
+        "amount": {"$ref": "#/$defs/positiveDecimal"},
+        "currency": {"$ref": "#/$defs/currency"},
+        "instrument_id": {"type": ["string", "null"], "minLength": 1, "maxLength": 64},
+        "occurred_at": {"$ref": "#/$defs/timestamp"}
+      },
+      "allOf": [
+        {"if": {"properties": {"entry_type": {"const": "POSITION_COST"}}, "required": ["entry_type"]}, "then": {"properties": {"instrument_id": {"type": "string"}}}, "else": {"properties": {"instrument_id": {"type": "null"}}}}
+      ]
+    },
+    "tradeAccountingRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["dto_type", "schema_version", "source_trade", "source_fingerprint", "request_fingerprint", "idempotency_key", "scope_id", "account_id", "currency", "cost_basis_method", "accounting_policy_version", "rounding_policy_version", "account_mapping_version", "fee_policy", "account_selections", "requested_at"],
+      "properties": {
+        "dto_type": {"const": "TRADE_ACCOUNTING_REQUEST"},
+        "schema_version": {"const": 1},
+        "source_trade": {"$ref": "#/$defs/sourceTrade"},
+        "source_fingerprint": {"$ref": "#/$defs/hash"},
+        "request_fingerprint": {"$ref": "#/$defs/hash"},
+        "idempotency_key": {"type": "string", "minLength": 1, "maxLength": 256},
+        "scope_id": {"type": "string", "minLength": 1, "maxLength": 128},
+        "account_id": {"type": "string", "minLength": 1, "maxLength": 128},
+        "currency": {"$ref": "#/$defs/currency"},
+        "cost_basis_method": {"const": "WEIGHTED_AVERAGE_V1"},
+        "accounting_policy_version": {"const": "TRADE_ACCOUNTING_V1"},
+        "rounding_policy_version": {"const": "CURRENCY_MINOR_UNIT_HALF_EVEN_V1"},
+        "account_mapping_version": {"type": "string", "minLength": 1, "maxLength": 64},
+        "fee_policy": {"$ref": "#/$defs/feePolicy"},
+        "account_selections": {"type": "array", "minItems": 4, "uniqueItems": true, "items": {"$ref": "#/$defs/accountSelection"}},
+        "requested_at": {"$ref": "#/$defs/timestamp"}
+      }
+    },
+    "quantityCorrection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["instrument_id", "currency", "quantity_delta", "cost_basis_delta"],
+      "properties": {
+        "instrument_id": {"type": "string", "minLength": 1, "maxLength": 64},
+        "currency": {"$ref": "#/$defs/currency"},
+        "quantity_delta": {"type": "integer", "not": {"const": 0}},
+        "cost_basis_delta": {"$ref": "#/$defs/decimal"}
+      }
+    },
+    "monetaryAdjustment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["currency", "amount_delta"],
+      "properties": {"currency": {"$ref": "#/$defs/currency"}, "amount_delta": {"$ref": "#/$defs/nonZeroDecimal"}}
+    },
+    "adjustmentSource": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["fact_id", "fact_type", "account_id", "case_id", "case_version", "command_id", "command_fingerprint", "action_id", "evidence_id", "source_checkpoint", "authorization_fingerprint", "fencing_token", "reason_code", "repair_fact_checksum", "compensates_transaction_id", "quantity_correction", "monetary_adjustment"],
+      "properties": {
+        "fact_id": {"$ref": "#/$defs/uuid"},
+        "fact_type": {"enum": ["QUANTITY_CORRECTION", "MONETARY_ADJUSTMENT", "COMPENSATING_FACT"]},
+        "account_id": {"type": "string", "minLength": 1, "maxLength": 128},
+        "case_id": {"$ref": "#/$defs/uuid"},
+        "case_version": {"type": "integer", "minimum": 1},
+        "command_id": {"$ref": "#/$defs/uuid"},
+        "command_fingerprint": {"$ref": "#/$defs/hash"},
+        "action_id": {"$ref": "#/$defs/uuid"},
+        "evidence_id": {"$ref": "#/$defs/uuid"},
+        "source_checkpoint": {"type": "integer", "minimum": 0},
+        "authorization_fingerprint": {"$ref": "#/$defs/hash"},
+        "fencing_token": {"type": "integer", "minimum": 1},
+        "reason_code": {"type": "string", "minLength": 1, "maxLength": 128},
+        "repair_fact_checksum": {"$ref": "#/$defs/hash"},
+        "compensates_transaction_id": {"anyOf": [{"$ref": "#/$defs/uuid"}, {"type": "null"}]},
+        "quantity_correction": {"anyOf": [{"$ref": "#/$defs/quantityCorrection"}, {"type": "null"}]},
+        "monetary_adjustment": {"anyOf": [{"$ref": "#/$defs/monetaryAdjustment"}, {"type": "null"}]}
+      },
+      "oneOf": [
+        {"properties": {"fact_type": {"const": "QUANTITY_CORRECTION"}, "quantity_correction": {"$ref": "#/$defs/quantityCorrection"}, "monetary_adjustment": {"type": "null"}, "compensates_transaction_id": {"type": "null"}}},
+        {"properties": {"fact_type": {"const": "MONETARY_ADJUSTMENT"}, "quantity_correction": {"type": "null"}, "monetary_adjustment": {"$ref": "#/$defs/monetaryAdjustment"}, "compensates_transaction_id": {"type": "null"}}},
+        {"properties": {"fact_type": {"const": "COMPENSATING_FACT"}, "quantity_correction": {"type": "null"}, "monetary_adjustment": {"type": "null"}, "compensates_transaction_id": {"$ref": "#/$defs/uuid"}}}
+      ]
+    },
+    "ledgerTransaction": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["dto_type", "schema_version", "transaction_id", "idempotency_key", "transaction_kind", "source_fingerprint", "scope_id", "account_id", "currency", "accounting_policy_version", "rounding_policy_version", "fee_policy_version", "entries", "ledger_sequence", "previous_transaction_checksum", "transaction_checksum", "correlation_id", "causation_id", "recorded_at", "posted_at"],
+      "properties": {
+        "dto_type": {"const": "LEDGER_TRANSACTION"},
+        "schema_version": {"const": 1},
+        "transaction_id": {"$ref": "#/$defs/uuid"},
+        "idempotency_key": {"type": "string", "minLength": 1, "maxLength": 256},
+        "transaction_kind": {"enum": ["TRADE", "ADJUSTMENT", "COMPENSATING_FACT"]},
+        "source_trade": {"$ref": "#/$defs/sourceTrade"},
+        "adjustment_source": {"$ref": "#/$defs/adjustmentSource"},
+        "source_fingerprint": {"$ref": "#/$defs/hash"},
+        "scope_id": {"type": "string", "minLength": 1, "maxLength": 128},
+        "account_id": {"type": "string", "minLength": 1, "maxLength": 128},
+        "currency": {"$ref": "#/$defs/currency"},
+        "accounting_policy_version": {"enum": ["TRADE_ACCOUNTING_V1", "REPAIR_FACT_V1"]},
+        "rounding_policy_version": {"const": "CURRENCY_MINOR_UNIT_HALF_EVEN_V1"},
+        "fee_policy_version": {"type": ["string", "null"], "maxLength": 64},
+        "entries": {"type": "array", "minItems": 2, "items": {"$ref": "#/$defs/ledgerEntry"}},
+        "ledger_sequence": {"type": "integer", "minimum": 1},
+        "previous_transaction_checksum": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"},
+        "transaction_checksum": {"$ref": "#/$defs/hash"},
+        "correlation_id": {"type": "string", "minLength": 1, "maxLength": 64},
+        "causation_id": {"type": ["string", "null"], "maxLength": 64},
+        "recorded_at": {"$ref": "#/$defs/timestamp"},
+        "posted_at": {"$ref": "#/$defs/timestamp"}
+      },
+      "oneOf": [
+        {"properties": {"transaction_kind": {"const": "TRADE"}, "source_trade": {"$ref": "#/$defs/sourceTrade"}, "accounting_policy_version": {"const": "TRADE_ACCOUNTING_V1"}, "fee_policy_version": {"const": "BROKER_CHARGES_V1"}}, "required": ["source_trade"], "not": {"required": ["adjustment_source"]}},
+        {"properties": {"transaction_kind": {"const": "ADJUSTMENT"}, "adjustment_source": {"properties": {"fact_type": {"enum": ["QUANTITY_CORRECTION", "MONETARY_ADJUSTMENT"]}}}, "accounting_policy_version": {"const": "REPAIR_FACT_V1"}, "fee_policy_version": {"type": "null"}}, "required": ["adjustment_source"], "not": {"required": ["source_trade"]}},
+        {"properties": {"transaction_kind": {"const": "COMPENSATING_FACT"}, "adjustment_source": {"properties": {"fact_type": {"const": "COMPENSATING_FACT"}}}, "accounting_policy_version": {"const": "REPAIR_FACT_V1"}, "fee_policy_version": {"type": "null"}}, "required": ["adjustment_source"], "not": {"required": ["source_trade"]}}
+      ]
+    },
+    "postResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["dto_type", "schema_version", "operation_id", "idempotency_key", "outcome", "transaction_id", "ledger_sequence", "failure_code", "detail", "retryable", "reconciliation_required"],
+      "properties": {
+        "dto_type": {"const": "POST_RESULT"},
+        "schema_version": {"const": 1},
+        "operation_id": {"$ref": "#/$defs/uuid"},
+        "idempotency_key": {"type": "string", "minLength": 1, "maxLength": 256},
+        "outcome": {"enum": ["POSTED", "DUPLICATE", "REJECTED", "UNKNOWN"]},
+        "transaction_id": {"anyOf": [{"$ref": "#/$defs/uuid"}, {"type": "null"}]},
+        "ledger_sequence": {"type": ["integer", "null"], "minimum": 1},
+        "failure_code": {"enum": [null, "QQ-COMMON-1003", "QQ-STORAGE-7001", "QQ-STORAGE-7005", "QQ-STORAGE-7007", "QQ-STORAGE-7008", "QQ-STORAGE-7009", "QQ-STORAGE-7010", "QQ-STORAGE-7011", "QQ-STORAGE-7012", "QQ-RECOVERY-8001"]},
+        "detail": {"type": ["string", "null"], "maxLength": 512},
+        "retryable": {"type": "boolean"},
+        "reconciliation_required": {"type": "boolean"}
+      },
+      "oneOf": [
+        {"properties": {"outcome": {"enum": ["POSTED", "DUPLICATE"]}, "transaction_id": {"$ref": "#/$defs/uuid"}, "ledger_sequence": {"type": "integer", "minimum": 1}, "failure_code": {"type": "null"}, "retryable": {"const": false}, "reconciliation_required": {"const": false}}},
+        {"properties": {"outcome": {"const": "REJECTED"}, "ledger_sequence": {"type": "null"}, "failure_code": {"enum": ["QQ-COMMON-1003", "QQ-STORAGE-7001", "QQ-STORAGE-7005", "QQ-STORAGE-7007", "QQ-STORAGE-7008", "QQ-STORAGE-7009", "QQ-STORAGE-7010", "QQ-STORAGE-7011", "QQ-RECOVERY-8001"]}, "reconciliation_required": {"const": false}}},
+        {"properties": {"outcome": {"const": "UNKNOWN"}, "transaction_id": {"$ref": "#/$defs/uuid"}, "ledger_sequence": {"type": "null"}, "failure_code": {"const": "QQ-STORAGE-7012"}, "retryable": {"const": false}, "reconciliation_required": {"const": true}}}
+      ]
+    }
+  }
+}

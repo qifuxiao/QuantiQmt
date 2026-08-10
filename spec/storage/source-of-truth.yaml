@@ -46,18 +46,35 @@ catalog:
       durable: postgresql_append_only
       cache: balance_projection
       recovery: ledger_replay
+      contract: STORAGE-LEDGER-PORTFOLIO
     - data: position
       authority: trade_ledger_projection
       external_baseline: broker
       durable: postgresql
       cache: memory_or_redis
       recovery: replay_and_reconcile
+      broker_overwrite: forbidden
+      contract: STORAGE-LEDGER-PORTFOLIO
     - data: account_cash
       authority: internal_ledger
       tradable_external_baseline: broker
       durable: postgresql
       cache: risk_snapshot
       recovery: ledger_replay_and_broker_query
+    - data: portfolio_snapshot
+      authority: none_rebuildable
+      durable: postgresql
+      cache: memory_or_redis
+      recovery: validate_checksum_then_snapshot_plus_ledger_or_full_ledger_replay
+      contract: STORAGE-LEDGER-PORTFOLIO
+    - data: reconciliation_case
+      authority: reconciliation_case_journal
+      durable: postgresql_append_only_evidence_and_transitions
+      cache: case_current_projection
+      recovery: case_journal_replay_and_same_command_outcome_query
+      broker_snapshot_role: evidence_only
+      repair_history_mutation: forbidden
+      contract: STORAGE-LEDGER-PORTFOLIO
     - data: tick
       authority: market_upstream
       durable: optional_market_store

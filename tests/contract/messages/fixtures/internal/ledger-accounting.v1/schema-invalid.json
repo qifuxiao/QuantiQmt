@@ -1,0 +1,20 @@
+{
+  "cases": [
+    {"name":"float_amount","dto_index":7,"changes":{"dtos.7.entries.0.amount":1000.0}},
+    {"name":"illegal_debit_credit","dto_index":7,"changes":{"dtos.7.entries.0.direction":"LEFT"}},
+    {"name":"cash_wrong_classification","dto_index":0,"changes":{"dtos.0.classification":"EXPENSE"}},
+    {"name":"inactive_selected_account","dto_index":6,"changes":{"dtos.6.account_selections.3.account_active":false}},
+    {"name":"verified_fee_policy_version_missing","dto_index":6,"changes":{"dtos.6.fee_policy.version":"UNVERSIONED"}},
+    {"name":"fee_missing","dto_index":6,"changes":{},"remove_paths":["dtos.6.source_trade.fee"],"expected_validator":"required"},
+    {"name":"fee_float_amount","dto_index":6,"changes":{"dtos.6.source_trade.fee.amount":0.25}},
+    {"name":"fee_rounding_unfrozen","dto_index":6,"changes":{"dtos.6.source_trade.fee.rounding_policy_version":"OTHER"}},
+    {"name":"repair_missing_case","dto_index":9,"changes":{},"remove_paths":["dtos.9.adjustment_source.case_id"],"expected_validator":"required"},
+    {"name":"repair_missing_command","dto_index":9,"changes":{},"remove_paths":["dtos.9.adjustment_source.command_id"],"expected_validator":"required"},
+    {"name":"repair_missing_checksum","dto_index":9,"changes":{},"remove_paths":["dtos.9.adjustment_source.repair_fact_checksum"],"expected_validator":"required"},
+    {"name":"trade_carries_repair_source","dto_index":7,"changes":{"dtos.7.adjustment_source":{} }},
+    {"name":"repair_fabricates_source_trade","dto_index":9,"changes":{"dtos.9.source_trade":{} }},
+    {"name":"trade_order_id_missing","dto_index":7,"changes":{},"remove_paths":["dtos.7.source_trade.order_id"],"expected_validator":"required"},
+    {"name":"trade_order_id_null","dto_index":7,"changes":{"dtos.7.source_trade.order_id":null}},
+    {"name":"trade_order_id_not_internal_uuid","dto_index":7,"changes":{"dtos.7.source_trade.order_id":"legacy-order-id"}}
+  ]
+}

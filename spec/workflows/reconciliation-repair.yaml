@@ -1,0 +1,60 @@
+workflow:
+  id: WF-RECONCILIATION-REPAIR
+  inputs:
+    case: CONTRACT-RECONCILIATION-V1.ReconciliationCase
+    command: CONTRACT-RECONCILIATION-V1.RepairCommand
+  output: CONTRACT-RECONCILIATION-V1.RepairResult
+  deadline_required: true
+  steps:
+    - id: validate_schema_and_canonical_fingerprint
+      owner: Reconciliation
+      fingerprint_includes: [schema_version, command_id, idempotency_key, case_id, case_key, case_severity, expected_case_version, expected_portfolio_version, fencing_token, mode, immutable_evidence_identity, authorization_binding, approval_binding, ordered_actions]
+      fingerprint_excludes: [requested_at, deadline_at, authorization_authorized_at, approval_approved_at, evidence_observation_capture_expiry_times, persistence_created_at, persistence_completed_at, command_fingerprint]
+      canonicalization: UTF8_NFC_lexicographic_keys_decimal_strings_unchanged
+      failure: reject_no_mutation
+    - {id: lookup_idempotency_key, owner: Reconciliation, same_fingerprint: return_original_result, different_fingerprint: QQ-STORAGE-7001}
+    - {id: validate_evidence_freshness, owner: Reconciliation, stale: QQ-RECOVERY-8005}
+    - {id: validate_authorization_and_fencing, owner: Reconciliation, failure: QQ-RECOVERY-8005}
+    - {id: validate_case_and_portfolio_versions, owner: Reconciliation, failure: QQ-COMMON-1003}
+    - {id: validate_approval_binding, owner: Reconciliation, failure: QQ-RECOVERY-8005}
+    - id: validate_append_only_actions_and_balance
+      owner: AccountLedger
+      fact_types: [QUANTITY_CORRECTION, MONETARY_ADJUSTMENT, COMPENSATING_FACT]
+      transaction_kind: ADJUSTMENT_or_COMPENSATING_FACT_never_TRADE
+      required_identity: [account_id, case_id, case_version, command_id, command_fingerprint, action_id, fact_id, evidence_id, source_checkpoint, authorization_fingerprint, fencing_token, repair_fact_checksum]
+      checksum: canonical_complete_repair_fact_excluding_repair_fact_checksum
+      failure: QQ-RECOVERY-8006_or_QQ-STORAGE-7005_or_QQ-RECOVERY-8001
+    - id: apply_atomic_repair
+      owner: Reconciliation
+      transaction: "RepairIdempotency + DiscriminatedRepairFacts + LedgerTransactions + LedgerEntries + Projection + CaseTransition + Audit + Outbox"
+      partial_failure: rollback_all
+    - {id: re_reconcile_original_difference, owner: Reconciliation, clean: VerifyResolved, remaining: Reinvestigate}
+  automatic_policy:
+    allowed_severity: [P2, P3]
+    requires_policy_whitelist: true
+    requires_fresh_evidence: true
+    forbidden_reasons: [CASH_MISMATCH, POSITION_COST_MISMATCH, LEDGER_BALANCE_INVALID, REPAIR_OUTCOME_UNKNOWN]
+  manual_policy:
+    approval_required: true
+    approval_bindings: [case_id, case_version, evidence_id, policy_version]
+    p0_p1_independent_approver_required: true
+  case_version_chain:
+    each_transition: resulting_case_version_equals_expected_case_version_plus_one
+    repair_result: equals_last_resulting_case_version
+  allowed_actions: [APPEND_ADJUSTMENT, APPEND_COMPENSATING_FACT]
+  forbidden_actions: [UPDATE_HISTORY, DELETE_HISTORY, UPSERT_HISTORY, BROKER_OVERWRITE, OMS_ORDER_MUTATION]
+  unknown_outcome:
+    result: UNKNOWN
+    error: QQ-RECOVERY-8007
+    transition: APPLYING_to_UNKNOWN
+    risk_action: fail_closed
+    recovery: query_same_command_and_idempotency_key_then_reconcile
+    blind_retry: forbidden
+  invariants:
+    - all_history_is_append_only
+    - broker_data_is_evidence_only
+    - approval_and_evidence_are_immutable_and_version_bound
+    - stale_fencing_never_returns_cached_success
+    - no_partial_success_result
+    - unknown_result_requires_QQ_RECOVERY_8007_and_reconciliation_required_true
+    - result_reuses_command_id_idempotency_key_and_command_fingerprint
