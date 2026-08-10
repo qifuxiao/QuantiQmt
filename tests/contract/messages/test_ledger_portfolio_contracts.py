@@ -818,6 +818,7 @@ def test_valid_fixtures_cover_trade_fees_tax_partial_close_pnl_snapshot_and_repa
         "PARTIAL_CLOSE",
         "OUT_OF_ORDER",
         "ADJUSTMENT_FACT",
+        "COMPENSATING_FACT",
     ]
     assert portfolio["coverage"] == [
         "SECOND_BUY_WEIGHTED_AVERAGE",

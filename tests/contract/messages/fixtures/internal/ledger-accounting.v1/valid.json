@@ -1,5 +1,5 @@
 {
-  "coverage": ["BUY", "COMMISSION", "FEE", "TAX", "PARTIAL_CLOSE", "OUT_OF_ORDER", "ADJUSTMENT_FACT"],
+  "coverage": ["BUY", "COMMISSION", "FEE", "TAX", "PARTIAL_CLOSE", "OUT_OF_ORDER", "ADJUSTMENT_FACT", "COMPENSATING_FACT"],
   "reference_vectors": {
     "source_fingerprint": "11ee92a96f046450e076b88c6594af8ac331beb8dec5b0450d643225547ebe2b",
     "unicode_nfc_source_fingerprint": "d117c067e0990754b0467d0c2ff619a976e4921dff312657d6de39605c10e68d",
@@ -59,6 +59,16 @@
         {"entry_id":"a97ba6c3-a269-5750-8358-4969f878f357","entry_ordinal":1,"ledger_account_id":"22222222-2222-4222-8222-222222222222","entry_type":"POSITION_COST","direction":"CREDIT","amount":"100.00","currency":"CNY","instrument_id":"600000.XSHG","occurred_at":"2026-08-07T01:04:01Z"}
       ],
       "ledger_sequence":3,"previous_transaction_checksum":"18111c860342dcf65c7e6d9909b03a4a9b9a5f781e374a85190cacbd3d17ecea","transaction_checksum":"e3a56366137fe63a57a5c4c99cd51a6f1d44b7a5a9f97bf6422406baf698dc44","correlation_id":"recon-corr-1","causation_id":"aaaaaaaa-7777-4777-8777-aaaaaaaaaaaa","recorded_at":"2026-08-07T01:04:01Z","posted_at":"2026-08-07T01:04:02Z"
+    },
+    {
+      "dto_type":"LEDGER_TRANSACTION","schema_version":1,"transaction_id":"0cedfdcc-e928-5002-9e73-6a9c7ad1c137","idempotency_key":"repair|fcdc7233-da35-513d-8408-b837162f7158|cccccccc-9999-4999-8999-cccccccccccc","transaction_kind":"COMPENSATING_FACT",
+      "adjustment_source":{"fact_id":"cccccccc-1111-4111-8111-cccccccccccc","fact_type":"COMPENSATING_FACT","account_id":"acct-1","case_id":"fcdc7233-da35-513d-8408-b837162f7158","case_version":3,"command_id":"cccccccc-7777-4777-8777-cccccccccccc","command_fingerprint":"4444444444444444444444444444444444444444444444444444444444444444","action_id":"cccccccc-9999-4999-8999-cccccccccccc","evidence_id":"cccccccc-3333-4333-8333-cccccccccccc","source_checkpoint":3,"authorization_fingerprint":"5555555555555555555555555555555555555555555555555555555555555555","fencing_token":10,"reason_code":"APPROVED_COMPENSATING_FACT","repair_fact_checksum":"f940591ec61d6ccf5bd01cfbc3d89746392fa579b3c60ccc0b94bb77397ef139","compensates_transaction_id":"b2b9c310-31fd-5260-9ed9-47abad836942","quantity_correction":null,"monetary_adjustment":null},
+      "source_fingerprint":"ce3e67bd31e211e3a56bdfec96a4302378c8276cfbb65af116815cf9698cdb85","scope_id":"TRADING:acct-1","account_id":"acct-1","currency":"CNY","accounting_policy_version":"REPAIR_FACT_V1","rounding_policy_version":"CURRENCY_MINOR_UNIT_HALF_EVEN_V1","fee_policy_version":null,
+      "entries":[
+        {"entry_id":"7daa9e54-b732-5704-b8f4-073e8227897a","entry_ordinal":0,"ledger_account_id":"11111111-1111-4111-8111-111111111111","entry_type":"CASH","direction":"DEBIT","amount":"1.00","currency":"CNY","instrument_id":null,"occurred_at":"2026-08-07T01:05:01Z"},
+        {"entry_id":"a2b91193-8686-51b7-97f5-0d4f0f7bc2c3","entry_ordinal":1,"ledger_account_id":"55555555-5555-4555-8555-555555555555","entry_type":"REALIZED_PNL","direction":"CREDIT","amount":"1.00","currency":"CNY","instrument_id":null,"occurred_at":"2026-08-07T01:05:01Z"}
+      ],
+      "ledger_sequence":4,"previous_transaction_checksum":"e3a56366137fe63a57a5c4c99cd51a6f1d44b7a5a9f97bf6422406baf698dc44","transaction_checksum":"14b8483842cb2f83d45e612f00ad80c3c39555e229c74c18aa1ffe5899293c0c","correlation_id":"recon-corr-2","causation_id":"cccccccc-7777-4777-8777-cccccccccccc","recorded_at":"2026-08-07T01:05:01Z","posted_at":"2026-08-07T01:05:02Z"
     },
     {"dto_type":"POST_RESULT","schema_version":1,"operation_id":"268b0047-e3a7-5cbb-abc7-35185170b3c8","idempotency_key":"qmt|acct-1|2026-08-07|trade-sell-1","outcome":"DUPLICATE","transaction_id":"268b0047-e3a7-5cbb-abc7-35185170b3c8","ledger_sequence":2,"failure_code":null,"detail":null,"retryable":false,"reconciliation_required":false}
   ]

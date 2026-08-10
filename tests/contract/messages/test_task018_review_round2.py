@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from collections.abc import Callable
 from copy import deepcopy
 from decimal import Decimal
@@ -12,6 +13,8 @@ from tests.contract.messages.test_ledger_portfolio_contracts import (
     FIXTURES,
     ROOT,
     _accounting_request_fingerprint,
+    _adjustment_identity,
+    _canonical_json,
     _entry_identity,
     _load,
     _projection_state_checksum,
@@ -600,3 +603,88 @@ def test_unresolved_broker_trade_is_reconciliation_only() -> None:
         "LEDGER_ENTRY",
         "POSITION_PROJECTION_CHANGE",
     ]
+
+
+def test_complete_compensating_fact_fixture_is_schema_and_semantic_valid() -> None:
+    validator = _validator("ledger/ledger-accounting.v1.schema.json")
+    fixture = _load(FIXTURES / "ledger-accounting.v1/valid.json")
+    compensating = next(
+        dto
+        for dto in fixture["dtos"]
+        if dto["dto_type"] == "LEDGER_TRANSACTION"
+        and dto["transaction_kind"] == "COMPENSATING_FACT"
+    )
+    source = compensating["adjustment_source"]
+    assert source["fact_type"] == "COMPENSATING_FACT"
+    assert source["account_id"] == compensating["account_id"] == "acct-1"
+    assert source["compensates_transaction_id"] == "b2b9c310-31fd-5260-9ed9-47abad836942"
+    assert source["repair_fact_checksum"] == _repair_fact_checksum(source)
+    assert (
+        compensating["source_fingerprint"]
+        == hashlib.sha256(_canonical_json(source).encode("utf-8")).hexdigest()
+    )
+    assert compensating["transaction_id"] == _adjustment_identity(source)
+    assert sum(
+        Decimal(entry["amount"])
+        for entry in compensating["entries"]
+        if entry["direction"] == "DEBIT"
+    ) == sum(
+        Decimal(entry["amount"])
+        for entry in compensating["entries"]
+        if entry["direction"] == "CREDIT"
+    )
+    validator.validate(compensating)
+    _validate_ledger_semantics(fixture)
+
+
+def test_compensating_fact_route_rejects_schema_and_semantic_contradictions() -> None:
+    validator = _validator("ledger/ledger-accounting.v1.schema.json")
+    fixture = _load(FIXTURES / "ledger-accounting.v1/valid.json")
+    transactions = {
+        dto["transaction_kind"]: dto
+        for dto in fixture["dtos"]
+        if dto["dto_type"] == "LEDGER_TRANSACTION"
+    }
+    assert set(transactions) == {"TRADE", "ADJUSTMENT", "COMPENSATING_FACT"}
+    for kind, transaction in transactions.items():
+        validator.validate(transaction)
+        assert ("source_trade" in transaction) is (kind == "TRADE")
+        assert ("adjustment_source" in transaction) is (kind != "TRADE")
+
+    compensating = transactions["COMPENSATING_FACT"]
+    trade = transactions["TRADE"]
+    schema_invalid_mutations: dict[str, Callable[[dict[str, Any]], object]] = {
+        "source_trade_forbidden": lambda value: value.update(
+            source_trade=deepcopy(trade["source_trade"])
+        ),
+        "fact_type_mismatch": lambda value: value["adjustment_source"].update(
+            fact_type="MONETARY_ADJUSTMENT"
+        ),
+        "compensation_identity_missing": lambda value: value["adjustment_source"].pop(
+            "compensates_transaction_id"
+        ),
+        "compensation_identity_null": lambda value: value["adjustment_source"].update(
+            compensates_transaction_id=None
+        ),
+        "transaction_kind_mismatch": lambda value: value.update(transaction_kind="ADJUSTMENT"),
+    }
+    for _name, mutate in schema_invalid_mutations.items():
+        invalid = deepcopy(compensating)
+        mutate(invalid)
+        assert not validator.is_valid(invalid)
+
+    checksum_invalid = deepcopy(fixture)
+    next(
+        dto
+        for dto in checksum_invalid["dtos"]
+        if dto.get("transaction_kind") == "COMPENSATING_FACT"
+    )["adjustment_source"]["repair_fact_checksum"] = "f" * 64
+    with pytest.raises(ValueError, match="repair fact checksum"):
+        _validate_ledger_semantics(checksum_invalid)
+
+    unbalanced = deepcopy(fixture)
+    next(dto for dto in unbalanced["dtos"] if dto.get("transaction_kind") == "COMPENSATING_FACT")[
+        "entries"
+    ][0]["amount"] = "2.00"
+    with pytest.raises(ValueError, match="unbalanced"):
+        _validate_ledger_semantics(unbalanced)

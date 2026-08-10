@@ -65,6 +65,7 @@ delivery:
 - `LedgerEntry` is frozen as an embedded-only `LedgerTransaction.entries` structure and is not independently routed by the top-level Schema or Port DTO list.
 - TASK-018 remains active with draft/in-progress/pending/prohibited delivery; these fixes are awaiting independent Review and contain no runtime or migration implementation.
 - Review P1 after head `32acd040cb97d62d9a29996cd04a6a983b88dc8c` is covered by a TRADE-only resolved Order UUID gate: public Broker v1 remains nullable/optional, while internal request/transaction Schema and semantic validation reject missing, null, non-canonical, invalid, or unresolved Order identity. `WF-TRADE-ACCOUNTING` machine-freezes reconciliation-only output and forbids Ledger/Portfolio output for unresolved trades; repair routes remain independent of Broker Order identity.
+- Review P2 after head `9889d8afbda743ac729d4e26224f3eadc67d0bed` adds a complete sequence-4 `COMPENSATING_FACT` fixture with canonical identity/checksum chain and balanced entries. Direct Schema/semantic tests cover the valid route plus source-Trade injection, fact/kind mismatch, missing/null compensation identity, checksum mismatch and unbalanced entries; no frozen contract semantics changed.
 
 ## Review focus
 
