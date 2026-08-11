@@ -1,0 +1,75 @@
+workflow:
+  id: WF-MARKET-DATA
+  version: 1
+  authority: PORTS-MARKET
+  clock: injected_utc_and_monotonic
+  stages:
+    - name: ingress
+      actions: [validate_provider_shape, normalize_decimal_strings, bind_provider_sequence]
+      timeout: callback_budget
+      forbidden: [blocking_io, persistence, business_processing, unbounded_enqueue]
+    - name: enqueue
+      actions: [validate_generation_and_fencing, bounded_nonblocking_enqueue]
+      overflow:
+        policy: REJECT_NEW_WITH_GAP_EVIDENCE
+        reject_new: emit_degraded_and_exact_lost_sequence_gap
+        tick_coalesce: forbidden_v1
+      never_drop: [trade, audit, session, quality, final_bar]
+    - name: quality
+      actions: [detect_duplicate, detect_out_of_order, detect_gap, detect_stale, advance_quality_version]
+      fail_closed: true
+    - name: snapshot_and_health
+      actions: [load_accepted_policy_by_version_and_checksum, validate_policy_checksum_and_activation, validate_request_result_context, recompute_snapshot_freshness_or_health_status]
+      validator: CONTRACT-MARKET-SEMANTIC-VALIDATION-V1
+      snapshot_inputs: [request, result, accepted_policy, injected_evaluation_at]
+      health_inputs: [request, result, accepted_policy, injected_observed_at]
+      all_snapshot_outcomes: mandatory_same_validator
+      rejected_snapshot_payload: null_do_not_parse
+      response_thresholds_as_authority: forbidden
+      failure: reject_without_returning_trade_safe_snapshot_or_HEALTHY
+    - name: publish
+      actions: [validate_canonical_integer_wire_tokens, schema_validate, validate_envelope_payload_binding, semantic_validate, persist_optional_evidence, publish_envelope]
+      envelope: CONTRACT-MESSAGE-ENVELOPE-V1
+      semantic_contract: CONTRACT-MARKET-SEMANTIC-VALIDATION-V1
+      idempotency_identity: event_specific_envelope_idempotency_key_without_payload_hash
+      payload_fingerprint: SHA256_RFC8785_JCS_full_payload
+      identity_collision: fail_closed_and_retain_reconciliation_evidence
+    - name: aggregate
+      actions: [buffer_until_watermark, enforce_session_boundary, compute_decimal_ohlcv, close_final_bar, checksum]
+      final_revision: forbidden
+  reconnect_recovery:
+    order:
+      - enter_UNAVAILABLE
+      - reconnect_with_deadline
+      - load_version_matched_calendar
+      - fetch_snapshot
+      - bounded_backfill_from_checkpoint
+      - verify_contiguous_sequences
+      - verify_snapshot_and_checkpoint_checksums
+      - enter_RECOVERING
+      - publish_quality_evidence
+      - enter_NORMAL_only_after_zero_unresolved_gaps
+    one_new_tick_restores_normal: false
+    irrecoverable_gap: remain_fail_visible
+    validation_boundaries: [persist, transition, restore, publish, strategy_risk_delivery]
+    validation_failure: reject_without_repair_or_state_advance
+  replay:
+    inputs: [normalized_events, calendar_version, aggregation_policy, checkpoint, watermark_sequence]
+    deterministic_output: [event_identity, payload, checksum, order]
+    wall_clock: forbidden
+    ambient_randomness: forbidden
+    future_data: forbidden
+    tick_order: [event_time, source_sequence, event_id]
+    formulas:
+      open: first_price
+      close: last_price
+      high: decimal_max
+      low: decimal_min
+      volume: sum_incremental_integer_quantity
+      turnover: exact_sum_incremental_decimal_strings
+    reference_fixture: tests/contract/messages/fixtures/internal/market-data.v1/bar-reference-vector.json
+  rollback:
+    stop_publishers_before_readers: true
+    preserve_published_events_and_gap_evidence: true
+    preserve_final_bars: true
+    release: prohibited

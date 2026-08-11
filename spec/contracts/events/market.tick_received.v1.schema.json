@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:quantiqmt:event:market.tick_received:v1",
+  "title": "MarketTickReceivedPayloadV1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["event_id", "partition_key", "provider", "instrument_id", "exchange", "calendar_id", "calendar_version", "session_id", "trading_day", "event_time", "received_at", "source_sequence", "watermark_sequence", "last_price", "last_quantity", "turnover", "quality", "gap_start_sequence", "gap_end_sequence"],
+  "properties": {
+    "event_id": {"type": "string", "format": "uuid", "pattern": "^[0-9a-f-]{36}$"}, "partition_key": {"type": "string", "minLength": 1, "maxLength": 64},
+    "provider": {"type": "string", "minLength": 1, "maxLength": 64}, "instrument_id": {"type": "string", "minLength": 1, "maxLength": 64},
+    "exchange": {"type": "string", "pattern": "^[A-Z0-9]{2,16}$"}, "calendar_id": {"type": "string", "minLength": 1, "maxLength": 64},
+    "calendar_version": {"type": "string", "minLength": 1, "maxLength": 64}, "session_id": {"type": "string", "minLength": 1, "maxLength": 64},
+    "trading_day": {"type": "string", "format": "date"}, "event_time": {"type": "string", "format": "date-time", "pattern": "Z$"}, "received_at": {"type": "string", "format": "date-time", "pattern": "Z$"},
+    "source_sequence": {"type": "integer", "minimum": 0, "maximum": 9007199254740991}, "watermark_sequence": {"type": "integer", "minimum": 0, "maximum": 9007199254740991},
+    "last_price": {"type": "string", "pattern": "^(?=.*[1-9])(0|[1-9][0-9]{0,17})(\\.[0-9]{1,8})?$"}, "last_quantity": {"type": "integer", "minimum": 0, "maximum": 9007199254740991}, "turnover": {"type": "string", "pattern": "^(0|[1-9][0-9]{0,17})(\\.[0-9]{1,8})?$"},
+    "bid_price": {"type": ["string", "null"], "pattern": "^(?=.*[1-9])(0|[1-9][0-9]{0,17})(\\.[0-9]{1,8})?$"}, "ask_price": {"type": ["string", "null"], "pattern": "^(?=.*[1-9])(0|[1-9][0-9]{0,17})(\\.[0-9]{1,8})?$"},
+    "quality": {"enum": ["NORMAL", "DEGRADED", "STALE", "GAP", "UNAVAILABLE", "RECOVERING"]},
+    "gap_start_sequence": {"type": ["integer", "null"], "minimum": 0, "maximum": 9007199254740991}, "gap_end_sequence": {"type": ["integer", "null"], "minimum": 0, "maximum": 9007199254740991}
+  },
+  "allOf": [{"if": {"properties": {"quality": {"const": "GAP"}}}, "then": {"properties": {"gap_start_sequence": {"type": "integer", "minimum": 0, "maximum": 9007199254740991}, "gap_end_sequence": {"type": "integer", "minimum": 0, "maximum": 9007199254740991}}}, "else": {"properties": {"gap_start_sequence": {"type": "null"}, "gap_end_sequence": {"type": "null"}}}}],
+  "$defs": {"uuid": {"type": "string", "format": "uuid", "pattern": "^[0-9a-f-]{36}$"}, "time": {"type": "string", "format": "date-time", "pattern": "Z$"}, "positiveDecimal": {"type": "string", "pattern": "^(?=.*[1-9])(0|[1-9][0-9]{0,17})(\\.[0-9]{1,8})?$"}, "nonNegativeDecimal": {"type": "string", "pattern": "^(0|[1-9][0-9]{0,17})(\\.[0-9]{1,8})?$"}}
+}

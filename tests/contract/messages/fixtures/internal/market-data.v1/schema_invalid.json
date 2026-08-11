@@ -1,0 +1,11 @@
+{
+  "cases": [
+    {"name": "market_health_missing_provider", "dto_type": "MARKET_HEALTH", "field": "provider", "operation": "remove", "error": "provider"},
+    {"name": "market_subscription_capacity_not_integer", "dto_type": "SUBSCRIPTION_REQUEST", "field": "queue_capacity", "operation": "replace", "value": "unbounded", "error": "integer"},
+    {"name": "market_input_float_price", "dto_type": "BAR_AGGREGATION_INPUT", "field": "price", "operation": "replace", "value": 10.01, "error": "string"},
+    {"name": "market_tick_coalesce_forbidden", "dto_type": "SUBSCRIPTION_REQUEST", "field": "overflow_policy", "operation": "replace", "value": "COALESCE_WITH_GAP_EVIDENCE", "error": "REJECT_NEW_WITH_GAP_EVIDENCE"},
+    {"name": "market_available_snapshot_stale", "dto_type": "SNAPSHOT_RESULT", "field": "snapshot.stale", "operation": "replace", "value": true, "error": "False"},
+    {"name": "market_available_snapshot_checksum_unverified", "dto_type": "SNAPSHOT_RESULT", "field": "snapshot.checksum_verified", "operation": "replace", "value": false, "error": "True"},
+    {"name": "market_healthy_with_gap_quality", "dto_type": "MARKET_HEALTH", "field": "quality", "operation": "replace", "value": "GAP", "error": "not valid under any"}
+  ]
+}

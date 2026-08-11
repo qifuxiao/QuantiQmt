@@ -1,8 +1,8 @@
 specification:
   name: quantiqmt
-  version: 0.9.0
+  version: 0.10.0
   status: accepted
-  updated: 2026-08-07
+  updated: 2026-08-11
   normative_root: spec
   explanatory_root: docs
 
@@ -83,6 +83,18 @@ catalogs:
       path: contracts/portfolio/portfolio-projection.v1.schema.json
     - id: CONTRACT-RECONCILIATION-V1
       path: contracts/reconciliation/reconciliation.v1.schema.json
+    - id: CONTRACT-MARKET-TICK-RECEIVED-V1
+      path: contracts/events/market.tick_received.v1.schema.json
+    - id: CONTRACT-MARKET-BAR-CLOSED-V1
+      path: contracts/events/market.bar_closed.v1.schema.json
+    - id: CONTRACT-MARKET-QUALITY-CHANGED-V1
+      path: contracts/events/market.quality_changed.v1.schema.json
+    - id: CONTRACT-MARKET-SESSION-CHANGED-V1
+      path: contracts/events/market.session_changed.v1.schema.json
+    - id: CONTRACT-MARKET-DATA-V1
+      path: contracts/market/market-data.v1.schema.json
+    - id: CONTRACT-MARKET-SEMANTIC-VALIDATION-V1
+      path: contracts/market/market-data.semantic-validation.v1.yaml
     - id: CONTRACT-ERROR-CATALOG
       path: contracts/errors/catalog.yaml
   interfaces:
@@ -98,6 +110,8 @@ catalogs:
       path: interfaces/broker-simulator.md
     - id: PORTS-LEDGER-PORTFOLIO
       path: interfaces/ledger-portfolio-ports.md
+    - id: PORTS-MARKET
+      path: interfaces/market-ports.md
   state_machines:
     - id: SM-ORDER
       path: state-machines/order.yaml
@@ -134,6 +148,8 @@ catalogs:
       path: workflows/outbox-publication.yaml
     - id: WF-RECONCILIATION-REPAIR
       path: workflows/reconciliation-repair.yaml
+    - id: WF-MARKET-DATA
+      path: workflows/market-data.yaml
   repositories:
     - id: REPO-ORDER
       path: repositories/order-repository.md
@@ -148,6 +164,8 @@ catalogs:
       path: storage/outbox.yaml
     - id: STORAGE-LEDGER-PORTFOLIO
       path: storage/ledger-portfolio.yaml
+    - id: STORAGE-MARKET-DATA
+      path: storage/market-data.yaml
   nfr:
     - id: NFR-PERFORMANCE
       path: nfr/performance.yaml
@@ -164,42 +182,42 @@ catalogs:
       path: reviews/IMPLEMENTATION-READINESS-0.7.md
 
 change:
-  id: SPEC-0.9.0-LEDGER-PORTFOLIO-RECONCILIATION-CONTRACTS
-  compatibility: additive_internal_contracts_and_optional_public_v1_fee_fields_runtime_and_database_implementation_deferred
-  previous_version: 0.8.0
-  public_message_schema_changes: "additive optional fee evidence on broker.trade_reported.v1 and ledger.trade_posted.v1; existing payloads remain schema-valid, but Ledger accounting requires normalized explicit fee evidence and fails closed for historical unbound input"
-  storage_schema_changes: "preserves the 0.8.0 additive OrderRegistration broker/capability binding owned by TASK-048; adds normative initial Ledger, Portfolio projection/snapshot and Reconciliation logical storage contract; TASK-018 creates no migration and no database object"
-  error_catalog_change: "additive version 4 Ledger/replay/repair codes plus version 5 deterministic-collision and per-operation UNKNOWN codes QQ-STORAGE-7011..7014; QQ-STORAGE-7006 and all existing meanings unchanged"
-  runtime_code_change: "TASK-048 remains required for OrderRegistration binding; Ledger/Portfolio/Reconciliation runtime is required only when TASK-007 or another human-authorized successor implements these contracts; TASK-018 changes no runtime code"
+  id: SPEC-0.10.0-MARKET-DATA-CONTRACTS
+  compatibility: additive_unpublished_public_v1_market_events_corrected_before_first_release_with_fail_closed_binding_and_internal_contracts_runtime_and_storage_implementation_deferred
+  previous_version: 0.9.0
+  public_message_schema_changes: "activates four previously planned and never-published V1 names with final fail-closed payload schemas: market.tick_received.v1, market.bar_closed.v1, market.quality_changed.v1 and market.session_changed.v1; Review corrections add provider/version/recovery/window/checksum evidence before first release; no previously active public schema changes"
+  storage_schema_changes: "adds logical STORAGE-MARKET-DATA authority, optional tick/bar durability, immutable calendar/checkpoint semantics and explicit gap evidence; no database object or migration is created"
+  error_catalog_change: none
+  runtime_code_change: "none in TASK-020; TASK-023 remains blocked and owns a future implementation only after TASK-020 and TASK-022 trusted completion"
   review_change: none
-  contract_change: "freezes exhaustive Ledger account taxonomy/resolution, canonical account_id and independently typed commission/fee/tax, authoritative Trade fingerprint/canonical JSON, fixed entry slots, weighted-average projection and explicit T+1 release, single-currency snapshot and replayable state checksum, top-level LedgerTransaction routes with embedded-only entries, discriminated repair facts bound to Case/command/checksum, and exhaustive operation result matrices"
-  semantic_validation_change: "requires machine validation for balance, canonical account identity across source/request/account/transaction, resolved canonical internal Order UUID before TRADE accounting, reconciliation-only handling for missing/null/invalid/unresolved Broker order identity, active unique account selection, independently typed fee currency/rounding and posting, source/repair fingerprints and NFC vectors, repair Case/command/checksum bindings, exact weighted average and versions, release calendar/checkpoint/CAS, snapshot currency/quality/checksum, state transitions/version chain, P0/P1 approval, UNKNOWN result identity/code and append-only repair facts"
-  internal_contracts_added: [CONTRACT-LEDGER-ACCOUNTING-V1, CONTRACT-PORTFOLIO-PROJECTION-V1, CONTRACT-RECONCILIATION-V1, PORTS-LEDGER-PORTFOLIO, REPO-LEDGER-PORTFOLIO, STORAGE-LEDGER-PORTFOLIO, WF-RECONCILIATION-REPAIR]
-  public_contracts_added: []
-  task_queue_change: "TASK-018 remains active/draft pending independent Review; TASK-007 remains blocked and is constrained to the frozen contracts; no task is activated"
-  affected_tasks: [TASK-007, TASK-009, TASK-018, TASK-019, TASK-021, TASK-024, TASK-027]
+  contract_change: "freezes public Market event payloads, complete envelope binding, MarketGateway DTO/Port outcomes, immutable checksum-bound validation policy, request/result/context Snapshot and Health validation, I-JSON safe integers, IANA tzdb/fold replay evidence, versioned calendar/session/quality recovery, V1 reject-with-gap backpressure, RFC8785 checksums, UUIDv5 Bar identity and deterministic replay"
+  semantic_validation_change: "adds CONTRACT-MARKET-SEMANTIC-VALIDATION-V1 and requires canonical integer token, schema, envelope/payload binding, then the same semantic validator before publish, persistence, quality transition, snapshot/health return, restore or Strategy/Risk delivery; recomputes freshness and health from accepted policy, validates all rejected snapshot reasons, identity collision, RFC8785/I-JSON projections, tzdb/fold mapping, recovery ranges, OHLC, finality and LIVE/REPLAY vectors"
+  internal_contracts_added: [CONTRACT-MARKET-DATA-V1, CONTRACT-MARKET-SEMANTIC-VALIDATION-V1, PORTS-MARKET, WF-MARKET-DATA, STORAGE-MARKET-DATA]
+  public_contracts_added: [CONTRACT-MARKET-TICK-RECEIVED-V1, CONTRACT-MARKET-BAR-CLOSED-V1, CONTRACT-MARKET-QUALITY-CHANGED-V1, CONTRACT-MARKET-SESSION-CHANGED-V1]
+  task_queue_change: "TASK-020 remains active/draft/in-progress pending independent Review; TASK-023 remains blocked and is constrained to the frozen contracts; no other task changes state"
+  affected_tasks: [TASK-020, TASK-021, TASK-023, TASK-024, TASK-026]
   deployment_order:
-    - independently_review_and_merge_task_017_contracts
-    - activate_implement_review_and_merge_task_048_order_registration_binding
-    - implement_task_006_only_against_the_versioned_contract_snapshot
-    - independently_review_and_merge_task_018_contracts
-    - human_authorized_task_018_closeout_with_trusted_delivery_evidence
-    - keep_TASK_007_blocked_until_all_direct_dependencies_are_trusted_completed
-    - human_authorize_runtime_and_if_needed_expand_only_migration_scope
-    - implement_TASK_007_only_against_SPEC_0_9_0_contracts
-    - verify_shadow_replay_balance_checksums_and_reconciliation_fail_closed_behavior
-    - deploy_compatible_writers_then_readers_then_projection_consumers
+    - independently_review_and_merge_TASK_020_contracts
+    - human_authorized_TASK_020_closeout_with_trusted_delivery_evidence
+    - keep_TASK_023_blocked_until_TASK_020_and_TASK_022_are_trusted_completed
+    - separately_human_authorize_TASK_023_runtime_implementation
+    - generate_reviewed_immutable_schema_bundle_from_manifest_for_TASK_023
+    - verify_installed_wheel_bundle_digest_and_manifest_parity_without_source_checkout
+    - deploy_schema_compatible_consumers_before_market_event_publishers
+    - verify_shadow_ingress_gap_recovery_and_live_replay_determinism
+    - activate_immutable_market_validation_policy_and_tzdb_bundle_before_snapshot_or_health_traffic
+    - enable_bounded_publishers_without_silent_drop
   migration:
-    runtime_data: "TASK-048 must preserve legacy OrderRegistration values as explicitly unbound and cannot dispatch them without auditable binding; none in TASK-018 because no Ledger/Portfolio/Reconciliation runtime or persisted rows exist on the audited base"
-    public_events: "deploy additive optional fee-aware schemas/readers before fee-emitting writers; old payloads remain schema-valid, while a future Ledger writer must normalize explicit fee evidence or quarantine historical unbound input rather than infer a fee"
-    storage: "no migration is created or authorized here; a future persistent implementation must use an independently authorized expand-only migration before deployment and must never infer or overwrite historical facts"
-    task_queue: "TASK-007 remains blocked with its existing dependencies/status; TASK-019 and other downstream tasks remain blocked; this change activates none"
-    historical_evidence: "Broker observations may seed reconciliation evidence only and cannot backfill internal Ledger/Portfolio authority"
+    runtime_data: "not applicable in TASK-020 because no Market runtime is implemented; TASK-023 must load only a reviewed immutable manifest-indexed schema bundle plus accepted policy/tzdb versions and fail closed on missing, tampered or mismatched content"
+    public_events: "new event names have no historical published payload, so Review corrections are folded into V1 before first release; deploy accepted readers and immutable bundle before future publishers and reject unknown versions fail-closed"
+    storage: "no migration is created or authorized; future persistence requires independently authorized expand-only storage work"
+    task_queue: "TASK-020 remains active; TASK-023 remains blocked on TASK-020 and TASK-022; no downstream activation"
+    historical_evidence: "missing upstream ranges remain explicit GAP/UNAVAILABLE evidence and are never inferred or silently backfilled"
     destructive_backfill: forbidden
   rollback:
     runtime_data: not_applicable_no_runtime_change
-    public_events: "stop fee-emitting writers before reverting readers; never erase fee evidence already published or persisted"
-    task_queue: "keep TASK-007 and downstream tasks blocked; do not activate any task"
-    contracts: "before any runtime adoption, revert only the unimplemented 0.9.0 registrations/specs/tests; never delete persisted OrderRegistration binding or Ledger, projection, Case, repair or audit history; after adoption stop writers/readers under human rollback authorization"
-    storage: "no database rollback in TASK-018; future rollback preserves all append-only facts and disables incompatible writers"
+    public_events: "before runtime adoption revert only unimplemented routes; after adoption stop publishers before readers and preserve every emitted event, gap and quality record"
+    task_queue: "keep TASK-020 active until independent Review; keep TASK-023 and downstream tasks blocked"
+    contracts: "never reuse the four public names or weaken V1 meaning; rollback stops publishers, retains compatible readers and the last reviewed immutable schema bundle, and preserves collision/checksum/gap/quality evidence"
+    storage: "no database rollback in TASK-020; future rollback preserves final bars, checkpoints, calendars and gap evidence"
     release: prohibited

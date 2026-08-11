@@ -24,6 +24,23 @@ nfr:
     queue_degraded_ratio: 0.80
     reject_new_risk_ratio: 0.95
     report_percentiles: [p50, p95, p99, p99_9, max]
+  market_data:
+    target_messages_per_second: 50000
+    normalize_to_publish_p99_ms: 3
+    callback_copy_to_ingress_p99_ms: 1
+    queue_capacity: bounded_and_load_tested
+    batch_capacity: bounded
+    warning_ratio: 0.60
+    critical_ratio: 0.80
+    overflow_ratio: 0.95
+    source_lag_stale_ms: versioned_policy_value
+    validation_policy: immutable_version_and_checksum_from_configuration_authority
+    snapshot_freshness_clock: injected_UTC_integer_milliseconds
+    response_thresholds_as_authority: forbidden
+    threshold_order: warning_less_than_critical_less_than_overflow_less_than_or_equal_capacity
+    overflow_action: reject_new_with_exact_gap_evidence
+    tick_coalesce: forbidden_v1
+    forbidden: [unbounded_queue, silent_drop, transaction_or_audit_queue_capacity_sharing]
   forbidden:
     - report_average_only
     - achieve_latency_by_dropping_order_messages

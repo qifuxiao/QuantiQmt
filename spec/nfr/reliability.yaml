@@ -51,3 +51,31 @@ nfr:
     ambient_randomness: forbidden
     wall_clock: forbidden
     exhausted_scenario_fallback: forbidden
+  market_data:
+    contract: CONTRACT-MARKET-DATA-V1
+    public_events: [market.tick_received.v1, market.bar_closed.v1, market.quality_changed.v1, market.session_changed.v1]
+    queue: bounded
+    callback_blocking_io: forbidden
+    silent_drop: forbidden
+    tick_coalesce: forbidden_v1
+    overflow: reject_new_with_exact_lost_sequence_gap_evidence
+    combined_envelope_payload_validation: mandatory
+    idempotency_collision: fail_closed_and_retain_evidence
+    quality_priority: [UNAVAILABLE, GAP, STALE, RECOVERING, DEGRADED, NORMAL]
+    one_new_tick_restores_normal: false
+    recovery_gate: [version_matched_calendar_session, snapshot_identity_and_checksum, checkpoint_identity_and_checksum, bounded_backfill, contiguous_source_versions, watermark_covers_source_version, zero_unresolved_gaps]
+    validation_boundaries: [publish, persist, quality_transition, snapshot_restore, strategy_risk_delivery]
+    validation_failure_state_advance: forbidden
+    validation_policy: immutable_versioned_checksum_bound_configuration
+    policy_version_reuse_with_different_content: fail_closed
+    snapshot_all_outcomes_same_validator: true
+    snapshot_freshness: recompute_from_injected_evaluation_at_never_trust_stale_flag
+    health_threshold_authority: accepted_policy_not_response
+    market_json_integer_domain: I_JSON_safe_unsigned
+    integer_exponent_or_fraction_wire_token: reject_before_schema
+    timezone_database: explicit_immutable_IANA_tzdb_version_fail_closed
+    final_bar_rewrite: forbidden
+    replay_inputs: [normalized_events, calendar_version, aggregation_policy, checkpoint, watermark_sequence]
+    wall_clock: forbidden
+    ambient_randomness: forbidden
+    future_data: forbidden

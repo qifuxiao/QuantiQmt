@@ -1,0 +1,195 @@
+semantic_validation:
+  id: CONTRACT-MARKET-SEMANTIC-VALIDATION-V1
+  version: 1
+  authority: PORTS-MARKET
+  execution_order: [draft_2020_12_schema, envelope_payload_binding, semantic_invariants]
+  mandatory_boundaries: [publish, persist, quality_transition, snapshot_restore, strategy_risk_delivery]
+  failure_action: reject_without_publish_persist_transition_or_repair
+  canonicalization:
+    algorithm: RFC8785_JCS
+    encoding: UTF-8
+    bom: forbidden
+    object_key_order: original_property_name_UTF16_code_units
+    unicode_normalization: forbidden
+    unicode: scalar_values
+    number_serialization: RFC8785
+    production_implementation: RFC8785_compatible_library_required_not_language_default_string_conversion
+    json_integer_domain: I_JSON_safe_unsigned_0_to_9007199254740991
+    integer_wire_lexeme: ^(0|[1-9][0-9]{0,15})$
+    exponent_or_fractional_integer_token: reject_before_schema_validation
+    decimal_representation: canonical_decimal_string
+    floats_for_price_quantity_turnover_or_fee: forbidden
+    hash: SHA-256_lowercase_hex
+    non_bmp_reference:
+      input: {"": 1, "𐀀": 2}
+      canonical_json: '{"𐀀":2,"":1}'
+      sha256: 9d4cdc71dda603c42f9b21d88d0c2ffc31a76cd1bd461d7359406cf169845f1e
+    safe_integer_cross_language_reference:
+      input: {safe: 9007199254740991, decimal: "9007199254740991.00"}
+      canonical_json: '{"decimal":"9007199254740991.00","safe":9007199254740991}'
+      sha256: 841b22f8ce183dafb48820ed983911baf3c2c33d6fde00b3bfb737aa2d64ef36
+      uuidv5_namespace: 9a41e905-11f3-5c30-8f02-5ba3f8ae8485
+      uuidv5: ef05fe42-6716-5f00-b484-7769ceafed5a
+  event_envelope_binding:
+    market.tick_received.v1:
+      schema_version: 1
+      source_template: MarketGateway/{provider}
+      partition_key: payload.instrument_id
+      aggregate_id_template: market:{provider}:{instrument_id}:tick
+      aggregate_version: payload.source_sequence
+      message_id: payload.event_id
+      idempotency_key_template: market.tick:{provider}:{instrument_id}:{source_sequence}
+    market.bar_closed.v1:
+      schema_version: 1
+      source_template: BarAggregator/{provider}
+      partition_key: payload.instrument_id
+      aggregate_id_template: market:{provider}:{instrument_id}:bar:{timeframe_seconds}:{calendar_version}:{session_id}
+      aggregate_version: payload.source_sequence_end
+      message_id: payload.event_id
+      idempotency_key_template: market.bar:{provider}:{instrument_id}:{calendar_version}:{session_id}:{timeframe_seconds}:{window_start}
+    market.quality_changed.v1:
+      schema_version: 1
+      source_template: MarketQuality/{provider}
+      partition_key: payload.instrument_id
+      aggregate_id_template: market:{provider}:{instrument_id}:quality
+      aggregate_version: payload.quality_version
+      message_id: payload.event_id
+      idempotency_key_template: market.quality:{provider}:{instrument_id}:{quality_version}
+    market.session_changed.v1:
+      schema_version: 1
+      source_template: SessionScheduler/{calendar_id}
+      partition_key: payload.exchange
+      aggregate_id_template: market:{calendar_id}:{calendar_version}:{exchange}:{session_id}:session
+      aggregate_version: payload.transition_sequence
+      message_id: payload.event_id
+      idempotency_key_template: market.session:{calendar_id}:{calendar_version}:{exchange}:{session_id}:{transition_sequence}
+  idempotency:
+    identity: envelope.idempotency_key
+    fingerprint: SHA256_RFC8785_JCS_of_full_payload
+    same_identity_same_fingerprint: duplicate_ignore
+    same_identity_different_fingerprint: fail_closed_identity_collision
+    payload_hash_in_identity: forbidden
+  checksums:
+    MARKET_VALIDATION_POLICY:
+      checksum_field: policy_checksum
+      projection: [dto_type, schema_version, provider, generation, calendar_id, calendar_version, session_id, policy_version, aggregation_policy_version, activated_at, snapshot_max_age_ms, future_clock_skew_ms, queue_capacity, warning_watermark, critical_watermark, overflow_watermark, source_lag_stale_ms, tzdb_version]
+    TRADING_CALENDAR:
+      checksum_field: content_checksum
+      projection: [dto_type, schema_version, calendar_id, calendar_version, exchange, timezone, tzdb_version, trading_day, sessions]
+    MARKET_SNAPSHOT:
+      checksum_field: content_checksum
+      projection: [dto_type, schema_version, provider, generation, instrument_id, calendar_id, calendar_version, session_id, as_of, source_version, source_sequence, quality_version, aggregation_policy_version, quality, stale, unresolved_gap_count]
+    BAR_AGGREGATION_CHECKPOINT:
+      checksum_field: checkpoint_checksum
+      projection: [dto_type, schema_version, provider, instrument_id, calendar_id, calendar_version, session_id, source_version, quality_version, aggregation_policy_version, watermark_sequence, watermark_event_time, last_final_sequence]
+    market.bar_closed.v1:
+      checksum_field: content_checksum
+      projection: [partition_key, provider, instrument_id, exchange, calendar_id, calendar_version, session_id, trading_day, session_open_at, session_close_at, timeframe_seconds, allowed_lateness_ms, window_start, window_end, event_time, received_at, watermark_event_time, open, high, low, close, volume, turnover, source_sequence_start, source_sequence_end, watermark_sequence, quality, gap_start_sequence, gap_end_sequence, partial, final, revision, aggregation_policy_version]
+  bar_identity:
+    algorithm: UUIDv5
+    namespace: 9a41e905-11f3-5c30-8f02-5ba3f8ae8485
+    name_encoding: RFC8785_JCS_UTF8
+    name_projection: [provider, instrument_id, calendar_version, session_id, timeframe_seconds, window_start, window_end, aggregation_policy_version, source_sequence_start, source_sequence_end]
+  bar_aggregation:
+    tick_order: [event_time, source_sequence, event_id]
+    open: first_price_in_tick_order
+    close: last_price_in_tick_order
+    high: maximum_price
+    low: minimum_price
+    volume: sum_integer_incremental_quantity
+    turnover: sum_canonical_decimal_incremental_turnover
+    turnover_rounding: exact_decimal_no_rounding
+    window_alignment: session_open_plus_integer_multiple_of_timeframe_seconds
+    window_length: exactly_timeframe_seconds
+    cross_session_or_break: forbidden
+    event_time: window_end
+    final_gate: watermark_event_time_greater_or_equal_window_end_plus_allowed_lateness
+    final_revision: 0
+    late_after_final: reject_and_emit_gap_evidence
+  calendar_session:
+    timezone: IANA_zoneinfo_required
+    tzdb_source: deployed_immutable_IANA_tzdb_bundle
+    tzdb_version: explicit_and_checksum_bound
+    tzdb_bundle_activation: verify_manifest_version_zone_list_and_each_zone_sha256_before_load
+    system_tzdb_fallback: prohibited
+    missing_or_unknown_tzdb: fail_closed
+    local_boundary_resolution: explicit_fold_0_or_1_then_round_trip_to_reject_nonexistent_time
+    ambiguous_time: explicit_fold_required_and_UTC_offset_checksum_bound
+    intervals: UTC_ordered_non_overlapping
+    input_event_time: inside_bound_session_half_open_interval
+    non_cross_midnight_trading_day: local_session_open_date
+    cross_midnight_trading_day: local_session_close_date
+    crosses_local_midnight_flag_must_match: true
+  quality:
+    version_rule: quality_version_equals_previous_quality_version_plus_one
+    source_version_rule: source_version_greater_or_equal_previous_source_version
+    transitions:
+      - [UNAVAILABLE, RECOVERING, SNAPSHOT_VERIFYING]
+      - [UNAVAILABLE, RECOVERING, BACKFILL_STARTED]
+      - [GAP, RECOVERING, BACKFILL_STARTED]
+      - [STALE, RECOVERING, SNAPSHOT_VERIFYING]
+      - [RECOVERING, NORMAL, RECOVERY_VERIFIED]
+      - [UNAVAILABLE, NORMAL, INITIAL_BASELINE_VERIFIED]
+      - [NORMAL, DEGRADED, BACKPRESSURE]
+      - [NORMAL, DEGRADED, SOURCE_LAG]
+      - [DEGRADED, STALE, STALE_DEADLINE_EXCEEDED]
+      - [NORMAL, GAP, SOURCE_SEQUENCE_GAP]
+      - [DEGRADED, GAP, SOURCE_SEQUENCE_GAP]
+      - [STALE, GAP, SOURCE_SEQUENCE_GAP]
+      - [RECOVERING, GAP, SOURCE_SEQUENCE_GAP]
+      - [NORMAL, UNAVAILABLE, DISCONNECTED]
+      - [DEGRADED, UNAVAILABLE, DISCONNECTED]
+      - [STALE, UNAVAILABLE, DISCONNECTED]
+      - [GAP, UNAVAILABLE, DISCONNECTED]
+      - [RECOVERING, UNAVAILABLE, DISCONNECTED]
+    duplicate_same_version_same_fingerprint: ignore
+    duplicate_same_version_different_fingerprint: fail_closed_collision
+    normal_requires: [zero_unresolved_gaps, verified_snapshot_checksum, verified_checkpoint_checksum, contiguous_backfill, matching_calendar_session, watermark_covers_source_version]
+    non_normal_strategy_gate: reject_new_strategy_input
+    non_normal_risk_gate: snapshot_invalid_fail_closed
+  recovery_evidence:
+    required_for_quality: [NORMAL, RECOVERING]
+    fields: [provider, instrument_id, calendar_id, calendar_version, session_id, snapshot_identity, snapshot_checksum, checkpoint_identity, checkpoint_checksum, backfill_start_sequence, backfill_end_sequence, gap_start_sequence, gap_end_sequence, watermark_sequence, previous_source_version, source_version, previous_quality_version, quality_version]
+    resolution:
+      source: immutable_snapshot_and_checkpoint_registry
+      snapshot_identity: resolve_exact_or_reject
+      checkpoint_identity: resolve_exact_or_reject
+      checksums: recompute_from_normative_projections_and_match_or_reject
+      bindings: [provider, instrument_id, calendar_id, calendar_version, session_id, source_version, quality_version]
+      missing_or_tampered: reject_without_publish_persist_transition_or_recovery
+    range_rules:
+      - backfill_start_sequence_equals_gap_start_sequence
+      - backfill_end_sequence_equals_gap_end_sequence
+      - gap_start_sequence_equals_previous_source_version_plus_one
+      - gap_end_sequence_less_than_or_equal_source_version
+      - watermark_sequence_greater_than_or_equal_source_version
+  snapshot_available:
+    required_quality: NORMAL
+    stale: false
+    unresolved_gap_count: 0
+    checksum_verified: true
+    binding_fields: [provider, generation, instrument_id, calendar_id, calendar_version, session_id, source_version, source_sequence, quality_version, aggregation_policy_version]
+    source_sequence_rule: source_sequence_equals_source_version
+  validation_policy:
+    dto: MARKET_VALIDATION_POLICY
+    authority: reviewed_immutable_versioned_configuration_store
+    activation: explicit_human_authorized_version_and_checksum_record_before_ingress
+    immutable_identity: [provider, generation, calendar_id, calendar_version, session_id, policy_version]
+    checksum: RFC8785_JCS_SHA256_over_MARKET_VALIDATION_POLICY_projection
+    version_reuse_with_different_checksum: fail_closed_collision
+    snapshot_validator_inputs: [request, result, accepted_policy, evaluation_at]
+    health_validator_inputs: [request, result, accepted_policy, injected_observed_at]
+    evaluation_clock: injected_canonical_UTC_integer_milliseconds
+    snapshot_freshness_ms: evaluation_at_minus_snapshot_as_of
+    available_age_range: 0_to_snapshot_max_age_ms_inclusive
+    future_as_of: reject_if_greater_than_evaluation_at_plus_future_clock_skew_ms
+    stale_boolean: evidence_only_recomputed_value_must_match
+    rejected_snapshot: validate_same_request_policy_context_without_parsing_null_snapshot
+    all_outcomes_mandatory_boundary: request_result_context_validator_before_return
+  health_backpressure:
+    ordering: warning_watermark_less_than_critical_less_than_overflow_less_than_or_equal_capacity
+    queue_depth: less_than_or_equal_queue_capacity
+    healthy_queue: queue_depth_less_than_warning_watermark
+    healthy_lag: source_lag_ms_less_than_stale_after_ms
+    overflow_policy: REJECT_NEW_WITH_GAP_EVIDENCE
+    coalesce: forbidden_v1

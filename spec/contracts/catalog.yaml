@@ -1,6 +1,6 @@
 catalog:
   id: CONTRACT-CATALOG
-  version: 4
+  version: 5
   status: accepted
 messages:
   - {name: strategy.submit_order_intent.v1, kind: command, owner: OrderApplication, schema: commands/strategy.submit_order_intent.v1.schema.json, status: active}
@@ -8,10 +8,10 @@ messages:
   - {name: execution.cancel_order.v1, kind: command, owner: OrderApplication, schema: commands/execution.cancel_order.v1.schema.json, status: active}
   - {name: broker.trade_reported.v1, kind: event, publisher: BrokerAdapter, consumers: [OMS, Reconciliation, Audit], schema: events/broker.trade_reported.v1.schema.json, status: active}
   - {name: oms.order_status_changed.v1, kind: event, publisher: OMS, consumers: [StrategyRuntime, Portfolio, Audit, Alert], schema: events/oms.order_status_changed.v1.schema.json, status: active}
-  - {name: market.tick_received.v1, kind: event, publisher: MarketGateway, consumers: [StrategyRuntime, MarketQuality], status: planned}
-  - {name: market.bar_closed.v1, kind: event, publisher: BarAggregator, consumers: [StrategyRuntime, Storage], status: planned}
-  - {name: market.quality_changed.v1, kind: event, publisher: MarketQuality, consumers: [StrategyRuntime, Risk, Alert], status: planned}
-  - {name: market.session_changed.v1, kind: event, publisher: SessionScheduler, consumers: [StrategyRuntime, Risk, OMS], status: planned}
+  - {name: market.tick_received.v1, kind: event, publisher: MarketGateway, consumers: [StrategyRuntime, MarketQuality], schema: events/market.tick_received.v1.schema.json, status: active}
+  - {name: market.bar_closed.v1, kind: event, publisher: BarAggregator, consumers: [StrategyRuntime, Storage], schema: events/market.bar_closed.v1.schema.json, status: active}
+  - {name: market.quality_changed.v1, kind: event, publisher: MarketQuality, consumers: [StrategyRuntime, Risk, Alert], schema: events/market.quality_changed.v1.schema.json, status: active}
+  - {name: market.session_changed.v1, kind: event, publisher: SessionScheduler, consumers: [StrategyRuntime, Risk, OMS], schema: events/market.session_changed.v1.schema.json, status: active}
   - {name: strategy.signal_generated.v1, kind: event, publisher: StrategyRuntime, consumers: [Audit, Analytics], status: planned}
   - {name: strategy.target_generated.v1, kind: event, publisher: StrategyRuntime, consumers: [TargetResolver, Audit], status: planned}
   - {name: strategy.target_resolved.v1, kind: event, publisher: TargetResolver, consumers: [OrderApplication, Audit], status: planned}
@@ -43,6 +43,8 @@ rules:
   published_name_reuse: forbidden
   planned_message_must_be_activated_by_spec_change_task: true
 internal_contracts:
+  - {id: CONTRACT-MARKET-DATA-V1, schema: market/market-data.v1.schema.json, status: draft, owner: MarketData}
+  - {id: CONTRACT-MARKET-SEMANTIC-VALIDATION-V1, schema: market/market-data.semantic-validation.v1.yaml, status: draft, owner: MarketData}
   - {id: CONTRACT-LEDGER-ACCOUNTING-V1, schema: ledger/ledger-accounting.v1.schema.json, status: draft, owner: AccountLedger}
   - {id: CONTRACT-PORTFOLIO-PROJECTION-V1, schema: portfolio/portfolio-projection.v1.schema.json, status: draft, owner: PortfolioProjection}
   - {id: CONTRACT-RECONCILIATION-V1, schema: reconciliation/reconciliation.v1.schema.json, status: draft, owner: Reconciliation}
