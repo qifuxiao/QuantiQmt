@@ -16,6 +16,6 @@
   "critical_watermark": 819,
   "overflow_watermark": 972,
   "source_lag_stale_ms": 2000,
-  "tzdb_version": "2026a",
-  "policy_checksum": "11e06b4e08e0e04f55a0afa4e9fbc8b86822e6e349f67e5372652d5c67676892"
+  "tzdb_version": "2026c",
+  "policy_checksum": "d31191dd8fbba15144a133d0d663b3c7cf80cdc0843de7587256d17eda828e9d"
 }

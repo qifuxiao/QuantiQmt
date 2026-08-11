@@ -1,0 +1,10 @@
+{
+  "iana_version": "2026c",
+  "source": "IANA tzdb via tzdata 2026.3",
+  "files": {
+    "Asia/Shanghai": "bf8b7ed82fe6e63e6d98f8cea934eeac901cd16aba85eb5755ce3f8b4289ea8a",
+    "Asia/Tokyo": "59a3871430f0d3b93e619fa30a43a41d1e88bdd49ff26f09d0f405a500706f96",
+    "America/New_York": "d7f2206b3a45989fc9ad63d558922532fa7352280d5f87176bf1db79cb1d1fa9",
+    "UTC": "fddce1e648a1732ac29afd9a16151b2973cdf082e7ec0c690f7e42be6b598b93"
+  }
+}

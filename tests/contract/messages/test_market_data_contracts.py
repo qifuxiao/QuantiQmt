@@ -22,6 +22,7 @@ ROOT = Path(__file__).resolve().parents[3]
 SCHEMAS = ROOT / "spec" / "contracts"
 SEMANTIC_CONTRACT = SCHEMAS / "market" / "market-data.semantic-validation.v1.yaml"
 FIXTURES = Path(__file__).with_name("fixtures")
+TZDB_FIXTURE = FIXTURES / "internal/market-data.v1/tzdb"
 EVENTS = {
     "market.tick_received.v1": "events/market.tick_received.v1.schema.json",
     "market.bar_closed.v1": "events/market.bar_closed.v1.schema.json",
@@ -39,7 +40,7 @@ SESSION_TRANSITIONS = {
 }
 SAFE_INTEGER_MAX = 9_007_199_254_740_991
 ACCEPTED_POLICY_REGISTRY = {
-    "market-policy-v1": "11e06b4e08e0e04f55a0afa4e9fbc8b86822e6e349f67e5372652d5c67676892"
+    "market-policy-v1": "d31191dd8fbba15144a133d0d663b3c7cf80cdc0843de7587256d17eda828e9d"
 }
 
 
@@ -76,7 +77,11 @@ def _iana_zone(name: str) -> ZoneInfo:
     try:
         return ZoneInfo(name)
     except ZoneInfoNotFoundError as exc:
-        raise ValueError("calendar timezone is not IANA or tzdb is unavailable") from exc
+        path = TZDB_FIXTURE / Path(*name.split("/"))
+        if not path.is_file():
+            raise ValueError("calendar timezone is not IANA or tzdb is unavailable") from exc
+        with path.open("rb") as stream:
+            return ZoneInfo.from_file(stream, key=name)
 
 
 def _resolve_local_boundary(value: str, zone_name: str, fold: int) -> datetime:
@@ -1644,6 +1649,14 @@ def test_zoneinfo_reference_vectors_cover_tokyo_new_york_dst_and_midnight() -> N
     opened = _resolve_local_boundary("2026-08-11T23:00:00", "Asia/Tokyo", 0)
     closed = _resolve_local_boundary("2026-08-12T01:00:00", "Asia/Tokyo", 0)
     assert opened.date() != closed.date()
+
+
+def test_frozen_tzdb_reference_bundle_version_and_digests() -> None:
+    reference = _load(FIXTURES / "internal/market-data.v1/tzdb-reference.json")
+    assert reference["iana_version"] == _market_policy()["tzdb_version"]
+    for name, expected in reference["files"].items():
+        path = TZDB_FIXTURE / Path(*name.split("/"))
+        assert hashlib.sha256(path.read_bytes()).hexdigest() == expected
 
 
 def test_zoneinfo_rejects_unknown_and_nonexistent_dst_boundary() -> None:
