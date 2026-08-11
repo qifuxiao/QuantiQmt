@@ -90,7 +90,7 @@ def _resolve_local_boundary(value: str, zone_name: str, fold: int) -> datetime:
         raise ValueError("local boundary/fold is invalid")
     zone = _iana_zone(zone_name)
     resolved = local.replace(tzinfo=zone, fold=fold)
-    if resolved.astimezone(ZoneInfo("UTC")).astimezone(zone).replace(tzinfo=None) != local:
+    if resolved.astimezone(_iana_zone("UTC")).astimezone(zone).replace(tzinfo=None) != local:
         raise ValueError("nonexistent local boundary")
     return resolved
 
@@ -517,8 +517,8 @@ def validate_market_contract_semantics(document: dict[str, Any]) -> None:
             interval["close_local"], calendar["timezone"], interval["close_fold"]
         )
         if (
-            resolved_open.astimezone(ZoneInfo("UTC")) != opened
-            or resolved_close.astimezone(ZoneInfo("UTC")) != closed
+            resolved_open.astimezone(_iana_zone("UTC")) != opened
+            or resolved_close.astimezone(_iana_zone("UTC")) != closed
         ):
             raise ValueError("calendar local/UTC boundary mismatch")
         if interval["open_utc_offset_seconds"] != str(
