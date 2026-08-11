@@ -66,6 +66,14 @@ nfr:
     recovery_gate: [version_matched_calendar_session, snapshot_identity_and_checksum, checkpoint_identity_and_checksum, bounded_backfill, contiguous_source_versions, watermark_covers_source_version, zero_unresolved_gaps]
     validation_boundaries: [publish, persist, quality_transition, snapshot_restore, strategy_risk_delivery]
     validation_failure_state_advance: forbidden
+    validation_policy: immutable_versioned_checksum_bound_configuration
+    policy_version_reuse_with_different_content: fail_closed
+    snapshot_all_outcomes_same_validator: true
+    snapshot_freshness: recompute_from_injected_evaluation_at_never_trust_stale_flag
+    health_threshold_authority: accepted_policy_not_response
+    market_json_integer_domain: I_JSON_safe_unsigned
+    integer_exponent_or_fraction_wire_token: reject_before_schema
+    timezone_database: explicit_immutable_IANA_tzdb_version_fail_closed
     final_bar_rewrite: forbidden
     replay_inputs: [normalized_events, calendar_version, aggregation_policy, checkpoint, watermark_sequence]
     wall_clock: forbidden

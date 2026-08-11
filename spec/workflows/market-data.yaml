@@ -18,8 +18,17 @@ workflow:
     - name: quality
       actions: [detect_duplicate, detect_out_of_order, detect_gap, detect_stale, advance_quality_version]
       fail_closed: true
+    - name: snapshot_and_health
+      actions: [load_accepted_policy_by_version_and_checksum, validate_policy_checksum_and_activation, validate_request_result_context, recompute_snapshot_freshness_or_health_status]
+      validator: CONTRACT-MARKET-SEMANTIC-VALIDATION-V1
+      snapshot_inputs: [request, result, accepted_policy, injected_evaluation_at]
+      health_inputs: [request, result, accepted_policy, injected_observed_at]
+      all_snapshot_outcomes: mandatory_same_validator
+      rejected_snapshot_payload: null_do_not_parse
+      response_thresholds_as_authority: forbidden
+      failure: reject_without_returning_trade_safe_snapshot_or_HEALTHY
     - name: publish
-      actions: [schema_validate, validate_envelope_payload_binding, semantic_validate, persist_optional_evidence, publish_envelope]
+      actions: [validate_canonical_integer_wire_tokens, schema_validate, validate_envelope_payload_binding, semantic_validate, persist_optional_evidence, publish_envelope]
       envelope: CONTRACT-MESSAGE-ENVELOPE-V1
       semantic_contract: CONTRACT-MARKET-SEMANTIC-VALIDATION-V1
       idempotency_identity: event_specific_envelope_idempotency_key_without_payload_hash

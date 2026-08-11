@@ -190,8 +190,8 @@ change:
   error_catalog_change: none
   runtime_code_change: "none in TASK-020; TASK-023 remains blocked and owns a future implementation only after TASK-020 and TASK-022 trusted completion"
   review_change: none
-  contract_change: "freezes public Market event payloads, complete envelope binding, MarketGateway DTO/Port outcomes, safe snapshot/health thresholds, versioned calendar/session/quality recovery evidence, V1 reject-with-gap backpressure, RFC8785 checksums, UUIDv5 Bar identity, deterministic aggregation and replay"
-  semantic_validation_change: "adds CONTRACT-MARKET-SEMANTIC-VALIDATION-V1 and requires schema, envelope/payload binding, then the same semantic validator before publish, persistence, quality transition, restore or Strategy/Risk delivery; validates identity collision, JCS projections, time/order/version, recovery ranges, snapshot availability, queue/lag thresholds, calendar/session mapping, OHLC, finality and LIVE/REPLAY vectors"
+  contract_change: "freezes public Market event payloads, complete envelope binding, MarketGateway DTO/Port outcomes, immutable checksum-bound validation policy, request/result/context Snapshot and Health validation, I-JSON safe integers, IANA tzdb/fold replay evidence, versioned calendar/session/quality recovery, V1 reject-with-gap backpressure, RFC8785 checksums, UUIDv5 Bar identity and deterministic replay"
+  semantic_validation_change: "adds CONTRACT-MARKET-SEMANTIC-VALIDATION-V1 and requires canonical integer token, schema, envelope/payload binding, then the same semantic validator before publish, persistence, quality transition, snapshot/health return, restore or Strategy/Risk delivery; recomputes freshness and health from accepted policy, validates all rejected snapshot reasons, identity collision, RFC8785/I-JSON projections, tzdb/fold mapping, recovery ranges, OHLC, finality and LIVE/REPLAY vectors"
   internal_contracts_added: [CONTRACT-MARKET-DATA-V1, CONTRACT-MARKET-SEMANTIC-VALIDATION-V1, PORTS-MARKET, WF-MARKET-DATA, STORAGE-MARKET-DATA]
   public_contracts_added: [CONTRACT-MARKET-TICK-RECEIVED-V1, CONTRACT-MARKET-BAR-CLOSED-V1, CONTRACT-MARKET-QUALITY-CHANGED-V1, CONTRACT-MARKET-SESSION-CHANGED-V1]
   task_queue_change: "TASK-020 remains active/draft/in-progress pending independent Review; TASK-023 remains blocked and is constrained to the frozen contracts; no other task changes state"
@@ -205,9 +205,10 @@ change:
     - verify_installed_wheel_bundle_digest_and_manifest_parity_without_source_checkout
     - deploy_schema_compatible_consumers_before_market_event_publishers
     - verify_shadow_ingress_gap_recovery_and_live_replay_determinism
+    - activate_immutable_market_validation_policy_and_tzdb_bundle_before_snapshot_or_health_traffic
     - enable_bounded_publishers_without_silent_drop
   migration:
-    runtime_data: "not applicable in TASK-020 because no Market runtime is implemented; TASK-023 must load only a reviewed immutable manifest-indexed schema bundle and fail closed on missing, tampered or mismatched bundle"
+    runtime_data: "not applicable in TASK-020 because no Market runtime is implemented; TASK-023 must load only a reviewed immutable manifest-indexed schema bundle plus accepted policy/tzdb versions and fail closed on missing, tampered or mismatched content"
     public_events: "new event names have no historical published payload, so Review corrections are folded into V1 before first release; deploy accepted readers and immutable bundle before future publishers and reject unknown versions fail-closed"
     storage: "no migration is created or authorized; future persistence requires independently authorized expand-only storage work"
     task_queue: "TASK-020 remains active; TASK-023 remains blocked on TASK-020 and TASK-022; no downstream activation"

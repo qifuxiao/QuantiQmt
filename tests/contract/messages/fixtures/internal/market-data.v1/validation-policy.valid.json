@@ -1,0 +1,21 @@
+{
+  "dto_type": "MARKET_VALIDATION_POLICY",
+  "schema_version": 1,
+  "provider": "SIM",
+  "generation": 1,
+  "calendar_id": "CN-A",
+  "calendar_version": "cal-v1",
+  "session_id": "am",
+  "policy_version": "market-policy-v1",
+  "aggregation_policy_version": "bar-v1",
+  "activated_at": "2026-08-11T00:00:00Z",
+  "snapshot_max_age_ms": 1000,
+  "future_clock_skew_ms": 100,
+  "queue_capacity": 1024,
+  "warning_watermark": 614,
+  "critical_watermark": 819,
+  "overflow_watermark": 972,
+  "source_lag_stale_ms": 2000,
+  "tzdb_version": "2026a",
+  "policy_checksum": "11e06b4e08e0e04f55a0afa4e9fbc8b86822e6e349f67e5372652d5c67676892"
+}

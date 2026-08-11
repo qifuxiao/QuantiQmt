@@ -49,7 +49,8 @@ The schema additionally binds operation-specific success: START/APPLIED uses
 UNSUBSCRIBE/APPLIED uses `UNSUBSCRIBED`; contradictory combinations are invalid.
 `SnapshotResult` is either `AVAILABLE/AVAILABLE` with a non-null validated
 snapshot or `REJECTED` with null snapshot and exactly one of
-`DEADLINE_EXCEEDED`, `UNAVAILABLE`, `STALE`, `GAP`, `INVALID_REQUEST`.
+`DEADLINE_EXCEEDED`, `UNAVAILABLE`, `STALE`, `GAP`, `CHECKSUM_UNVERIFIED`,
+`INVALID_REQUEST`.
 Request/result identifiers and generation/operation fields MUST match.
 
 The callback boundary may only normalize validated vendor data and perform a
@@ -68,6 +69,22 @@ transaction/audit queues.
 
 ## Snapshot and health
 
+`MARKET_VALIDATION_POLICY` is immutable, versioned configuration loaded from the
+reviewed configuration authority before ingress activation. Its identity binds
+provider, generation, calendar/session and policy version; its JCS checksum binds
+snapshot maximum age, permitted future clock skew, queue capacity/watermarks,
+source-lag stale threshold, aggregation policy and tzdb version. Activation stores
+the `(policy_version, policy_checksum)` pair. Reusing a version with different
+content or loading a missing/tampered policy fails closed.
+
+Snapshot validation is one request/result/context operation. Its inputs are the
+`SnapshotRequest`, `SnapshotResult`, accepted validation policy and injected
+`evaluation_at`. Both times are canonical UTC and freshness is the exact integer
+millisecond delta `evaluation_at - as_of`; the maximum-age boundary is inclusive.
+An `as_of` beyond `evaluation_at + future_clock_skew_ms` is rejected. The response
+`stale` flag is evidence only and MUST equal the recomputed value. V1 freezes
+`source_sequence == source_version`, and that version must equal the request.
+
 A snapshot binds provider, generation, instrument, calendar/session,
 source/source-sequence, quality version, aggregation-policy version, `as_of`,
 quality, unresolved-gap count and JCS checksum. `AVAILABLE` requires
@@ -75,6 +92,11 @@ quality, unresolved-gap count and JCS checksum. `AVAILABLE` requires
 request/snapshot version binding. STALE, GAP, RECOVERING, UNAVAILABLE, an
 unverified checksum, or any binding mismatch returns non-AVAILABLE with the
 schema-frozen reason and cannot satisfy Strategy/Risk.
+
+Every `REJECTED` result runs the same validator with the request and accepted
+policy, requires a null snapshot and one exhaustive reason, and does not parse a
+snapshot. Routine failure is never represented by an exception, bare null, or a
+branch that bypasses semantic validation.
 
 Health is exhaustive and bound to request ID, provider, generation,
 calendar/session, source/quality version and effective policy version. `HEALTHY`
@@ -84,6 +106,12 @@ stale threshold. `DEGRADED` uses the exact quality/reason matrix;
 inconsistency, or depth above capacity cannot be HEALTHY. A deadline or adapter
 failure is returned as fail-visible health or snapshot rejection; null and thrown
 adapter exceptions are not Port outcomes.
+Health response thresholds are telemetry, not authority: every threshold must
+equal the accepted policy and status is recomputed from that policy. Inflating
+all response thresholds while retaining the same policy version/checksum is a
+checksum collision and fails closed.
+The Health validator also receives injected `observed_at`; the result timestamp
+must match it exactly and cannot predate policy activation.
 
 ## Envelope binding and idempotency
 
@@ -102,7 +130,8 @@ cannot be bypassed with a new arbitrary identity.
 ## Trading calendar and session
 
 `TradingCalendar` is versioned, checksum-bound authority for exchange timezone,
-trading day, UTC session intervals and local-midnight crossing. Domain code uses
+tzdb version, trading day, UTC session intervals, local boundaries, explicit
+PEP-495 fold choices, resolved UTC offsets and local-midnight crossing. Domain code uses
 an injected Clock and MUST NOT infer trading day from UTC date or environment
 timezone. Intervals are ordered, non-overlapping and never inferred from ticks.
 
@@ -110,7 +139,10 @@ Session states are `CLOSED`, `PRE_OPEN`, `OPEN`, `BREAK`, `CLOSING`. The public
 session schema enumerates every legal state pair. A duplicate is represented only
 as `CLOSED -> CLOSED / DUPLICATE_SUPPRESSED`; an old transition sequence is ignored
 with audit evidence and cannot move state. Calendar-version mismatch is rejected.
-Timezone must be an IANA name supported by the deployed calendar database.
+Timezone must resolve through the deployed immutable IANA tzdb version; missing
+tzdb data and unknown zones fail closed. Nonexistent local times are rejected by
+local→UTC→local round trip. Ambiguous boundaries require explicit fold `0` or `1`,
+and the resolved offset is checksum-bound.
 The validator proves each UTC interval's local trading-day mapping and
 `crosses_local_midnight` flag, and proves each aggregation input event time lies
 inside its bound half-open session interval.
@@ -162,6 +194,12 @@ semantic contract, RFC 8785 JCS, UTF-8 without BOM and SHA-256 lowercase hex.
 Decimal values remain strings and Unicode is not normalized. Bar `event_id` is
 UUIDv5 using namespace `9a41e905-11f3-5c30-8f02-5ba3f8ae8485` and the indexed JCS
 identity projection; history cannot be silently revised by selecting UUID4.
+Production MUST use an RFC 8785 compatible implementation, not `str(int)` or a
+language-default serializer. Every JSON integer participating in Market schemas
+is within I-JSON `0..9007199254740991`; larger exact domain numbers remain
+canonical decimal strings. Exponent/fraction lexical forms for integer fields are
+rejected before schema validation. The semantic contract supplies independent
+canonical-byte, SHA-256 and UUIDv5 vectors for cross-language parity.
 
 For identical normalized input order, calendar/version, policy, checkpoint and
 watermark sequence, LIVE and REPLAY MUST emit byte-identical payload identity,

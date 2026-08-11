@@ -13,6 +13,10 @@ semantic_validation:
     unicode_normalization: forbidden
     unicode: scalar_values
     number_serialization: RFC8785
+    production_implementation: RFC8785_compatible_library_required_not_language_default_string_conversion
+    json_integer_domain: I_JSON_safe_unsigned_0_to_9007199254740991
+    integer_wire_lexeme: ^(0|[1-9][0-9]{0,15})$
+    exponent_or_fractional_integer_token: reject_before_schema_validation
     decimal_representation: canonical_decimal_string
     floats_for_price_quantity_turnover_or_fee: forbidden
     hash: SHA-256_lowercase_hex
@@ -20,6 +24,12 @@ semantic_validation:
       input: {"": 1, "𐀀": 2}
       canonical_json: '{"𐀀":2,"":1}'
       sha256: 9d4cdc71dda603c42f9b21d88d0c2ffc31a76cd1bd461d7359406cf169845f1e
+    safe_integer_cross_language_reference:
+      input: {safe: 9007199254740991, decimal: "9007199254740991.00"}
+      canonical_json: '{"decimal":"9007199254740991.00","safe":9007199254740991}'
+      sha256: 841b22f8ce183dafb48820ed983911baf3c2c33d6fde00b3bfb737aa2d64ef36
+      uuidv5_namespace: 9a41e905-11f3-5c30-8f02-5ba3f8ae8485
+      uuidv5: ef05fe42-6716-5f00-b484-7769ceafed5a
   event_envelope_binding:
     market.tick_received.v1:
       schema_version: 1
@@ -60,9 +70,12 @@ semantic_validation:
     same_identity_different_fingerprint: fail_closed_identity_collision
     payload_hash_in_identity: forbidden
   checksums:
+    MARKET_VALIDATION_POLICY:
+      checksum_field: policy_checksum
+      projection: [dto_type, schema_version, provider, generation, calendar_id, calendar_version, session_id, policy_version, aggregation_policy_version, activated_at, snapshot_max_age_ms, future_clock_skew_ms, queue_capacity, warning_watermark, critical_watermark, overflow_watermark, source_lag_stale_ms, tzdb_version]
     TRADING_CALENDAR:
       checksum_field: content_checksum
-      projection: [dto_type, schema_version, calendar_id, calendar_version, exchange, timezone, trading_day, sessions]
+      projection: [dto_type, schema_version, calendar_id, calendar_version, exchange, timezone, tzdb_version, trading_day, sessions]
     MARKET_SNAPSHOT:
       checksum_field: content_checksum
       projection: [dto_type, schema_version, provider, generation, instrument_id, calendar_id, calendar_version, session_id, as_of, source_version, source_sequence, quality_version, aggregation_policy_version, quality, stale, unresolved_gap_count]
@@ -95,6 +108,11 @@ semantic_validation:
     late_after_final: reject_and_emit_gap_evidence
   calendar_session:
     timezone: IANA_zoneinfo_required
+    tzdb_source: deployed_immutable_IANA_tzdb_bundle
+    tzdb_version: explicit_and_checksum_bound
+    missing_or_unknown_tzdb: fail_closed
+    local_boundary_resolution: explicit_fold_0_or_1_then_round_trip_to_reject_nonexistent_time
+    ambiguous_time: explicit_fold_required_and_UTC_offset_checksum_bound
     intervals: UTC_ordered_non_overlapping
     input_event_time: inside_bound_session_half_open_interval
     non_cross_midnight_trading_day: local_session_open_date
@@ -149,6 +167,23 @@ semantic_validation:
     unresolved_gap_count: 0
     checksum_verified: true
     binding_fields: [provider, generation, instrument_id, calendar_id, calendar_version, session_id, source_version, source_sequence, quality_version, aggregation_policy_version]
+    source_sequence_rule: source_sequence_equals_source_version
+  validation_policy:
+    dto: MARKET_VALIDATION_POLICY
+    authority: reviewed_immutable_versioned_configuration_store
+    activation: explicit_human_authorized_version_and_checksum_record_before_ingress
+    immutable_identity: [provider, generation, calendar_id, calendar_version, session_id, policy_version]
+    checksum: RFC8785_JCS_SHA256_over_MARKET_VALIDATION_POLICY_projection
+    version_reuse_with_different_checksum: fail_closed_collision
+    snapshot_validator_inputs: [request, result, accepted_policy, evaluation_at]
+    health_validator_inputs: [request, result, accepted_policy, injected_observed_at]
+    evaluation_clock: injected_canonical_UTC_integer_milliseconds
+    snapshot_freshness_ms: evaluation_at_minus_snapshot_as_of
+    available_age_range: 0_to_snapshot_max_age_ms_inclusive
+    future_as_of: reject_if_greater_than_evaluation_at_plus_future_clock_skew_ms
+    stale_boolean: evidence_only_recomputed_value_must_match
+    rejected_snapshot: validate_same_request_policy_context_without_parsing_null_snapshot
+    all_outcomes_mandatory_boundary: request_result_context_validator_before_return
   health_backpressure:
     ordering: warning_watermark_less_than_critical_less_than_overflow_less_than_or_equal_capacity
     queue_depth: less_than_or_equal_queue_capacity

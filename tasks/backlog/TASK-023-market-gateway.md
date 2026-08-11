@@ -44,6 +44,7 @@ verification:
 - Build one immutable `quantiqmt.contracts.schema_bundle` package resource generated from the reviewed `spec/manifest.yaml` contract index. The bundle records manifest version, every canonical contract ID/path/digest and an overall bundle digest; generation fails on duplicates, missing routes, unresolved refs or parity mismatch.
 - Runtime Registry loads only that installed package resource, verifies manifest-version parity and bundle/content digests before serving a schema, and fails closed for missing, tampered, partial or mismatched bundles. Runtime must never read a source-checkout `spec/contracts/**` path and must not maintain a second hand-copied schema set.
 - Wheel/build verification installs the artifact in an isolated environment without the source checkout, validates every active Market route and semantic-contract digest, and proves missing/tampered bundle failure. `pyproject.toml` may change only as required to package the reviewed generated resource.
+- Package or declare an immutable IANA tzdb artifact/version alongside the reviewed schema bundle and load accepted `MARKET_VALIDATION_POLICY` versions by immutable checksum. Missing tzdb, unknown zones, policy-version checksum collision, stale/future Snapshot evidence, or response-supplied Health threshold mismatch must fail closed in isolated wheel tests.
 
 ## Review focus
 

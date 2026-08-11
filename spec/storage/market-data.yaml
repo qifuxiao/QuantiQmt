@@ -26,6 +26,8 @@ storage:
       versioned_immutable: true
       checksum_required: true
       checksum_projection: CONTRACT-MARKET-SEMANTIC-VALIDATION-V1.checksums.TRADING_CALENDAR
+      replay_binding: [timezone, tzdb_version, local_boundary, fold, resolved_utc_offset]
+      unknown_or_missing_tzdb: fail_closed
       environment_timezone_inference: forbidden
     checkpoint:
       fields: [instrument_id, calendar_version, session_id, watermark_sequence, watermark_event_time, last_final_sequence, checkpoint_checksum]
@@ -34,6 +36,8 @@ storage:
     snapshot:
       available_requires: [NORMAL, not_stale, zero_unresolved_gaps, checksum_verified, exact_version_binding]
       checksum_projection: CONTRACT-MARKET-SEMANTIC-VALIDATION-V1.checksums.MARKET_SNAPSHOT
+      freshness_policy: immutable_version_and_checksum_required
+      response_stale_flag_as_authority: forbidden
       non_available_evidence_retained: true
   recovery:
     source: [versioned_calendar, validated_snapshot, bounded_backfill, checkpoint]

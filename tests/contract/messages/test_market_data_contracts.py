@@ -2,13 +2,15 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import uuid
 from copy import deepcopy
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from decimal import Decimal
 from itertools import pairwise, product
 from pathlib import Path
 from typing import Any, cast
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import pytest
 import yaml
@@ -35,7 +37,10 @@ SESSION_TRANSITIONS = {
     ("CLOSING", "CLOSED"): "CALENDAR_BOUNDARY",
     ("CLOSED", "CLOSED"): "DUPLICATE_SUPPRESSED",
 }
-SUPPORTED_IANA_TIMEZONES = {"Asia/Shanghai": timezone(timedelta(hours=8))}
+SAFE_INTEGER_MAX = 9_007_199_254_740_991
+ACCEPTED_POLICY_REGISTRY = {
+    "market-policy-v1": "11e06b4e08e0e04f55a0afa4e9fbc8b86822e6e349f67e5372652d5c67676892"
+}
 
 
 def _load(path: Path) -> dict[str, Any]:
@@ -65,6 +70,24 @@ def _utc(value: str) -> datetime:
     if not value.endswith("Z"):
         raise ValueError("timestamp must be canonical UTC Z")
     return datetime.fromisoformat(value.replace("Z", "+00:00"))
+
+
+def _iana_zone(name: str) -> ZoneInfo:
+    try:
+        return ZoneInfo(name)
+    except ZoneInfoNotFoundError as exc:
+        raise ValueError("calendar timezone is not IANA or tzdb is unavailable") from exc
+
+
+def _resolve_local_boundary(value: str, zone_name: str, fold: int) -> datetime:
+    local = datetime.fromisoformat(value)
+    if local.tzinfo is not None or fold not in {0, 1}:
+        raise ValueError("local boundary/fold is invalid")
+    zone = _iana_zone(zone_name)
+    resolved = local.replace(tzinfo=zone, fold=fold)
+    if resolved.astimezone(ZoneInfo("UTC")).astimezone(zone).replace(tzinfo=None) != local:
+        raise ValueError("nonexistent local boundary")
+    return resolved
 
 
 def _jcs(value: object) -> str:
@@ -117,6 +140,166 @@ def _refresh_bar_identity_and_checksum(value: dict[str, Any]) -> None:
         )
     )
     _refresh_checksum("market.bar_closed.v1", value)
+
+
+def validate_unsigned_integer_token(token: str) -> int:
+    if re.fullmatch(r"0|[1-9][0-9]*", token) is None:
+        raise ValueError("canonical unsigned safe integer token required")
+    value = int(token)
+    if value > SAFE_INTEGER_MAX:
+        raise ValueError("canonical unsigned safe integer token required")
+    return value
+
+
+def _validate_accepted_policy(
+    request: dict[str, Any], policy: dict[str, Any], *, snapshot: bool
+) -> None:
+    _validator("market/market-data.v1.schema.json").validate(policy)
+    accepted_checksum = ACCEPTED_POLICY_REGISTRY.get(policy["policy_version"])
+    if accepted_checksum is None:
+        raise ValueError("validation policy identity mismatch")
+    for field in ("provider", "generation", "calendar_id", "calendar_version", "session_id"):
+        if request[field] != policy[field]:
+            raise ValueError("validation policy identity mismatch")
+    request_policy_version = (
+        request["aggregation_policy_version"] if snapshot else request["policy_version"]
+    )
+    expected_policy_version = (
+        policy["aggregation_policy_version"] if snapshot else policy["policy_version"]
+    )
+    if request_policy_version != expected_policy_version:
+        raise ValueError("validation policy identity mismatch")
+    try:
+        _assert_checksum("MARKET_VALIDATION_POLICY", policy)
+    except ValueError as exc:
+        raise ValueError("validation policy checksum mismatch") from exc
+    if policy["policy_checksum"] != accepted_checksum:
+        raise ValueError("validation policy checksum mismatch")
+    if not (
+        policy["warning_watermark"]
+        < policy["critical_watermark"]
+        < policy["overflow_watermark"]
+        <= policy["queue_capacity"]
+    ):
+        raise ValueError("validation policy thresholds invalid")
+
+
+def validate_snapshot_exchange(
+    request: dict[str, Any],
+    result: dict[str, Any],
+    policy: dict[str, Any],
+    evaluation_at: str,
+) -> None:
+    _validator("market/market-data.v1.schema.json").validate(request)
+    _validate_accepted_policy(request, policy, snapshot=True)
+    if result.get("request_id") != request["request_id"]:
+        raise ValueError("snapshot request identity mismatch")
+    rejected_reasons = {
+        "DEADLINE_EXCEEDED",
+        "UNAVAILABLE",
+        "STALE",
+        "GAP",
+        "CHECKSUM_UNVERIFIED",
+        "INVALID_REQUEST",
+    }
+    if result.get("outcome") == "REJECTED":
+        if result.get("reason_code") not in rejected_reasons:
+            raise ValueError("snapshot outcome/reason mismatch")
+        if result.get("snapshot") is not None:
+            raise ValueError("REJECTED snapshot must be null")
+        _validator("market/market-data.v1.schema.json").validate(result)
+        return
+    if result.get("outcome") != "AVAILABLE" or result.get("reason_code") != "AVAILABLE":
+        raise ValueError("snapshot outcome/reason mismatch")
+    snapshot = result.get("snapshot")
+    if not isinstance(snapshot, dict):
+        raise ValueError("AVAILABLE snapshot payload required")
+    _validator("market/market-data.v1.schema.json").validate(result)
+    for field in (
+        "provider",
+        "generation",
+        "instrument_id",
+        "calendar_id",
+        "calendar_version",
+        "session_id",
+        "source_version",
+        "quality_version",
+        "aggregation_policy_version",
+    ):
+        if snapshot[field] != request[field]:
+            raise ValueError("snapshot request/version binding mismatch")
+    if snapshot["source_sequence"] != snapshot["source_version"]:
+        raise ValueError("snapshot source sequence/version mismatch")
+    _assert_checksum("MARKET_SNAPSHOT", snapshot)
+    as_of = _utc(snapshot["as_of"])
+    evaluated = _utc(evaluation_at)
+    age_delta = evaluated - as_of
+    future_delta = as_of - evaluated
+    age_ms = age_delta.days * 86_400_000 + age_delta.seconds * 1000 + age_delta.microseconds // 1000
+    future_ms = (
+        future_delta.days * 86_400_000
+        + future_delta.seconds * 1000
+        + future_delta.microseconds // 1000
+    )
+    if future_ms > policy["future_clock_skew_ms"]:
+        raise ValueError("snapshot future clock skew")
+    recomputed_stale = age_ms > policy["snapshot_max_age_ms"]
+    if snapshot["stale"] is not recomputed_stale:
+        if recomputed_stale:
+            raise ValueError("snapshot freshness policy violation")
+        raise ValueError("snapshot stale flag contradicts trusted policy")
+    if recomputed_stale or snapshot["quality"] != "NORMAL":
+        raise ValueError("snapshot freshness policy violation")
+    if snapshot["unresolved_gap_count"] != 0 or not snapshot["checksum_verified"]:
+        raise ValueError("AVAILABLE snapshot is not trade-safe")
+
+
+def validate_health_exchange(
+    request: dict[str, Any],
+    health: dict[str, Any],
+    policy: dict[str, Any],
+    observed_at: str,
+) -> None:
+    _validator("market/market-data.v1.schema.json").validate(request)
+    _validator("market/market-data.v1.schema.json").validate(health)
+    _validate_accepted_policy(request, policy, snapshot=False)
+    if health["observed_at"] != observed_at or _utc(observed_at) < _utc(policy["activated_at"]):
+        raise ValueError("health observed_at context mismatch")
+    for field in (
+        "request_id",
+        "provider",
+        "generation",
+        "calendar_id",
+        "calendar_version",
+        "session_id",
+        "source_version",
+        "quality_version",
+        "policy_version",
+    ):
+        if health[field] != request[field]:
+            raise ValueError("health version/policy binding mismatch")
+    threshold_fields = (
+        "queue_capacity",
+        "warning_watermark",
+        "critical_watermark",
+        "overflow_watermark",
+        "source_lag_stale_ms",
+    )
+    if any(health[field] != policy[field] for field in threshold_fields):
+        raise ValueError("health thresholds do not match accepted policy")
+    if health["queue_depth"] > policy["queue_capacity"]:
+        raise ValueError("queue depth exceeds capacity")
+    if health["source_lag_ms"] >= policy["source_lag_stale_ms"]:
+        expected = ("DEGRADED", "STALE", "STALE")
+    elif health["queue_depth"] >= policy["overflow_watermark"]:
+        expected = ("DEGRADED", "GAP", "GAP")
+    elif health["queue_depth"] >= policy["warning_watermark"]:
+        expected = ("DEGRADED", "DEGRADED", "BACKPRESSURE")
+    else:
+        expected = ("HEALTHY", "NORMAL", "OK")
+    actual = (health["status"], health["quality"], health["reason_code"])
+    if actual != expected:
+        raise ValueError("health status does not match accepted policy")
 
 
 def validate_market_event_semantics(message_type: str, payload: dict[str, Any]) -> None:
@@ -281,11 +464,22 @@ def validate_market_event_semantics(message_type: str, payload: dict[str, Any]) 
         raise ValueError("session/calendar version mismatch")
     if not (_utc(payload["session_open_at"]) < _utc(payload["session_close_at"])):
         raise ValueError("session interval is inverted")
-    market_timezone = SUPPORTED_IANA_TIMEZONES.get(payload["timezone"])
-    if market_timezone is None:
-        raise ValueError("calendar timezone is not IANA")
+    market_timezone = _iana_zone(payload["timezone"])
     local_open = _utc(payload["session_open_at"]).astimezone(market_timezone)
     local_close = _utc(payload["session_close_at"]).astimezone(market_timezone)
+    if not payload["tzdb_version"]:
+        raise ValueError("calendar tzdb version is missing")
+    if (
+        payload["session_open_fold"] != local_open.fold
+        or payload["session_close_fold"] != local_close.fold
+    ):
+        raise ValueError("session fold binding mismatch")
+    if payload["session_open_utc_offset_seconds"] != str(
+        int(cast(timedelta, local_open.utcoffset()).total_seconds())
+    ) or payload["session_close_utc_offset_seconds"] != str(
+        int(cast(timedelta, local_close.utcoffset()).total_seconds())
+    ):
+        raise ValueError("session UTC offset binding mismatch")
     crosses = local_open.date() != local_close.date()
     if crosses != payload["crosses_local_midnight"]:
         raise ValueError("cross-midnight declaration mismatch")
@@ -297,10 +491,11 @@ def validate_market_event_semantics(message_type: str, payload: dict[str, Any]) 
 def validate_market_contract_semantics(document: dict[str, Any]) -> None:
     dtos = document["dtos"]
     by_type = {dto["dto_type"]: dto for dto in dtos}
+    validation_policy = _load(FIXTURES / "internal/market-data.v1/validation-policy.valid.json")
     calendar = by_type["TRADING_CALENDAR"]
-    market_timezone = SUPPORTED_IANA_TIMEZONES.get(calendar["timezone"])
-    if market_timezone is None:
-        raise ValueError("calendar timezone is not IANA")
+    market_timezone = _iana_zone(calendar["timezone"])
+    if calendar["tzdb_version"] != validation_policy["tzdb_version"]:
+        raise ValueError("calendar/policy tzdb version mismatch")
     intervals = calendar["sessions"]
     if any(
         _utc(current["close_at"]) > _utc(following["open_at"])
@@ -310,6 +505,23 @@ def validate_market_contract_semantics(document: dict[str, Any]) -> None:
     for interval in intervals:
         opened = _utc(interval["open_at"])
         closed = _utc(interval["close_at"])
+        resolved_open = _resolve_local_boundary(
+            interval["open_local"], calendar["timezone"], interval["open_fold"]
+        )
+        resolved_close = _resolve_local_boundary(
+            interval["close_local"], calendar["timezone"], interval["close_fold"]
+        )
+        if (
+            resolved_open.astimezone(ZoneInfo("UTC")) != opened
+            or resolved_close.astimezone(ZoneInfo("UTC")) != closed
+        ):
+            raise ValueError("calendar local/UTC boundary mismatch")
+        if interval["open_utc_offset_seconds"] != str(
+            int(cast(timedelta, resolved_open.utcoffset()).total_seconds())
+        ) or interval["close_utc_offset_seconds"] != str(
+            int(cast(timedelta, resolved_close.utcoffset()).total_seconds())
+        ):
+            raise ValueError("calendar UTC offset binding mismatch")
         if opened >= closed:
             raise ValueError("calendar session interval is inverted")
         crosses = (
@@ -392,6 +604,12 @@ def validate_market_contract_semantics(document: dict[str, Any]) -> None:
         and snapshot["checksum_verified"] is True
     ):
         raise ValueError("AVAILABLE snapshot is not trade-safe")
+    validate_snapshot_exchange(
+        snapshot_request,
+        snapshot_result,
+        validation_policy,
+        "2026-08-11T01:30:01.000Z",
+    )
 
     health = by_type["MARKET_HEALTH"]
     health_request = by_type["HEALTH_REQUEST"]
@@ -425,6 +643,7 @@ def validate_market_contract_semantics(document: dict[str, Any]) -> None:
         or health["source_lag_ms"] >= health["source_lag_stale_ms"]
     ):
         raise ValueError("false HEALTHY under queue/lag threshold")
+    validate_health_exchange(health_request, health, validation_policy, health["observed_at"])
 
     policy = by_type["BAR_AGGREGATION_POLICY"]
     checkpoint = by_type["BAR_AGGREGATION_CHECKPOINT"]
@@ -605,6 +824,7 @@ def test_review_safety_rules_are_normative_and_machine_indexed() -> None:
     assert set(contract["checksums"]) == {
         "TRADING_CALENDAR",
         "MARKET_SNAPSHOT",
+        "MARKET_VALIDATION_POLICY",
         "BAR_AGGREGATION_CHECKPOINT",
         "market.bar_closed.v1",
     }
@@ -636,6 +856,42 @@ def test_checksum_reference_vectors_reject_every_projected_field_mutation() -> N
         changed[field] = _different_value(changed[field])
         with pytest.raises(ValueError, match="checksum mismatch"):
             _assert_checksum("market.bar_closed.v1", changed)
+
+    policy = _market_policy()
+    _assert_checksum("MARKET_VALIDATION_POLICY", policy)
+    policy_fields = _semantic_contract()["semantic_validation"]["checksums"][
+        "MARKET_VALIDATION_POLICY"
+    ]["projection"]
+    for field in policy_fields:
+        changed = deepcopy(policy)
+        changed[field] = _different_value(changed[field])
+        with pytest.raises(ValueError, match="checksum mismatch"):
+            _assert_checksum("MARKET_VALIDATION_POLICY", changed)
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("timezone", "Asia/Tokyo"),
+        ("tzdb_version", "2025b"),
+        ("open_fold", 1),
+        ("close_fold", 1),
+        ("open_utc_offset_seconds", "32400"),
+        ("close_utc_offset_seconds", "32400"),
+    ],
+)
+def test_calendar_timezone_tzdb_fold_and_offset_are_checksum_bound(
+    field: str, value: object
+) -> None:
+    document = _load(FIXTURES / "internal/market-data.v1/valid.json")
+    calendar = next(dto for dto in document["dtos"] if dto["dto_type"] == "TRADING_CALENDAR")
+    changed = deepcopy(calendar)
+    if field in {"timezone", "tzdb_version"}:
+        changed[field] = value
+    else:
+        changed["sessions"][0][field] = value
+    with pytest.raises(ValueError, match="checksum mismatch"):
+        _assert_checksum("TRADING_CALENDAR", changed)
 
 
 def test_bar_window_finality_identity_and_checksum_guards() -> None:
@@ -1113,3 +1369,323 @@ def test_live_and_replay_reference_vector_computes_identical_complete_bar() -> N
     assert live == expected
     assert replay == expected
     validate_market_event_semantics("market.bar_closed.v1", live)
+
+
+def _market_policy() -> dict[str, Any]:
+    return _load(FIXTURES / "internal/market-data.v1/validation-policy.valid.json")
+
+
+def _snapshot_exchange() -> tuple[dict[str, Any], dict[str, Any]]:
+    document = _load(FIXTURES / "internal/market-data.v1/valid.json")
+    by_type = {dto["dto_type"]: dto for dto in document["dtos"]}
+    return by_type["SNAPSHOT_REQUEST"], by_type["SNAPSHOT_RESULT"]
+
+
+@pytest.mark.parametrize(
+    "evaluation_at,valid",
+    [
+        ("2026-08-11T01:30:00.999Z", True),
+        ("2026-08-11T01:30:01.000Z", True),
+        ("2026-08-11T01:30:01.001Z", False),
+    ],
+)
+def test_snapshot_freshness_uses_trusted_policy_millisecond_boundary(
+    evaluation_at: str, valid: bool
+) -> None:
+    request, result = _snapshot_exchange()
+    if valid:
+        validate_snapshot_exchange(request, result, _market_policy(), evaluation_at)
+    else:
+        with pytest.raises(ValueError, match="snapshot freshness policy violation"):
+            validate_snapshot_exchange(request, result, _market_policy(), evaluation_at)
+
+
+@pytest.mark.parametrize(
+    "mutation,error",
+    [
+        (
+            lambda request, result, policy: result["snapshot"].update(
+                as_of="2000-01-01T00:00:00Z", stale=False
+            ),
+            "snapshot freshness policy violation",
+        ),
+        (
+            lambda request, result, policy: result["snapshot"].update(
+                as_of="2026-08-11T01:30:01.101Z", stale=False
+            ),
+            "snapshot future clock skew",
+        ),
+        (
+            lambda request, result, policy: result["snapshot"].update(
+                source_sequence=11, source_version=10
+            ),
+            "snapshot source sequence/version mismatch",
+        ),
+        (
+            lambda request, result, policy: policy.update(
+                queue_capacity=1_000_000,
+                warning_watermark=900_000,
+                critical_watermark=950_000,
+                overflow_watermark=999_000,
+                source_lag_stale_ms=999_999,
+            ),
+            "validation policy checksum mismatch",
+        ),
+        (
+            lambda request, result, policy: policy.update(policy_version="other"),
+            "validation policy identity mismatch",
+        ),
+        (
+            lambda request, result, policy: policy.update(policy_checksum="f" * 64),
+            "validation policy checksum mismatch",
+        ),
+    ],
+)
+def test_snapshot_policy_context_rejects_untrusted_or_forged_inputs(
+    mutation: Any, error: str
+) -> None:
+    request, result = _snapshot_exchange()
+    policy = _market_policy()
+    mutation(request, result, policy)
+    snapshot = result.get("snapshot")
+    if isinstance(snapshot, dict):
+        _refresh_checksum("MARKET_SNAPSHOT", snapshot)
+    with pytest.raises(ValueError, match=error):
+        validate_snapshot_exchange(request, result, policy, "2026-08-11T01:30:01.000Z")
+
+
+@pytest.mark.parametrize(
+    "reason",
+    [
+        "DEADLINE_EXCEEDED",
+        "UNAVAILABLE",
+        "STALE",
+        "GAP",
+        "CHECKSUM_UNVERIFIED",
+        "INVALID_REQUEST",
+    ],
+)
+def test_every_rejected_snapshot_reason_uses_same_request_context_validator(
+    reason: str,
+) -> None:
+    request, result = _snapshot_exchange()
+    result.update(outcome="REJECTED", reason_code=reason, snapshot=None)
+    _validator("market/market-data.v1.schema.json").validate(result)
+    validate_snapshot_exchange(request, result, _market_policy(), "2026-08-11T01:30:01.000Z")
+
+
+@pytest.mark.parametrize(
+    "mutation,error",
+    [
+        (
+            lambda result: result.update(
+                outcome="REJECTED", reason_code="AVAILABLE", snapshot=None
+            ),
+            "snapshot outcome/reason mismatch",
+        ),
+        (
+            lambda result: result.update(
+                outcome="REJECTED",
+                reason_code="STALE",
+                snapshot={"forbidden": True},
+            ),
+            "REJECTED snapshot must be null",
+        ),
+        (
+            lambda result: result.update(request_id="550e8400-e29b-41d4-a716-446655449999"),
+            "snapshot request identity mismatch",
+        ),
+    ],
+)
+def test_rejected_snapshot_reason_payload_and_identity_mismatches_fail_closed(
+    mutation: Any, error: str
+) -> None:
+    request, result = _snapshot_exchange()
+    result.update(outcome="REJECTED", reason_code="STALE", snapshot=None)
+    mutation(result)
+    with pytest.raises(ValueError, match=error):
+        validate_snapshot_exchange(request, result, _market_policy(), "2026-08-11T01:30:01.000Z")
+
+
+@pytest.mark.parametrize(
+    "queue_depth,source_lag_ms,status,quality,reason",
+    [
+        (613, 1999, "HEALTHY", "NORMAL", "OK"),
+        (614, 1999, "DEGRADED", "DEGRADED", "BACKPRESSURE"),
+        (819, 1999, "DEGRADED", "DEGRADED", "BACKPRESSURE"),
+        (972, 1999, "DEGRADED", "GAP", "GAP"),
+        (10, 2000, "DEGRADED", "STALE", "STALE"),
+    ],
+)
+def test_health_status_is_recomputed_from_accepted_policy(
+    queue_depth: int,
+    source_lag_ms: int,
+    status: str,
+    quality: str,
+    reason: str,
+) -> None:
+    document = _load(FIXTURES / "internal/market-data.v1/valid.json")
+    by_type = {dto["dto_type"]: dto for dto in document["dtos"]}
+    health = by_type["MARKET_HEALTH"]
+    health.update(
+        queue_depth=queue_depth,
+        source_lag_ms=source_lag_ms,
+        status=status,
+        quality=quality,
+        reason_code=reason,
+    )
+    validate_health_exchange(
+        by_type["HEALTH_REQUEST"],
+        health,
+        _market_policy(),
+        "2026-08-11T01:30:00Z",
+    )
+
+
+def test_health_cannot_inflate_all_self_reported_thresholds() -> None:
+    document = _load(FIXTURES / "internal/market-data.v1/valid.json")
+    by_type = {dto["dto_type"]: dto for dto in document["dtos"]}
+    health = by_type["MARKET_HEALTH"]
+    health.update(
+        queue_capacity=1_000_000,
+        warning_watermark=900_000,
+        critical_watermark=950_000,
+        overflow_watermark=999_000,
+        source_lag_stale_ms=999_999,
+    )
+    with pytest.raises(ValueError, match="health thresholds do not match accepted policy"):
+        validate_health_exchange(
+            by_type["HEALTH_REQUEST"],
+            health,
+            _market_policy(),
+            "2026-08-11T01:30:00Z",
+        )
+
+
+def test_health_observed_at_must_match_injected_context() -> None:
+    document = _load(FIXTURES / "internal/market-data.v1/valid.json")
+    by_type = {dto["dto_type"]: dto for dto in document["dtos"]}
+    with pytest.raises(ValueError, match="health observed_at context mismatch"):
+        validate_health_exchange(
+            by_type["HEALTH_REQUEST"],
+            by_type["MARKET_HEALTH"],
+            _market_policy(),
+            "2026-08-11T01:30:00.001Z",
+        )
+
+
+def _integer_schema_nodes(value: object) -> list[dict[str, Any]]:
+    nodes: list[dict[str, Any]] = []
+    if isinstance(value, dict):
+        if value.get("type") == "integer":
+            nodes.append(value)
+        for child in value.values():
+            nodes.extend(_integer_schema_nodes(child))
+    elif isinstance(value, list):
+        for child in value:
+            nodes.extend(_integer_schema_nodes(child))
+    return nodes
+
+
+def test_every_market_json_integer_schema_is_i_json_safe() -> None:
+    schema_paths = [SCHEMAS / relative for relative in EVENTS.values()]
+    schema_paths.append(SCHEMAS / "market/market-data.v1.schema.json")
+    for path in schema_paths:
+        for node in _integer_schema_nodes(_load(path)):
+            assert node.get("maximum", SAFE_INTEGER_MAX) <= SAFE_INTEGER_MAX
+            assert "maximum" in node, f"unbounded integer in {path}"
+
+
+@pytest.mark.parametrize(
+    "value,valid",
+    [
+        (SAFE_INTEGER_MAX, True),
+        (SAFE_INTEGER_MAX + 1, False),
+        (SAFE_INTEGER_MAX + 2, False),
+        (10**30, False),
+        (-SAFE_INTEGER_MAX - 1, False),
+        (1.5, False),
+    ],
+)
+def test_market_integer_safe_boundary_is_schema_enforced(value: object, valid: bool) -> None:
+    document = _load(FIXTURES / "internal/market-data.v1/valid.json")
+    item = next(dto for dto in document["dtos"] if dto["dto_type"] == "BAR_AGGREGATION_INPUT")
+    item["source_sequence"] = value
+    assert _validator("market/market-data.v1.schema.json").is_valid(item) is valid
+
+
+@pytest.mark.parametrize("token", ["1e3", "1E+3", "1.0", "-1"])
+def test_noncanonical_integer_wire_tokens_are_rejected(token: str) -> None:
+    with pytest.raises(ValueError, match="canonical unsigned safe integer token"):
+        validate_unsigned_integer_token(token)
+
+
+def test_safe_integer_jcs_cross_language_reference_vector() -> None:
+    value = {"safe": SAFE_INTEGER_MAX, "decimal": "9007199254740991.00"}
+    expected = '{"decimal":"9007199254740991.00","safe":9007199254740991}'
+    assert _jcs(value).encode("utf-8") == expected.encode("utf-8")
+    assert (
+        _canonical_hash(value) == "841b22f8ce183dafb48820ed983911baf3c2c33d6fde00b3bfb737aa2d64ef36"
+    )
+    assert (
+        str(uuid.uuid5(uuid.UUID("9a41e905-11f3-5c30-8f02-5ba3f8ae8485"), expected))
+        == "ef05fe42-6716-5f00-b484-7769ceafed5a"
+    )
+
+
+def test_zoneinfo_reference_vectors_cover_tokyo_new_york_dst_and_midnight() -> None:
+    shanghai = _resolve_local_boundary("2026-08-11T09:30:00", "Asia/Shanghai", 0)
+    tokyo = _resolve_local_boundary("2026-08-11T09:30:00", "Asia/Tokyo", 0)
+    fold_zero = _resolve_local_boundary("2026-11-01T01:30:00", "America/New_York", 0)
+    fold_one = _resolve_local_boundary("2026-11-01T01:30:00", "America/New_York", 1)
+    assert shanghai.utcoffset() == timedelta(hours=8)
+    assert tokyo.utcoffset() == timedelta(hours=9)
+    assert fold_zero.utcoffset() != fold_one.utcoffset()
+    opened = _resolve_local_boundary("2026-08-11T23:00:00", "Asia/Tokyo", 0)
+    closed = _resolve_local_boundary("2026-08-12T01:00:00", "Asia/Tokyo", 0)
+    assert opened.date() != closed.date()
+
+
+def test_zoneinfo_rejects_unknown_and_nonexistent_dst_boundary() -> None:
+    with pytest.raises(ValueError, match="not IANA or tzdb is unavailable"):
+        _iana_zone("Not/AZone")
+    with pytest.raises(ValueError, match="nonexistent local boundary"):
+        _resolve_local_boundary("2026-03-08T02:30:00", "America/New_York", 0)
+    with pytest.raises(ValueError, match="local boundary/fold is invalid"):
+        _resolve_local_boundary("2026-11-01T01:30:00", "America/New_York", 2)
+
+
+def test_public_session_semantics_cover_tokyo_midnight_and_new_york_dst_fold() -> None:
+    base = _load(FIXTURES / "market.session_changed.v1/minimal.valid.json")
+    tokyo = deepcopy(base)
+    tokyo.update(
+        timezone="Asia/Tokyo",
+        session_open_at="2026-08-11T14:00:00Z",
+        session_close_at="2026-08-11T16:00:00Z",
+        session_open_fold=0,
+        session_close_fold=0,
+        session_open_utc_offset_seconds="32400",
+        session_close_utc_offset_seconds="32400",
+        trading_day="2026-08-12",
+        crosses_local_midnight=True,
+    )
+    validate_market_event_semantics("market.session_changed.v1", tokyo)
+
+    new_york = deepcopy(base)
+    new_york.update(
+        timezone="America/New_York",
+        event_time="2026-11-01T05:15:00Z",
+        received_at="2026-11-01T05:15:00.001Z",
+        session_open_at="2026-11-01T05:30:00Z",
+        session_close_at="2026-11-01T06:30:00Z",
+        session_open_fold=0,
+        session_close_fold=1,
+        session_open_utc_offset_seconds="-14400",
+        session_close_utc_offset_seconds="-18000",
+        trading_day="2026-11-01",
+        crosses_local_midnight=False,
+    )
+    validate_market_event_semantics("market.session_changed.v1", new_york)
+    new_york["session_close_fold"] = 0
+    with pytest.raises(ValueError, match="session fold binding mismatch"):
+        validate_market_event_semantics("market.session_changed.v1", new_york)

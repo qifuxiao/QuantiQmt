@@ -34,6 +34,9 @@ nfr:
     critical_ratio: 0.80
     overflow_ratio: 0.95
     source_lag_stale_ms: versioned_policy_value
+    validation_policy: immutable_version_and_checksum_from_configuration_authority
+    snapshot_freshness_clock: injected_UTC_integer_milliseconds
+    response_thresholds_as_authority: forbidden
     threshold_order: warning_less_than_critical_less_than_overflow_less_than_or_equal_capacity
     overflow_action: reject_new_with_exact_gap_evidence
     tick_coalesce: forbidden_v1
