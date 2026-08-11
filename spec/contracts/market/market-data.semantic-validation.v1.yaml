@@ -110,6 +110,8 @@ semantic_validation:
     timezone: IANA_zoneinfo_required
     tzdb_source: deployed_immutable_IANA_tzdb_bundle
     tzdb_version: explicit_and_checksum_bound
+    tzdb_bundle_activation: verify_manifest_version_zone_list_and_each_zone_sha256_before_load
+    system_tzdb_fallback: prohibited
     missing_or_unknown_tzdb: fail_closed
     local_boundary_resolution: explicit_fold_0_or_1_then_round_trip_to_reject_nonexistent_time
     ambiguous_time: explicit_fold_required_and_UTC_offset_checksum_bound

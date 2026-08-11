@@ -3,14 +3,16 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import shutil
 import uuid
 from copy import deepcopy
 from datetime import datetime, timedelta
 from decimal import Decimal
+from io import BytesIO
 from itertools import pairwise, product
 from pathlib import Path
 from typing import Any, cast
-from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+from zoneinfo import ZoneInfo
 
 import pytest
 import yaml
@@ -23,6 +25,7 @@ SCHEMAS = ROOT / "spec" / "contracts"
 SEMANTIC_CONTRACT = SCHEMAS / "market" / "market-data.semantic-validation.v1.yaml"
 FIXTURES = Path(__file__).with_name("fixtures")
 TZDB_FIXTURE = FIXTURES / "internal/market-data.v1/tzdb"
+TZDB_MANIFEST = FIXTURES / "internal/market-data.v1/tzdb-reference.json"
 EVENTS = {
     "market.tick_received.v1": "events/market.tick_received.v1.schema.json",
     "market.bar_closed.v1": "events/market.bar_closed.v1.schema.json",
@@ -39,6 +42,10 @@ SESSION_TRANSITIONS = {
     ("CLOSED", "CLOSED"): "DUPLICATE_SUPPRESSED",
 }
 SAFE_INTEGER_MAX = 9_007_199_254_740_991
+FROZEN_TZDB_VERSION = "2026c"
+FROZEN_TZDB_MANIFEST_CHECKSUM = "e815e8693332668600f0193bb43f5ed5a0d5e65d29967bbbf56d2765588f4e51"
+FROZEN_TZDB_ZONES = frozenset({"Asia/Shanghai", "Asia/Tokyo", "America/New_York", "UTC"})
+_FROZEN_ZONE_CACHE: dict[tuple[str, str, str], ZoneInfo] = {}
 ACCEPTED_POLICY_REGISTRY = {
     "market-policy-v1": "d31191dd8fbba15144a133d0d663b3c7cf80cdc0843de7587256d17eda828e9d"
 }
@@ -73,15 +80,80 @@ def _utc(value: str) -> datetime:
     return datetime.fromisoformat(value.replace("Z", "+00:00"))
 
 
-def _iana_zone(name: str) -> ZoneInfo:
+def _frozen_tzdb_bundle(
+    bundle_root: Path = TZDB_FIXTURE,
+    manifest_path: Path = TZDB_MANIFEST,
+) -> tuple[str, dict[str, Path], str]:
+    if not bundle_root.is_dir() or not manifest_path.is_file():
+        raise ValueError("frozen IANA tzdb bundle is unavailable")
     try:
-        return ZoneInfo(name)
-    except ZoneInfoNotFoundError as exc:
-        path = TZDB_FIXTURE / Path(*name.split("/"))
+        manifest = _load(manifest_path)
+        version = manifest["iana_version"]
+        source = manifest["source"]
+        files = manifest["files"]
+        manifest_checksum = manifest["manifest_checksum"]
+    except (KeyError, TypeError, json.JSONDecodeError) as exc:
+        raise ValueError("frozen IANA tzdb manifest is malformed") from exc
+    if version != FROZEN_TZDB_VERSION or not isinstance(source, str) or not source:
+        raise ValueError("frozen IANA tzdb version is not accepted")
+    if manifest_checksum != FROZEN_TZDB_MANIFEST_CHECKSUM:
+        raise ValueError("frozen IANA tzdb manifest checksum mismatch")
+    projection = {"iana_version": version, "source": source, "files": files}
+    actual_manifest_checksum = hashlib.sha256(
+        json.dumps(projection, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode(
+            "utf-8"
+        )
+    ).hexdigest()
+    if actual_manifest_checksum != manifest_checksum:
+        raise ValueError("frozen IANA tzdb manifest checksum mismatch")
+    if not isinstance(files, dict) or set(files) != FROZEN_TZDB_ZONES:
+        raise ValueError("frozen IANA tzdb zone manifest mismatch")
+    verified: dict[str, Path] = {}
+    digest_lines: list[str] = []
+    for zone_name in sorted(FROZEN_TZDB_ZONES):
+        digest = files.get(zone_name)
+        relative = Path(*zone_name.split("/"))
+        if (
+            not isinstance(digest, str)
+            or not re.fullmatch(r"[0-9a-f]{64}", digest)
+            or relative.is_absolute()
+            or ".." in relative.parts
+        ):
+            raise ValueError("frozen IANA tzdb zone manifest is malformed")
+        path = bundle_root / relative
         if not path.is_file():
-            raise ValueError("calendar timezone is not IANA or tzdb is unavailable") from exc
-        with path.open("rb") as stream:
-            return ZoneInfo.from_file(stream, key=name)
+            raise ValueError("frozen IANA tzdb zone file is missing")
+        actual_digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        if actual_digest != digest:
+            raise ValueError("frozen IANA tzdb zone digest mismatch")
+        verified[zone_name] = path
+        digest_lines.append(f"{zone_name}:{digest}")
+    bundle_digest = hashlib.sha256(
+        (f"{version}\n{manifest_checksum}\n" + "\n".join(digest_lines)).encode("ascii")
+    ).hexdigest()
+    return version, verified, bundle_digest
+
+
+def _frozen_tzdb_zone(
+    name: str,
+    bundle_root: Path = TZDB_FIXTURE,
+    manifest_path: Path = TZDB_MANIFEST,
+) -> ZoneInfo:
+    version, verified, bundle_digest = _frozen_tzdb_bundle(bundle_root, manifest_path)
+    if name not in verified:
+        raise ValueError("calendar timezone is not IANA or not in the frozen IANA tzdb bundle")
+    cache_key = (version, bundle_digest, name)
+    cached = _FROZEN_ZONE_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
+    with verified[name].open("rb") as stream:
+        zone = ZoneInfo.from_file(stream, key=name)
+    _FROZEN_ZONE_CACHE[cache_key] = zone
+    return zone
+
+
+def _iana_zone(name: str) -> ZoneInfo:
+    return _frozen_tzdb_zone(name)
 
 
 def _resolve_local_boundary(value: str, zone_name: str, fold: int) -> datetime:
@@ -1653,14 +1725,89 @@ def test_zoneinfo_reference_vectors_cover_tokyo_new_york_dst_and_midnight() -> N
 
 def test_frozen_tzdb_reference_bundle_version_and_digests() -> None:
     reference = _load(FIXTURES / "internal/market-data.v1/tzdb-reference.json")
-    assert reference["iana_version"] == _market_policy()["tzdb_version"]
+    assert reference["iana_version"] == _market_policy()["tzdb_version"] == FROZEN_TZDB_VERSION
+    assert reference["manifest_checksum"] == FROZEN_TZDB_MANIFEST_CHECKSUM
     for name, expected in reference["files"].items():
         path = TZDB_FIXTURE / Path(*name.split("/"))
+        assert path.is_file()
         assert hashlib.sha256(path.read_bytes()).hexdigest() == expected
 
 
+def _copy_frozen_tzdb_bundle(destination: Path) -> tuple[Path, Path]:
+    bundle = destination / "tzdb"
+    manifest = destination / "tzdb-reference.json"
+    shutil.copytree(TZDB_FIXTURE, bundle)
+    shutil.copy2(TZDB_MANIFEST, manifest)
+    return bundle, manifest
+
+
+def test_frozen_tzdb_loader_rejects_missing_unknown_and_tampered_bundle(
+    tmp_path: Path,
+) -> None:
+    with pytest.raises(ValueError, match="bundle is unavailable"):
+        _frozen_tzdb_zone("Asia/Shanghai", tmp_path / "missing", tmp_path / "missing.json")
+
+    for zone_name in sorted(FROZEN_TZDB_ZONES):
+        bundle, manifest = _copy_frozen_tzdb_bundle(tmp_path / zone_name.replace("/", "_"))
+        _frozen_tzdb_zone(zone_name, bundle, manifest)
+        (bundle / Path(*zone_name.split("/"))).write_bytes(b"tampered TZif")
+        with pytest.raises(ValueError, match="zone digest mismatch"):
+            _frozen_tzdb_zone(zone_name, bundle, manifest)
+        missing_destination = tmp_path / f"missing_{zone_name.replace('/', '_')}"
+        bundle, manifest = _copy_frozen_tzdb_bundle(missing_destination)
+        (bundle / Path(*zone_name.split("/"))).unlink()
+        with pytest.raises(ValueError, match="zone file is missing"):
+            _frozen_tzdb_zone(zone_name, bundle, manifest)
+
+    bundle, manifest = _copy_frozen_tzdb_bundle(tmp_path / "unknown")
+    with pytest.raises(ValueError, match="not in the frozen"):
+        _frozen_tzdb_zone("Europe/London", bundle, manifest)
+
+
+def test_frozen_tzdb_loader_rejects_zone_manifest_mutation(tmp_path: Path) -> None:
+    bundle, manifest_path = _copy_frozen_tzdb_bundle(tmp_path / "zone_manifest")
+    manifest = _load(manifest_path)
+    manifest["files"].pop("UTC")
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    with pytest.raises(ValueError, match=r"manifest checksum|zone manifest"):
+        _frozen_tzdb_zone("Asia/Shanghai", bundle, manifest_path)
+
+
+@pytest.mark.parametrize(
+    "field,value", [("iana_version", "2025b"), ("manifest_checksum", "0" * 64)]
+)
+def test_frozen_tzdb_loader_rejects_version_or_manifest_digest_tampering(
+    tmp_path: Path, field: str, value: str
+) -> None:
+    bundle, manifest_path = _copy_frozen_tzdb_bundle(tmp_path / field)
+    manifest = _load(manifest_path)
+    manifest[field] = value
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    with pytest.raises(ValueError, match=r"manifest checksum|version"):
+        _frozen_tzdb_zone("UTC", bundle, manifest_path)
+
+
+def test_frozen_tzdb_loader_uses_verified_fixture_bytes_even_when_system_zoneinfo_exists(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    real_zoneinfo = ZoneInfo
+    observed: list[bytes] = []
+    _FROZEN_ZONE_CACHE.clear()
+
+    class FrozenOnlyZoneInfo:
+        @classmethod
+        def from_file(cls, stream: Any, *, key: str) -> ZoneInfo:
+            data = stream.read()
+            observed.append(data)
+            return real_zoneinfo.from_file(BytesIO(data), key=key)
+
+    monkeypatch.setattr("test_market_data_contracts.ZoneInfo", FrozenOnlyZoneInfo)
+    assert _iana_zone("Asia/Shanghai").key == "Asia/Shanghai"
+    assert observed == [(TZDB_FIXTURE / "Asia" / "Shanghai").read_bytes()]
+
+
 def test_zoneinfo_rejects_unknown_and_nonexistent_dst_boundary() -> None:
-    with pytest.raises(ValueError, match="not IANA or tzdb is unavailable"):
+    with pytest.raises(ValueError, match="not in the frozen"):
         _iana_zone("Not/AZone")
     with pytest.raises(ValueError, match="nonexistent local boundary"):
         _resolve_local_boundary("2026-03-08T02:30:00", "America/New_York", 0)

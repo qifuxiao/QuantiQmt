@@ -92,13 +92,13 @@ nfr:
     required_sources: [decision.rule_results, rule_timings]
     includes_rule_result_and_latency: true
     semantic_validator_required: true
+    cardinality: exactly_one_timing_per_result_including_timeout_guard
+    order: contiguous_evaluation_index_from_zero
   market_validation_policy:
     required_log_fields: [provider, generation, calendar_version, session_id, policy_version, policy_checksum, tzdb_version, outcome, reason_code]
     metrics: [market_policy_validation_failure_total, market_snapshot_freshness_rejection_total, market_health_policy_mismatch_total, market_tzdb_resolution_failure_total]
     high_cardinality_labels_forbidden: [instrument_id, message_id, correlation_id]
     alerts: [POLICY_CHECKSUM_COLLISION, SNAPSHOT_FRESHNESS_REJECTION_SURGE, HEALTH_THRESHOLD_MISMATCH, TZDB_MISSING_OR_UNKNOWN]
-    cardinality: exactly_one_timing_per_result_including_timeout_guard
-    order: contiguous_evaluation_index_from_zero
   risk_audit_semantic_invariants:
     - unique_rule_result_rule_id
     - result_and_timing_indices_contiguous_from_zero

@@ -139,8 +139,10 @@ Session states are `CLOSED`, `PRE_OPEN`, `OPEN`, `BREAK`, `CLOSING`. The public
 session schema enumerates every legal state pair. A duplicate is represented only
 as `CLOSED -> CLOSED / DUPLICATE_SUPPRESSED`; an old transition sequence is ignored
 with audit evidence and cannot move state. Calendar-version mismatch is rejected.
-Timezone must resolve through the deployed immutable IANA tzdb version; missing
-tzdb data and unknown zones fail closed. Nonexistent local times are rejected by
+Timezone must resolve only through the deployed immutable IANA tzdb bundle. Bundle
+activation verifies its version, exact zone manifest and every TZif SHA-256 before
+any zone is loaded; system tzdb fallback is prohibited. Missing, tampered or
+unknown zones fail closed. Nonexistent local times are rejected by
 local→UTC→local round trip. Ambiguous boundaries require explicit fold `0` or `1`,
 and the resolved offset is checksum-bound.
 The validator proves each UTC interval's local trading-day mapping and

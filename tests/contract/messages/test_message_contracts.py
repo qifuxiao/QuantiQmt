@@ -562,6 +562,19 @@ def test_observability_joins_rule_result_with_separate_timing() -> None:
         "evaluation_index",
         "rule_id",
     ]
+    joined = nfr["risk_internal_joined_rule_audit_view"]
+    assert set(joined) == {
+        "join_key",
+        "required_sources",
+        "includes_rule_result_and_latency",
+        "semantic_validator_required",
+        "cardinality",
+        "order",
+    }
+    assert joined["cardinality"] == "exactly_one_timing_per_result_including_timeout_guard"
+    assert joined["order"] == "contiguous_evaluation_index_from_zero"
+    assert "cardinality" not in nfr["market_validation_policy"]
+    assert "order" not in nfr["market_validation_policy"]
 
 
 def test_payload_is_deeply_immutable_and_decimal_text_is_preserved(
