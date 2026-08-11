@@ -2,7 +2,9 @@ workflow:
   id: WF-CONTROL-PLANE
   contract: CONTRACT-CONTROL-PLANE-V1
   semantic_validator: CONTRACT-CONTROL-SEMANTIC-VALIDATION-V1
-  boundaries: [command_ingress, outbox_persist, event_publish, recovery_restore]
+  boundaries: [command_ingress, outbox_persist, event_publish, consumer_apply, control_transition, recovery_restore, external_side_effect]
+  validation_order: [structural_envelope, payload_schema, combined_binding, cross_object_semantics]
+  validation_failure: reject_without_repair_reorder_persist_publish_or_execute
   observability:
     steps: [normalize_context, redact_sensitive_values, validate_correlation_chain, emit_metric_log_trace_audit]
     failure: reject_record_and_emit_bounded_validation_metric
@@ -36,3 +38,9 @@ workflow:
     open_requires: [CONFIG_VERIFIED, MARKET_FRESH, AUDIT_AVAILABLE, RECONCILIATION_COMPLETE, LEASE_FENCED, OUTBOX_HEALTHY]
     closed_behavior: reject_new_order_intent_and_risk_approval
     reconnect_auto_normal: forbidden
+  lineage:
+    causation_required_for_control_events: true
+    parent_before_child_same_correlation: required
+    unknown_future_self_or_cross_correlation_parent: reject
+  redaction:
+    recursive_forbidden_keys: [password, secret, credential, token, access_token, private_key, raw_account_id, raw_account_identifier]

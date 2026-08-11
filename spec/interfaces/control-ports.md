@@ -15,9 +15,20 @@ allow-listed bounded labels in `NFR-OBSERVABILITY`; order, trade, instrument,
 account, strategy, message and correlation identifiers are prohibited labels.
 
 `ControlSemanticValidator` MUST validate envelope and payload together before
-publish or outbox persistence. Same identity plus the same canonical payload
+publish or outbox persistence. Its normative order is structural envelope,
+payload schema, combined event binding, then cross-object semantics. The same
+validator MUST run before Outbox persist, publish, consumer apply, control
+transition, restore/replay and every external side effect. Failure rejects
+without repair, reordering, persistence, publication or execution. Same identity plus the same canonical payload
 fingerprint is a duplicate; same identity with a different fingerprint is a
 fail-closed collision and MUST retain evidence.
+
+For combined control events, `causation_id` is required. A root event may use
+the explicit root context only; otherwise it MUST reference a known direct
+parent with an earlier sequence and identical correlation. Self references,
+unknown/future parents and cross-correlation links are rejected. Recursive
+redaction scans reject credentials, secrets, raw tokens and raw account
+identifiers; structured audit evidence is never a metric label.
 
 ## CommandBus and control actions
 

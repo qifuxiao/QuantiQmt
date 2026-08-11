@@ -50,6 +50,7 @@ internal_contracts:
   - {id: CONTRACT-RECONCILIATION-V1, schema: reconciliation/reconciliation.v1.schema.json, status: draft, owner: Reconciliation}
   - {id: CONTRACT-CONTROL-PLANE-V1, schema: control/control-plane.v1.schema.json, status: draft, owner: ControlPlane}
   - {id: CONTRACT-CONTROL-SEMANTIC-VALIDATION-V1, schema: control/control-semantic-validation.v1.yaml, status: draft, owner: ControlPlane}
+  - {id: CONTRACT-CONTROL-COMBINED-MESSAGE-V1, schema: control/combined-control-message.v1.schema.json, status: draft, owner: ControlPlane}
 internal_rules:
   schema_required: true
   schema_and_semantic_validation_required: true

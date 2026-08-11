@@ -31,11 +31,11 @@ delivery:
 
 ## Acceptance criteria
 
-- [ ] 定义每条交易链路必须携带的 log/metric/trace 字段。
-- [ ] 定义 P0/P1 告警、Runbook、critical lag 和 recovery barrier rules。
-- [ ] 定义 config hot reload vs restart policy、version activation 和 rollback。
-- [ ] 定义 Kill Switch、system mode、leader lease/fencing 和 stale token 行为。
-- [ ] 为后续 Control/Observability implementation task 提供验收标准。
+- [x] 定义每条交易链路必须携带的 log/metric/trace 字段。
+- [x] 定义 P0/P1 告警、Runbook、critical lag 和 recovery barrier rules。
+- [x] 定义 config hot reload vs restart policy、version activation 和 rollback。
+- [x] 定义 Kill Switch、system mode、leader lease/fencing 和 stale token 行为。
+- [x] 为后续 Control/Observability implementation task 提供验收标准。
 
 ### Acceptance evidence (machine-checked)
 
@@ -58,7 +58,8 @@ delivery:
 - `PORTS-CONTROL`, `WF-CONTROL-PLANE`, `SM-SYSTEM-MODE`, `NFR-OBSERVABILITY` and `NFR-RELIABILITY` freeze correlation/causation, prohibited sensitive/high-cardinality fields, P0/P1/P2 alert windows, atomic ActiveVersion+Event+Outbox, UNKNOWN reconciliation, stale fencing rejection, kill-switch capacity and recovery-barrier gates.
 - Four planned public messages are now registered with Draft 2020-12 schemas and complete disk golden fixture sets: `system.mode_changed.v1`, `system.component_health_changed.v1`, `system.kill_switch_changed.v1`, and `config.version_activated.v1`. Invalid transitions, missing evidence, additional properties, precision/type errors, partial activation, stale lease and incomplete barrier cases are rejected by schema or the normative semantic probe.
 - TASK-025 remains `blocked` with its original dependencies and now references the frozen control contracts, implementation owner, failure paths and bundle boundary. No runtime code, migration, monitoring product, OMS state mutation or release was implemented; `implementation_status` remains `in_progress`, `review_status` remains `pending`, and `release_status` remains `prohibited`.
-- Acceptance evidence: `poetry run python scripts/validate_specs.py` passed; `poetry run pytest tests/spec tests/contract` passed with 540 tests; targeted control/message suite passed with 237 tests.
+- Acceptance evidence: `poetry run python scripts/validate_specs.py` passed; the control contract suite passes 20 deterministic tests, including the shared `ControlSemanticValidator` combined-envelope matrix for all four events. The repository suite executes 541 passing tests; four unrelated market TZDB tests cannot create Windows temporary directories in the restricted runner and are recorded as an environment-only verification gap.
+- Review remediation evidence: `control/control-plane.v1.schema.json` uses Draft 2020-12 `unevaluatedProperties` fail-closed DTO branches; `control/combined-control-message.v1.schema.json` binds the canonical envelope to each mutually exclusive event payload. The shared reference validator enforces source/publisher/partition/aggregate/version/idempotency/fingerprint/correlation/causation, collision, lineage and recursive sensitive-key rules before every normative boundary. `control-semantic-validation.v1.yaml`, `PORTS-CONTROL`, `WF-CONTROL-PLANE`, and TASK-025 freeze config checksum/ack atomicity, kill-switch version/idempotency fencing, recovery-barrier evidence, bounded labels and future runtime integration without claiming current runtime wiring.
 
 ## Review focus
 

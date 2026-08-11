@@ -5,6 +5,10 @@ contract:
   validator: ControlSemanticValidator
   fail_closed: true
   boundaries: [schema_parse, envelope_publish, outbox_persist, command_dispatch, state_transition, recovery_restore]
+  order: [structural_envelope, payload_schema, combined_binding, cross_object_semantics]
+  result: {valid: continue, invalid: reject_without_mutation}
+  combined_message_schema: CONTRACT-CONTROL-COMBINED-MESSAGE-V1
+  required_context: [known_messages, evaluation_sequence, accepted_policy_version, accepted_policy_checksum]
 rules:
   observability:
     required_context: [message_id, correlation_id, causation_id, source, service, instance, environment, error_code]
@@ -15,6 +19,26 @@ rules:
     validate_together: [message_envelope, payload]
     required_mapping: [message_type, schema_version, publisher_source, partition_key, aggregate_id, aggregate_version, idempotency_key]
     collision: same_identity_same_fingerprint_duplicate; same_identity_different_fingerprint_reject
+    event_matrix:
+      system.mode_changed.v1: {source: TradingCore, publisher: TradingCore, aggregate_type: SYSTEM_MODE, partition_key: system}
+      system.component_health_changed.v1: {source: HealthService, publisher: HealthService, aggregate_type: SYSTEM_COMPONENT, partition_key: component}
+      system.kill_switch_changed.v1: {source: ControlPlane, publisher: ControlPlane, aggregate_type: KILL_SWITCH, partition_key: kill_switch}
+      config.version_activated.v1: {source: ConfigService, publisher: ConfigService, aggregate_type: CONFIG_VERSION, partition_key: config}
+    causation: required_for_combined_events; root_may_be_null_only_with_explicit_root_context
+    lineage: parent_must_be_known_and_before_child_same_correlation_no_self_reference
+    fingerprint: sha256_rfc8785_jcs_payload_utf8_no_bom_lower_hex
+    forbidden_keys: [password, secret, credential, token, access_token, private_key, raw_account_id, raw_account_identifier]
+  config_cross_object:
+    candidate_checksum: sha256_rfc8785_jcs_candidate_content_utf8_no_bom_lower_hex
+    checksum_excludes: [candidate_checksum]
+    version_checksum_content_identity_immutable: true
+    required_components_exact: true
+    component_ack_binding: [candidate_version, candidate_checksum, component_id, generation, capability_version, prepare_result]
+    missing_duplicate_extra_unknown_ack: reject
+    partial_silent_activation: forbidden
+    active_event_outbox_atomic: true
+    possible_commit_timeout: UNKNOWN_then_authoritative_query_without_identity_change
+    rollback: append_only_new_versioned_fact
   alerts:
     severity: [P0, P1, P2]
     critical_lag: {authoritative_measurement: source_received_watermark_delta, threshold_version_required: true, sustained_window_required: true, recovery_window_required: true}
@@ -35,6 +59,10 @@ rules:
     authorization_required: true
     stale_version_or_fence: reject
     unknown_outcome: reconcile_without_reissue
+    applied_version: current_version_must_equal_expected_version_plus_one
+    stale_expected_version: reject
+    idempotency_replay: same_key_same_payload_same_result; same_key_different_payload_conflict
+    disable_does_not_restore_normal: true
   lease_fencing:
     monotonic_epoch: true
     unique_fencing_token_per_epoch: true
@@ -47,6 +75,18 @@ rules:
     closed_rejects: [new_order_intent, new_risk_approval]
     reconnect_auto_normal: forbidden
     invalidation: conservative_mode_and_reopen_required
+    state_matrix:
+      CLOSED: {opened_at: null, invalidation_reason: null}
+      OPEN: {opened_at: required, invalidation_reason: null, evidence: exact_required_set}
+      INVALIDATED: {opened_at: null, invalidation_reason: required}
+    evidence_exact_set: [CONFIG_VERIFIED, MARKET_FRESH, AUDIT_AVAILABLE, RECONCILIATION_COMPLETE, LEASE_FENCED, OUTBOX_HEALTHY]
+    evidence_bindings: [reconciliation_case, market_quality_gap_watermark, config_version_checksum, audit_outbox_inbox_health, lease_fencing, component_generation_checksum]
+    reconnect_auto_open: forbidden
+  alert_labels:
+    metric_label_allowlist: [severity, component, alert_code, environment, policy_version]
+    structured_audit_evidence_fields: [correlation_id, causation_id, message_id, order_id, trade_id, instrument_id, raw_account_id]
+    forbidden_metric_or_alert_labels: [strategy_id, correlation_id, message_id, order_id, trade_id, instrument_id, raw_account_id]
+    evidence_is_not_label: true
   system_mode:
     legal_transitions_source: SM-SYSTEM-MODE
     strictest_scope_wins: true

@@ -1,0 +1,105 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:quantiqmt:contract:combined-control-message:v1",
+  "title": "CombinedControlMessageV1",
+  "oneOf": [
+    {"$ref": "#/$defs/mode"},
+    {"$ref": "#/$defs/component"},
+    {"$ref": "#/$defs/kill"},
+    {"$ref": "#/$defs/config"}
+  ],
+  "$defs": {
+    "common": {
+      "unevaluatedProperties": false,
+      "allOf": [
+        {"$ref": "urn:quantiqmt:contract:message-envelope:v1"},
+        {
+          "type": "object",
+          "required": ["publisher", "aggregate_type", "aggregate_id", "aggregate_version", "idempotency_key", "payload_fingerprint", "causation_id", "payload"],
+          "properties": {
+            "publisher": {"type": "string", "minLength": 1},
+            "aggregate_type": {"type": "string", "minLength": 1},
+            "aggregate_id": {"type": "string", "minLength": 1},
+            "aggregate_version": {"type": "integer", "minimum": 1, "maximum": 9007199254740991},
+            "idempotency_key": {"type": "string", "minLength": 1, "maxLength": 256},
+            "payload_fingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+            "causation_id": {"type": "string", "minLength": 16, "maxLength": 64},
+            "payload": {"type": "object"}
+          }
+        }
+      ]
+    },
+    "mode": {
+      "allOf": [
+        {"$ref": "#/$defs/common"},
+        {
+          "type": "object",
+          "required": ["message_type", "schema_version", "source", "publisher", "partition_key", "aggregate_type", "payload"],
+          "properties": {
+            "message_type": {"const": "system.mode_changed.v1"},
+            "schema_version": {"const": 1},
+            "source": {"const": "TradingCore"},
+            "publisher": {"const": "TradingCore"},
+            "partition_key": {"const": "system"},
+            "aggregate_type": {"const": "SYSTEM_MODE"},
+            "payload": {"$ref": "urn:quantiqmt:event:system.mode_changed:v1"}
+          }
+        }
+      ]
+    },
+    "component": {
+      "allOf": [
+        {"$ref": "#/$defs/common"},
+        {
+          "type": "object",
+          "required": ["message_type", "schema_version", "source", "publisher", "partition_key", "aggregate_type", "payload"],
+          "properties": {
+            "message_type": {"const": "system.component_health_changed.v1"},
+            "schema_version": {"const": 1},
+            "source": {"const": "HealthService"},
+            "publisher": {"const": "HealthService"},
+            "partition_key": {"const": "component"},
+            "aggregate_type": {"const": "SYSTEM_COMPONENT"},
+            "payload": {"$ref": "urn:quantiqmt:event:system.component_health_changed:v1"}
+          }
+        }
+      ]
+    },
+    "kill": {
+      "allOf": [
+        {"$ref": "#/$defs/common"},
+        {
+          "type": "object",
+          "required": ["message_type", "schema_version", "source", "publisher", "partition_key", "aggregate_type", "payload"],
+          "properties": {
+            "message_type": {"const": "system.kill_switch_changed.v1"},
+            "schema_version": {"const": 1},
+            "source": {"const": "ControlPlane"},
+            "publisher": {"const": "ControlPlane"},
+            "partition_key": {"const": "kill_switch"},
+            "aggregate_type": {"const": "KILL_SWITCH"},
+            "payload": {"$ref": "urn:quantiqmt:event:system.kill_switch_changed:v1"}
+          }
+        }
+      ]
+    },
+    "config": {
+      "allOf": [
+        {"$ref": "#/$defs/common"},
+        {
+          "type": "object",
+          "required": ["message_type", "schema_version", "source", "publisher", "partition_key", "aggregate_type", "payload"],
+          "properties": {
+            "message_type": {"const": "config.version_activated.v1"},
+            "schema_version": {"const": 1},
+            "source": {"const": "ConfigService"},
+            "publisher": {"const": "ConfigService"},
+            "partition_key": {"const": "config"},
+            "aggregate_type": {"const": "CONFIG_VERSION"},
+            "payload": {"$ref": "urn:quantiqmt:event:config.version_activated:v1"}
+          }
+        }
+      ]
+    }
+  }
+}

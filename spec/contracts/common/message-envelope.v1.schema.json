@@ -16,7 +16,10 @@
     "aggregate_id": {"type": ["string", "null"], "minLength": 1, "maxLength": 128},
     "aggregate_version": {"type": ["integer", "null"], "minimum": 1},
     "source": {"type": "string", "minLength": 1, "maxLength": 128},
+    "publisher": {"type": "string", "minLength": 1, "maxLength": 128},
     "partition_key": {"type": "string", "minLength": 1, "maxLength": 256},
+    "aggregate_type": {"type": "string", "minLength": 1, "maxLength": 128},
+    "payload_fingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
     "idempotency_key": {"type": ["string", "null"], "minLength": 1, "maxLength": 256},
     "payload": {"type": "object"}
   }
