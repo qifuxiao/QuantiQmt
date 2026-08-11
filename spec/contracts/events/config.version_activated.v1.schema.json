@@ -4,7 +4,7 @@
   "title": "ConfigVersionActivatedPayloadV1",
   "type": "object",
   "additionalProperties": false,
-  "required": ["event_id", "config_domain", "candidate_version", "candidate_checksum", "previous_version", "activation_mode", "safe_boundary", "required_components", "component_acks", "outcome", "rollback_version", "secret_references", "occurred_at", "correlation_id", "source"],
+  "required": ["event_id", "config_domain", "candidate_version", "candidate_checksum", "previous_version", "activation_mode", "safe_boundary", "required_components", "component_acks", "outcome", "active_version", "active_checksum", "rollback_version", "secret_references", "policy_version", "policy_checksum", "occurred_at", "correlation_id", "source"],
   "properties": {
     "event_id": {"type": "string", "format": "uuid"},
     "config_domain": {"type": "string", "pattern": "^[a-z][a-z0-9_.-]{1,63}$"},
@@ -16,8 +16,12 @@
     "required_components": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
     "component_acks": {"type": "object", "minProperties": 1, "additionalProperties": {"$ref": "#/$defs/componentAck"}},
     "outcome": {"enum": ["APPLIED", "REJECTED", "PARTIAL", "ROLLED_BACK", "UNKNOWN"]},
+    "active_version": {"type": ["string", "null"], "minLength": 1, "maxLength": 64},
+    "active_checksum": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"},
     "rollback_version": {"type": ["string", "null"], "minLength": 1, "maxLength": 64},
     "secret_references": {"type": "array", "items": {"type": "string", "pattern": "^secret://[^\\s]+$"}, "uniqueItems": true},
+    "policy_version": {"type": "string", "minLength": 1, "maxLength": 64},
+    "policy_checksum": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
     "occurred_at": {"type": "string", "format": "date-time", "pattern": "Z$"},
     "correlation_id": {"type": "string", "minLength": 16, "maxLength": 128},
     "source": {"type": "string", "const": "ConfigService"}

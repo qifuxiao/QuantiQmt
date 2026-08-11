@@ -3,9 +3,11 @@ contract:
   version: 1
   status: draft
   validator: ControlSemanticValidator
+  entrypoint: validate_control_message(message, validation_context)
+  decision: [ACCEPTED, DUPLICATE, REJECTED, CONFLICT]
   fail_closed: true
   boundaries: [schema_parse, envelope_publish, outbox_persist, command_dispatch, state_transition, recovery_restore]
-  order: [structural_envelope, payload_schema, combined_binding, cross_object_semantics]
+  order: [validation_context_schema, structural_envelope, payload_schema, combined_binding, lineage_identity_policy, event_specific_semantics, final_decision]
   result: {valid: continue, invalid: reject_without_mutation}
   combined_message_schema: CONTRACT-CONTROL-COMBINED-MESSAGE-V1
   required_context: [evaluation_at, accepted_policy, known_messages, identity_history, accepted_state]
@@ -25,13 +27,25 @@ rules:
       system.component_health_changed.v1: {source: HealthService, publisher: HealthService, aggregate_type: SYSTEM_COMPONENT, partition_key: component}
       system.kill_switch_changed.v1: {source: ControlPlane, publisher: ControlPlane, aggregate_type: KILL_SWITCH, partition_key: kill_switch}
       config.version_activated.v1: {source: ConfigService, publisher: ConfigService, aggregate_type: CONFIG_VERSION, partition_key: config}
-    causation: required_for_combined_events; no_implicit_root; explicit_root_type_and_authorization_required
+    causation: all_four_public_control_events_non_root; required_known_parent; root_inputs_are_authorized_context_records_only
     lineage: parent_must_be_known_unique_before_child_same_correlation_non_decreasing_time_no_self_reference
     context_required: true
     context_schema: CONTRACT-CONTROL-VALIDATION-CONTEXT-V1
     identity_history: same_identity_same_fingerprint_duplicate_stable_result; same_identity_different_fingerprint_conflict_reject
     fingerprint: sha256_rfc8785_jcs_payload_utf8_no_bom_lower_hex
     forbidden_keys: [password, secret, credential, token, access_token, private_key, raw_account_id, raw_account_identifier]
+  event_specific_dispatch:
+    exhaustive:
+      config.version_activated.v1: config_cross_object
+      system.kill_switch_changed.v1: kill_switch
+      system.mode_changed.v1: system_mode_transition
+      system.component_health_changed.v1: component_health_transition
+    missing_authority_context: reject_without_mutation
+  accepted_policy_binding:
+    fields: [policy_version, policy_checksum]
+    source: payload.policy_fields_or_payload.evidence
+    relation: exact_match_to_validation_context.accepted_policy
+    missing_or_mismatch: reject_without_mutation
   config_cross_object:
     candidate_checksum: sha256_rfc8785_jcs_candidate_content_utf8_no_bom_lower_hex
     checksum_excludes: [candidate_checksum]
@@ -93,8 +107,10 @@ rules:
       OPEN: {opened_at: required, invalidation_reason: null, evidence: exact_required_set}
       INVALIDATED: {opened_at: null, invalidation_reason: required}
     evidence_exact_set: [CONFIG_VERIFIED, MARKET_FRESH, AUDIT_AVAILABLE, RECONCILIATION_COMPLETE, LEASE_FENCED, OUTBOX_HEALTHY]
-    evidence_bindings: [reconciliation_case, market_quality_gap_watermark, config_version_checksum, audit_outbox_inbox_health, lease_fencing, component_generation_checksum]
+    evidence_bindings: [reconciliation_case, market_quality_gap_watermark, config_version_checksum, audit_outbox_inbox_health, lease_fencing, component_generation_version_checksum_health, calendar_session_policy_tzdb, critical_lag_policy_measurement]
     evidence_values_must_match_accepted_context: true
+    authority_sets: components_and_evidence_must_match_bidirectionally
+    exact_fields: [lease_authority_version, audit_outbox_position, audit_inbox_position, audit_watermark, audit_checksum, reconciliation_version, reconciliation_checksum, critical_lag_policy_version, critical_lag_policy_checksum, critical_lag_threshold, critical_lag_measurement_source, critical_lag_window_seconds, critical_lag_recovery_window_seconds, critical_lag_current]
     critical_lag_below_threshold_and_recovery_window: required
     reconnect_auto_open: forbidden
   alert_labels:

@@ -14,7 +14,9 @@ be redacted before a record crosses this port. Metrics MUST use only the
 allow-listed bounded labels in `NFR-OBSERVABILITY`; order, trade, instrument,
 account, strategy, message and correlation identifiers are prohibited labels.
 
-`ControlSemanticValidator(message, validation_context)` MUST validate envelope and payload together before
+Only `validate_control_message(message, validation_context)` is a usable
+ControlSemanticValidator entrypoint; it returns one canonical decision:
+`ACCEPTED`, `DUPLICATE`, `REJECTED` or `CONFLICT`. It MUST validate envelope and payload together before
 publish or outbox persistence. Its normative order is structural envelope,
 payload schema, combined event binding, then cross-object semantics. The same
 validator MUST run before Outbox persist, publish, consumer apply, control
@@ -30,9 +32,11 @@ lease/component/reconciliation/critical-lag authorities. Omitting or supplying
 an empty context is a validation error; a missing parent is never treated as a
 root event.
 
-For combined control events, `causation_id` is required. A root event may use
-the explicit root context only; otherwise it MUST reference a known direct
-parent with an earlier sequence and identical correlation. Self references,
+The four combined public control events are never root events: `causation_id`
+is required and MUST reference a known direct parent command/observation in
+the injected validation context with an earlier sequence and identical
+correlation. Root inputs, when needed, are authorized command/observation
+context records and are not published as these events. Self references,
 unknown/future parents and cross-correlation links are rejected. Recursive
 redaction scans reject credentials, secrets, raw tokens and raw account
 identifiers; structured audit evidence is never a metric label.

@@ -4,6 +4,7 @@ import hashlib
 import json
 import math
 from copy import deepcopy
+from decimal import Decimal
 from pathlib import Path
 from typing import Any, ClassVar
 
@@ -106,7 +107,9 @@ def _jcs(value: Any) -> str:
         exponent_value = int(exponent)
         absolute = abs(value)
         if 1e-6 <= absolute < 1e21:
-            fixed = format(value, ".15f").rstrip("0").rstrip(".")
+            fixed = format(Decimal(text), "f")
+            if "." in fixed:
+                fixed = fixed.rstrip("0").rstrip(".")
             return fixed
         sign = "+" if exponent_value >= 0 else "-"
         return f"{mantissa}e{sign}{abs(exponent_value)}"
@@ -174,11 +177,11 @@ class ControlSemanticValidator:
         _validator("control/control-plane.v1.schema.json").validate(dto)
         self._semantic_dto(dto)
 
-    def validate_message(
+    def validate_control_message(
         self,
         message: dict[str, Any],
         context: dict[str, Any],
-    ) -> None:
+    ) -> dict[str, Any]:
         required_context = {
             "evaluation_at",
             "accepted_policy",
@@ -192,6 +195,13 @@ class ControlSemanticValidator:
         _validator("control/combined-control-message.v1.schema.json").validate(message)
         message_type = message["message_type"]
         payload = message["payload"]
+        accepted_policy = context["accepted_policy"]
+        policy_evidence = payload.get("evidence", payload)
+        if (
+            policy_evidence.get("policy_version") != accepted_policy["version"]
+            or policy_evidence.get("policy_checksum") != accepted_policy["checksum"]
+        ):
+            raise ValueError("accepted policy binding mismatch")
         source, aggregate_type, partition, _aggregate = EVENT_BINDINGS[message_type]
         if (
             message["source"],
@@ -236,8 +246,149 @@ class ControlSemanticValidator:
         identity = context["identity_history"].get(message["message_id"]) or context[
             "identity_history"
         ].get(message["idempotency_key"])
-        if identity is not None and identity["fingerprint"] != message["payload_fingerprint"]:
-            raise ValueError("identity fingerprint conflict")
+        if identity is not None:
+            if identity["fingerprint"] != message["payload_fingerprint"]:
+                raise ValueError("identity fingerprint conflict")
+            if identity["decision"] in {"CONFLICT", "REJECTED", "FAILED", "UNKNOWN"}:
+                raise ValueError("prior conservative decision cannot be accepted")
+            decision = {
+                "status": "DUPLICATE",
+                "identity": message["message_id"],
+                "prior_decision": identity["decision"],
+            }
+        else:
+            decision = {"status": "ACCEPTED", "identity": message["message_id"]}
+        self._validate_event_specific(message, context)
+        return decision
+
+    def validate_message(self, message: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
+        """Compatibility wrapper; all callers must provide the full context."""
+        return self.validate_control_message(message, context)
+
+    def _validate_event_specific(self, message: dict[str, Any], context: dict[str, Any]) -> None:
+        payload = message["payload"]
+        event_type = message["message_type"]
+        if event_type == "config.version_activated.v1":
+            self.validate_config_event(payload, context)
+        elif event_type == "system.kill_switch_changed.v1":
+            self.validate_kill_event(payload, context)
+        elif event_type == "system.mode_changed.v1":
+            self.validate_mode_event(payload, context)
+        elif event_type == "system.component_health_changed.v1":
+            self.validate_health_event(payload, context)
+        else:
+            raise ValueError("unsupported control event type")
+
+    def validate_config_event(self, payload: dict[str, Any], context: dict[str, Any]) -> None:
+        config = context["accepted_state"]["config"]
+        if (
+            payload["candidate_version"] != config["version"]
+            or payload["candidate_checksum"] != config["checksum"]
+        ):
+            raise ValueError("config policy/version authority mismatch")
+        required = set(payload["required_components"])
+        acks = payload["component_acks"]
+        if set(acks) != required:
+            raise ValueError("component acknowledgement set mismatch")
+        for component, ack in acks.items():
+            if (
+                ack["component_id"] != component
+                or ack["candidate_version"] != payload["candidate_version"]
+                or ack["candidate_checksum"] != payload["candidate_checksum"]
+            ):
+                raise ValueError("component acknowledgement binding mismatch")
+            if (
+                ack["activation_mode"] != payload["activation_mode"]
+                or ack["safe_boundary"] != payload["safe_boundary"]
+                or ack["generation"] < 1
+                or not ack["capability_version"]
+                or ack["prepare_result"] not in {"PREPARED", "APPLIED", "REJECTED"}
+                or not ack["observed_at"]
+                or ack["ack_sequence"] < 1
+            ):
+                raise ValueError("component acknowledgement mode mismatch")
+        if (
+            payload["activation_mode"] == "HOT_RELOAD"
+            and payload["safe_boundary"] == "RESTART_ONLY"
+        ):
+            raise ValueError("hot reload cannot require restart boundary")
+        if payload["outcome"] == "APPLIED":
+            if (
+                payload["active_version"] != payload["candidate_version"]
+                or payload["active_checksum"] != payload["candidate_checksum"]
+            ):
+                raise ValueError("active config identity mismatch")
+            if any(ack["prepare_result"] != "APPLIED" for ack in acks.values()):
+                raise ValueError("partial silent activation")
+        elif payload["active_version"] is not None or payload["active_checksum"] is not None:
+            raise ValueError("non-applied config cannot claim active identity")
+        elif payload["outcome"] == "REJECTED" and any(
+            ack["prepare_result"] == "APPLIED" for ack in acks.values()
+        ):
+            raise ValueError("rejected config cannot contain applied acknowledgement")
+
+    def validate_kill_event(self, payload: dict[str, Any], context: dict[str, Any]) -> None:
+        authority = context["accepted_state"]["kill_switch"]
+        lease = context["accepted_state"]["lease"]
+        if (
+            payload["expected_version"] != authority["current_version"]
+            or payload["current_version"] != authority["current_version"]
+        ):
+            raise ValueError("kill switch authority version mismatch")
+        if payload["deadline_at"] <= context["evaluation_at"]:
+            raise ValueError("kill switch deadline expired")
+        auth = payload["authorization_evidence"]
+        if (
+            auth["authorization_id"] != authority["authorization_id"]
+            or auth["authorization_version"] != authority["authorization_version"]
+            or auth["authorization_checksum"] != authority["authorization_checksum"]
+        ):
+            raise ValueError("kill switch authorization binding mismatch")
+        if (
+            payload["leader_lease_id"] != lease["lease_id"]
+            or payload["fencing_token"] != lease["fencing_token"]
+        ):
+            raise ValueError("kill switch fencing binding mismatch")
+        if (
+            auth.get("revoked", False)
+            or auth.get("valid_until", "9999") <= context["evaluation_at"]
+        ):
+            raise ValueError("kill switch authorization invalid")
+        if (
+            payload["outcome"] in {"TIMEOUT", "UNKNOWN"}
+            and payload.get("effective_state") != "UNKNOWN"
+        ):
+            raise ValueError("unknown kill switch outcome must be UNKNOWN")
+        if payload["desired_state"] == "OFF" and (
+            payload["recovery_evidence_reference"] is None or payload["restores_normal"]
+        ):
+            raise ValueError("disable requires recovery evidence and cannot restore NORMAL")
+
+    def validate_mode_event(self, payload: dict[str, Any], context: dict[str, Any]) -> None:
+        if not payload.get("causation_id"):
+            raise ValueError("control events are never root")
+        state = context["accepted_state"]["system_mode"]
+        if payload["from_mode"] != state["mode"] or payload["generation"] != state["generation"]:
+            raise ValueError("system mode authority mismatch")
+        if (
+            payload["evidence"]["policy_version"] != state["policy_version"]
+            or payload["evidence"]["policy_checksum"] != state["policy_checksum"]
+        ):
+            raise ValueError("system mode policy mismatch")
+
+    def validate_health_event(self, payload: dict[str, Any], context: dict[str, Any]) -> None:
+        component = context["accepted_state"]["components"].get(payload["component"])
+        if (
+            component is None
+            or payload["component_version"] != component["version"]
+            or payload["generation"] != component["generation"]
+        ):
+            raise ValueError("component generation/version mismatch")
+        if (
+            payload["evidence"]["policy_version"] != context["accepted_policy"]["version"]
+            or payload["evidence"]["policy_checksum"] != context["accepted_policy"]["checksum"]
+        ):
+            raise ValueError("component policy mismatch")
 
     def validate_config_activation(self, candidate: dict[str, Any], result: dict[str, Any]) -> None:
         projection = {key: candidate[key] for key in candidate if key != "candidate_checksum"}
@@ -261,7 +412,7 @@ class ControlSemanticValidator:
         ):
             raise ValueError("partial silent activation")
 
-    def validate_kill_switch(
+    def _validate_kill_switch(
         self, command: dict[str, Any], result: dict[str, Any], context: dict[str, Any]
     ) -> None:
         self.validate_dto(command)
@@ -301,17 +452,6 @@ class ControlSemanticValidator:
             command["recovery_evidence_reference"] is None or result["restores_normal"]
         ):
             raise ValueError("disable requires recovery evidence and cannot restore NORMAL")
-
-    def validate_kill_switch_result(self, command: dict[str, Any], result: dict[str, Any]) -> None:
-        if (
-            result["outcome"] == "APPLIED"
-            and result["current_version"] != command["expected_version"] + 1
-        ):
-            raise ValueError("kill switch version jump")
-        if result["current_version"] < command["expected_version"]:
-            raise ValueError("stale expected version")
-        if command["desired_state"] == "OFF" and result.get("restores_normal", False):
-            raise ValueError("disable cannot restore NORMAL")
 
     def validate_recovery_barrier(self, barrier: dict[str, Any], context: dict[str, Any]) -> None:
         self.validate_dto(barrier)
@@ -357,6 +497,15 @@ class ControlSemanticValidator:
             or evidence["reconciliation_case_count"] != 0
         ):
             raise ValueError("barrier reconciliation evidence mismatch")
+        authority_components = authority["components"]
+        component_ids = set(authority_components)
+        if (
+            set(evidence["component_versions"]) != component_ids
+            or set(evidence["component_checksums"]) != component_ids
+            or set(evidence["component_generations"]) != component_ids
+            or set(evidence["component_health"]) != component_ids
+        ):
+            raise ValueError("barrier component evidence set mismatch")
         for component, version in evidence["component_versions"].items():
             accepted = authority["components"].get(component)
             if (
@@ -366,6 +515,66 @@ class ControlSemanticValidator:
                 or accepted["health"] != "HEALTHY"
             ):
                 raise ValueError("barrier component evidence mismatch")
+            if "component_generations" in evidence and (
+                evidence["component_generations"].get(component) != accepted["generation"]
+                or evidence["component_health"].get(component) != accepted["health"]
+            ):
+                raise ValueError("barrier component generation/health mismatch")
+        market = authority["market"]
+        exact_market = {
+            "market_calendar_version": market.get("calendar_version"),
+            "market_calendar_checksum": market.get("calendar_checksum"),
+            "market_session_id": market.get("session_id"),
+            "market_session_state": market.get("session_state"),
+            "market_policy_version": market.get("policy_version"),
+            "market_policy_checksum": market.get("policy_checksum"),
+            "market_tzdb_version": market.get("tzdb_version"),
+            "market_tzdb_checksum": market.get("tzdb_checksum"),
+            "market_source_version": market.get("source_version"),
+            "market_quality": market.get("quality"),
+            "unresolved_gap_count": market.get("unresolved_gap_count"),
+            "market_fresh_until": market.get("fresh_until"),
+        }
+        if any(evidence[key] != value for key, value in exact_market.items()):
+            raise ValueError("barrier market authority mismatch")
+        lease = authority["lease"]
+        exact_lease = {
+            "lease_id": lease.get("lease_id"),
+            "leader_id": lease.get("leader_id"),
+            "lease_authority_version": lease.get("authority_version"),
+            "lease_epoch": lease.get("epoch"),
+            "fencing_token": lease.get("fencing_token"),
+            "lease_expires_at": lease.get("expires_at"),
+        }
+        if any(evidence[key] != value for key, value in exact_lease.items()):
+            raise ValueError("barrier lease authority mismatch")
+        audit = authority["audit"]
+        if (
+            evidence["audit_outbox_position"] != audit.get("outbox_position")
+            or evidence["audit_inbox_position"] != audit.get("inbox_position")
+            or evidence["audit_watermark"] != audit.get("watermark")
+            or evidence["audit_checksum"] != audit.get("checksum")
+            or evidence["audit_lag"] != audit.get("lag")
+            or evidence["audit_healthy"] != audit.get("healthy")
+        ):
+            raise ValueError("barrier audit authority mismatch")
+        reconciliation = authority["reconciliation"]
+        if evidence["reconciliation_version"] != reconciliation.get("version") or evidence[
+            "reconciliation_checksum"
+        ] != reconciliation.get("checksum"):
+            raise ValueError("barrier reconciliation authority mismatch")
+        critical = authority["critical_lag"]
+        if (
+            evidence["critical_lag_policy_version"] != critical.get("policy_version")
+            or evidence["critical_lag_policy_checksum"] != critical.get("checksum")
+            or evidence["critical_lag_threshold"] != critical.get("threshold")
+            or evidence["critical_lag_measurement_source"] != critical.get("measurement_source")
+            or evidence["critical_lag_window_seconds"] != critical.get("window_seconds")
+            or evidence["critical_lag_recovery_window_seconds"]
+            != critical.get("recovery_window_seconds")
+            or evidence["critical_lag_current"] != critical.get("current")
+        ):
+            raise ValueError("barrier critical lag authority mismatch")
         if authority["lease"]["expires_at"] <= context["evaluation_at"]:
             raise ValueError("barrier lease expired")
 
@@ -516,16 +725,32 @@ def _validation_context(
             "config": {"version": "v2", "checksum": "a" * 64},
             "market": {
                 "calendar_version": "cal-v1",
+                "calendar_checksum": "e" * 64,
+                "session_id": "session-1",
+                "session_state": "OPEN",
                 "policy_version": "policy-v1",
+                "policy_checksum": "a" * 64,
                 "tzdb_version": "2026c",
+                "tzdb_checksum": "f" * 64,
+                "source_version": "source-v1",
                 "watermark": 1,
                 "unresolved_gap_count": 0,
                 "quality": "NORMAL",
+                "fresh_until": "2026-08-11T02:00:00Z",
             },
-            "audit": {"outbox_position": 1, "inbox_position": 1, "lag": 0, "healthy": True},
+            "audit": {
+                "outbox_position": 1,
+                "inbox_position": 1,
+                "watermark": 1,
+                "lag": 0,
+                "checksum": "9" * 64,
+                "healthy": True,
+            },
             "lease": {
                 "lease_id": "lease-1",
+                "leader_id": "oms-1",
                 "epoch": 1,
+                "authority_version": "lease-v1",
                 "fencing_token": "fence-token-000001",
                 "expires_at": "2026-08-11T02:00:00Z",
             },
@@ -539,12 +764,26 @@ def _validation_context(
             },
             "critical_lag": {
                 "policy_version": "lag-v1",
+                "checksum": "1" * 64,
                 "threshold": 10,
+                "measurement_source": "source_received_watermark_delta",
                 "window_seconds": 60,
                 "current": 0,
                 "recovery_window_seconds": 60,
             },
-            "kill_switch": {"current_version": 2, "effective_state": "OFF"},
+            "kill_switch": {
+                "current_version": 1,
+                "effective_state": "OFF",
+                "authorization_id": "auth-1",
+                "authorization_version": "v1",
+                "authorization_checksum": "d" * 64,
+            },
+            "system_mode": {
+                "mode": "STARTING",
+                "generation": 1,
+                "policy_version": "policy-v1",
+                "policy_checksum": "a" * 64,
+            },
         },
     }
 
@@ -572,6 +811,31 @@ def test_control_public_events_have_registered_schema_and_valid_fixture(message_
     payload = _load(FIXTURES / "control-events.json")[message_type]
     _validator(EVENT_SCHEMAS[message_type]).validate(payload)
     assert payload["source"] in {"TradingCore", "HealthService", "ControlPlane", "ConfigService"}
+
+
+def test_public_control_events_cannot_be_root() -> None:
+    payload = deepcopy(_load(FIXTURES / "control-events.json")["system.mode_changed.v1"])
+    payload["causation_id"] = None
+    with pytest.raises(ValidationError):
+        _validator(EVENT_SCHEMAS["system.mode_changed.v1"]).validate(payload)
+
+
+def test_unified_kill_event_rejects_authorization_and_fence_mismatch() -> None:
+    payload = deepcopy(_load(FIXTURES / "control-events.json")["system.kill_switch_changed.v1"])
+    checker = ControlSemanticValidator()
+    context = _validation_context(payload["correlation_id"])
+    for field, value in (
+        ("authorization_id", "other-auth"),
+        ("fencing_token", "other-fence-token-000001"),
+    ):
+        invalid = deepcopy(payload)
+        if field == "authorization_id":
+            invalid["authorization_evidence"][field] = value
+        else:
+            invalid[field] = value
+        message = _combined_fixture("system.kill_switch_changed.v1", invalid)
+        with pytest.raises((ValueError, ValidationError)):
+            checker.validate_control_message(message, context)
 
 
 @pytest.mark.parametrize("message_type", list(EVENT_SCHEMAS))
@@ -637,7 +901,7 @@ def test_control_lineage_context_is_mandatory_and_collision_safe() -> None:
         "fingerprint": message["payload_fingerprint"],
         "decision": "DUPLICATE",
     }
-    checker.validate_message(message, duplicate)
+    assert checker.validate_control_message(message, duplicate)["status"] == "DUPLICATE"
     conflict = _validation_context(payload["correlation_id"])
     conflict["identity_history"][message["message_id"]] = {
         "fingerprint": "0" * 64,
@@ -645,6 +909,13 @@ def test_control_lineage_context_is_mandatory_and_collision_safe() -> None:
     }
     with pytest.raises(ValueError, match="conflict"):
         checker.validate_message(message, conflict)
+    rejected = _validation_context(payload["correlation_id"])
+    rejected["identity_history"][message["message_id"]] = {
+        "fingerprint": message["payload_fingerprint"],
+        "decision": "REJECTED",
+    }
+    with pytest.raises(ValueError, match="conservative"):
+        checker.validate_control_message(message, rejected)
 
 
 @pytest.mark.parametrize(
@@ -655,6 +926,8 @@ def test_control_lineage_context_is_mandatory_and_collision_safe() -> None:
         (1e20, "100000000000000000000"),
         (1e21, "1e+21"),
         (-0.0, "0"),
+        (1.2345678901234567e-5, "0.000012345678901234568"),
+        (333333333.33333329, "333333333.3333333"),
     ],
 )
 def test_control_rfc8785_reference_number_vectors(value: float, expected: str) -> None:
@@ -717,21 +990,40 @@ def test_config_checksum_and_component_ack_binding_are_fail_closed() -> None:
         ControlSemanticValidator().validate_config_activation(bad_candidate, result)
 
 
+def test_config_event_ack_mode_and_active_identity_bindings_are_fail_closed() -> None:
+    payload = deepcopy(_load(FIXTURES / "control-events.json")["config.version_activated.v1"])
+    checker = ControlSemanticValidator()
+    message = _combined_fixture("config.version_activated.v1", payload)
+    context = _validation_context(payload["correlation_id"])
+    checker.validate_control_message(message, context)
+    for mutate in (
+        lambda item: item["component_acks"]["OMS"].update({"activation_mode": "RESTART_REQUIRED"}),
+        lambda item: item["component_acks"]["OMS"].update({"safe_boundary": "RESTART_ONLY"}),
+        lambda item: item["component_acks"]["OMS"].update({"capability_version": ""}),
+        lambda item: item["component_acks"]["OMS"].update({"generation": 0}),
+        lambda item: item["component_acks"]["OMS"].update({"prepare_result": "PREPARED"}),
+        lambda item: item.update({"active_version": "v1"}),
+        lambda item: item.update({"active_checksum": "0" * 64}),
+    ):
+        invalid = deepcopy(payload)
+        mutate(invalid)
+        invalid_message = _combined_fixture("config.version_activated.v1", invalid)
+        with pytest.raises((ValueError, ValidationError)):
+            checker.validate_control_message(invalid_message, context)
+
+
 def test_kill_switch_version_and_recovery_barrier_matrices_are_fail_closed() -> None:
     checker = ControlSemanticValidator()
-    command = {"expected_version": 3, "desired_state": "ON"}
-    checker.validate_kill_switch_result(command, {"outcome": "APPLIED", "current_version": 4})
-    for result in (
-        {"outcome": "APPLIED", "current_version": 3},
-        {"outcome": "APPLIED", "current_version": 5},
-    ):
-        with pytest.raises(ValueError):
-            checker.validate_kill_switch_result(command, result)
-    with pytest.raises(ValueError, match="NORMAL"):
-        checker.validate_kill_switch_result(
-            {"expected_version": 1, "desired_state": "OFF"},
-            {"outcome": "APPLIED", "current_version": 2, "restores_normal": True},
-        )
+    document = _load(FIXTURES / "control-plane.v1/valid.json")
+    command = next(item for item in document["dtos"] if item["dto_type"] == "KILL_SWITCH_COMMAND")
+    result = next(item for item in document["dtos"] if item["dto_type"] == "KILL_SWITCH_RESULT")
+    context = _validation_context(command["correlation_id"])
+    context["accepted_state"]["kill_switch"]["current_version"] = 2
+    checker._validate_kill_switch(command, result, context)
+    stale = deepcopy(command)
+    stale["expected_version"] = 1
+    with pytest.raises(ValueError):
+        checker._validate_kill_switch(stale, result, context)
     barrier = {
         "dto_type": "RECOVERY_BARRIER",
         "schema_version": 1,
@@ -749,6 +1041,40 @@ def test_kill_switch_version_and_recovery_barrier_matrices_are_fail_closed() -> 
             "reconciliation_case_count": 0,
             "component_versions": {"OMS": "v1"},
             "component_checksums": {"OMS": "b" * 64},
+            "lease_id": "lease-1",
+            "leader_id": "oms-1",
+            "lease_authority_version": "lease-v1",
+            "lease_epoch": 1,
+            "fencing_token": "fence-token-000001",
+            "lease_expires_at": "2026-08-11T02:00:00Z",
+            "audit_outbox_position": 1,
+            "audit_inbox_position": 1,
+            "audit_checksum": "9" * 64,
+            "audit_lag": 0,
+            "audit_healthy": True,
+            "market_calendar_version": "cal-v1",
+            "market_calendar_checksum": "e" * 64,
+            "market_session_id": "session-1",
+            "market_session_state": "OPEN",
+            "market_policy_version": "policy-v1",
+            "market_policy_checksum": "a" * 64,
+            "market_tzdb_version": "2026c",
+            "market_tzdb_checksum": "f" * 64,
+            "market_source_version": "source-v1",
+            "market_quality": "NORMAL",
+            "unresolved_gap_count": 0,
+            "market_fresh_until": "2026-08-11T02:00:00Z",
+            "reconciliation_version": "recon-v1",
+            "reconciliation_checksum": "c" * 64,
+            "critical_lag_policy_version": "lag-v1",
+            "critical_lag_policy_checksum": "1" * 64,
+            "critical_lag_threshold": 10,
+            "critical_lag_measurement_source": "source_received_watermark_delta",
+            "critical_lag_window_seconds": 60,
+            "critical_lag_recovery_window_seconds": 60,
+            "critical_lag_current": 0,
+            "component_generations": {"OMS": 1},
+            "component_health": {"OMS": "HEALTHY"},
         },
         "required_evidence": [],
         "invalidation_reason": None,
@@ -762,21 +1088,22 @@ def test_kill_switch_command_result_requires_authority_and_reconciliation_contex
     command = next(item for item in document["dtos"] if item["dto_type"] == "KILL_SWITCH_COMMAND")
     result = next(item for item in document["dtos"] if item["dto_type"] == "KILL_SWITCH_RESULT")
     context = _validation_context(command["correlation_id"])
+    context["accepted_state"]["kill_switch"]["current_version"] = 2
     checker = ControlSemanticValidator()
-    checker.validate_kill_switch(command, result, context)
+    checker._validate_kill_switch(command, result, context)
     stale = deepcopy(command)
     stale["expected_version"] = 1
     with pytest.raises(ValueError, match="stale"):
-        checker.validate_kill_switch(stale, result, context)
+        checker._validate_kill_switch(stale, result, context)
     unknown = deepcopy(result)
     unknown["outcome"] = "UNKNOWN"
     unknown["reconciliation_required"] = False
     with pytest.raises(ValueError, match="reconciliation"):
-        checker.validate_kill_switch(command, unknown, context)
+        checker._validate_kill_switch(command, unknown, context)
     expired = deepcopy(command)
     expired["authorization_evidence"]["valid_until"] = "2026-08-11T00:00:00Z"
     with pytest.raises(ValueError, match="expired"):
-        checker.validate_kill_switch(expired, result, context)
+        checker._validate_kill_switch(expired, result, context)
 
 
 def test_recovery_barrier_open_requires_authority_bound_evidence() -> None:
@@ -807,6 +1134,40 @@ def test_recovery_barrier_open_requires_authority_bound_evidence() -> None:
             "reconciliation_case_count": 0,
             "component_versions": {"OMS": "v1"},
             "component_checksums": {"OMS": "b" * 64},
+            "lease_id": "lease-1",
+            "leader_id": "oms-1",
+            "lease_authority_version": "lease-v1",
+            "lease_epoch": 1,
+            "fencing_token": "fence-token-000001",
+            "lease_expires_at": "2026-08-11T02:00:00Z",
+            "audit_outbox_position": 1,
+            "audit_inbox_position": 1,
+            "audit_checksum": "9" * 64,
+            "audit_lag": 0,
+            "audit_healthy": True,
+            "market_calendar_version": "cal-v1",
+            "market_calendar_checksum": "e" * 64,
+            "market_session_id": "session-1",
+            "market_session_state": "OPEN",
+            "market_policy_version": "policy-v1",
+            "market_policy_checksum": "a" * 64,
+            "market_tzdb_version": "2026c",
+            "market_tzdb_checksum": "f" * 64,
+            "market_source_version": "source-v1",
+            "market_quality": "NORMAL",
+            "unresolved_gap_count": 0,
+            "market_fresh_until": "2026-08-11T02:00:00Z",
+            "reconciliation_version": "recon-v1",
+            "reconciliation_checksum": "c" * 64,
+            "critical_lag_policy_version": "lag-v1",
+            "critical_lag_policy_checksum": "1" * 64,
+            "critical_lag_threshold": 10,
+            "critical_lag_measurement_source": "source_received_watermark_delta",
+            "critical_lag_window_seconds": 60,
+            "critical_lag_recovery_window_seconds": 60,
+            "critical_lag_current": 0,
+            "component_generations": {"OMS": 1},
+            "component_health": {"OMS": "HEALTHY"},
         },
     }
     checker = ControlSemanticValidator()
