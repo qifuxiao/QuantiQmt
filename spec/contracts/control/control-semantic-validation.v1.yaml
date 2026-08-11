@@ -8,7 +8,8 @@ contract:
   order: [structural_envelope, payload_schema, combined_binding, cross_object_semantics]
   result: {valid: continue, invalid: reject_without_mutation}
   combined_message_schema: CONTRACT-CONTROL-COMBINED-MESSAGE-V1
-  required_context: [known_messages, evaluation_sequence, accepted_policy_version, accepted_policy_checksum]
+  required_context: [evaluation_at, accepted_policy, known_messages, identity_history, accepted_state]
+  validation_context_schema: CONTRACT-CONTROL-VALIDATION-CONTEXT-V1
 rules:
   observability:
     required_context: [message_id, correlation_id, causation_id, source, service, instance, environment, error_code]
@@ -24,16 +25,26 @@ rules:
       system.component_health_changed.v1: {source: HealthService, publisher: HealthService, aggregate_type: SYSTEM_COMPONENT, partition_key: component}
       system.kill_switch_changed.v1: {source: ControlPlane, publisher: ControlPlane, aggregate_type: KILL_SWITCH, partition_key: kill_switch}
       config.version_activated.v1: {source: ConfigService, publisher: ConfigService, aggregate_type: CONFIG_VERSION, partition_key: config}
-    causation: required_for_combined_events; root_may_be_null_only_with_explicit_root_context
-    lineage: parent_must_be_known_and_before_child_same_correlation_no_self_reference
+    causation: required_for_combined_events; no_implicit_root; explicit_root_type_and_authorization_required
+    lineage: parent_must_be_known_unique_before_child_same_correlation_non_decreasing_time_no_self_reference
+    context_required: true
+    context_schema: CONTRACT-CONTROL-VALIDATION-CONTEXT-V1
+    identity_history: same_identity_same_fingerprint_duplicate_stable_result; same_identity_different_fingerprint_conflict_reject
     fingerprint: sha256_rfc8785_jcs_payload_utf8_no_bom_lower_hex
     forbidden_keys: [password, secret, credential, token, access_token, private_key, raw_account_id, raw_account_identifier]
   config_cross_object:
     candidate_checksum: sha256_rfc8785_jcs_candidate_content_utf8_no_bom_lower_hex
     checksum_excludes: [candidate_checksum]
+    canonicalization:
+      algorithm: RFC8785_JCS
+      utf8: no_bom
+      unicode: preserve_scalars_without_normalization
+      number_domain: I_JSON_safe_integers_or_decimal_strings
+      sha256: lowercase_hex
+      payload_fingerprint_uses_same_algorithm: true
     version_checksum_content_identity_immutable: true
     required_components_exact: true
-    component_ack_binding: [candidate_version, candidate_checksum, component_id, generation, capability_version, prepare_result]
+    component_ack_binding: [component_id, candidate_version, candidate_checksum, generation, capability_version, prepare_result, activation_mode, safe_boundary, observed_at, ack_sequence]
     missing_duplicate_extra_unknown_ack: reject
     partial_silent_activation: forbidden
     active_event_outbox_atomic: true
@@ -44,7 +55,7 @@ rules:
     critical_lag: {authoritative_measurement: source_received_watermark_delta, threshold_version_required: true, sustained_window_required: true, recovery_window_required: true}
     alert_not_state_authority: true
   config_activation:
-    candidate_checksum: canonical_payload_sha256
+    candidate_checksum: SHA256_RFC8785_JCS_candidate_content_excluding_checksum
     immutable_version: true
     secrets_are_references: true
     hard_limit_policy_must_match: true
@@ -62,6 +73,8 @@ rules:
     applied_version: current_version_must_equal_expected_version_plus_one
     stale_expected_version: reject
     idempotency_replay: same_key_same_payload_same_result; same_key_different_payload_conflict
+    command_result_binding: [command_id, command_fingerprint, previous_version, current_version, authorization_id, leader_lease_id, fencing_token]
+    possible_commit_timeout: UNKNOWN_with_reconciliation_required
     disable_does_not_restore_normal: true
   lease_fencing:
     monotonic_epoch: true
@@ -81,6 +94,8 @@ rules:
       INVALIDATED: {opened_at: null, invalidation_reason: required}
     evidence_exact_set: [CONFIG_VERIFIED, MARKET_FRESH, AUDIT_AVAILABLE, RECONCILIATION_COMPLETE, LEASE_FENCED, OUTBOX_HEALTHY]
     evidence_bindings: [reconciliation_case, market_quality_gap_watermark, config_version_checksum, audit_outbox_inbox_health, lease_fencing, component_generation_checksum]
+    evidence_values_must_match_accepted_context: true
+    critical_lag_below_threshold_and_recovery_window: required
     reconnect_auto_open: forbidden
   alert_labels:
     metric_label_allowlist: [severity, component, alert_code, environment, policy_version]

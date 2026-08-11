@@ -14,7 +14,7 @@ be redacted before a record crosses this port. Metrics MUST use only the
 allow-listed bounded labels in `NFR-OBSERVABILITY`; order, trade, instrument,
 account, strategy, message and correlation identifiers are prohibited labels.
 
-`ControlSemanticValidator` MUST validate envelope and payload together before
+`ControlSemanticValidator(message, validation_context)` MUST validate envelope and payload together before
 publish or outbox persistence. Its normative order is structural envelope,
 payload schema, combined event binding, then cross-object semantics. The same
 validator MUST run before Outbox persist, publish, consumer apply, control
@@ -22,6 +22,13 @@ transition, restore/replay and every external side effect. Failure rejects
 without repair, reordering, persistence, publication or execution. Same identity plus the same canonical payload
 fingerprint is a duplicate; same identity with a different fingerprint is a
 fail-closed collision and MUST retain evidence.
+
+`validation_context` is mandatory and is the `CONTRACT-CONTROL-VALIDATION-CONTEXT-V1`
+DTO: it contains injected `evaluation_at`, accepted policy identity, known
+message lineage, identity/fingerprint history, and accepted config/market/audit/
+lease/component/reconciliation/critical-lag authorities. Omitting or supplying
+an empty context is a validation error; a missing parent is never treated as a
+root event.
 
 For combined control events, `causation_id` is required. A root event may use
 the explicit root context only; otherwise it MUST reference a known direct
@@ -39,6 +46,13 @@ command identity is reconciled and never reissued with a new identity.
 
 `KillSwitchCommand` and `ConfigCandidate` are validated by schema and then by
 the same semantic validator at dispatch, persistence and recovery restore.
+Kill-switch command/result pairs MUST bind command identity and canonical
+fingerprint, expected/previous/current versions, authorization identity and
+checksum, leader lease/fencing evidence, absolute deadline and reconciliation
+evidence. `UNKNOWN` is returned for possible commit and requires an
+authoritative query; a new idempotency identity is forbidden. Disabling the
+switch requires a verified recovery-evidence reference and MUST NOT restore
+NORMAL automatically.
 Kill switch ON blocks new OrderIntent and new Risk approval but preserves
 cancel, recovery and explicitly approved reduce-risk capacity. It cannot change
 OMS business state or bypass Risk/Execution.

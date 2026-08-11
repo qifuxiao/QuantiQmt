@@ -101,6 +101,8 @@ catalogs:
       path: contracts/control/control-semantic-validation.v1.yaml
     - id: CONTRACT-CONTROL-COMBINED-MESSAGE-V1
       path: contracts/control/combined-control-message.v1.schema.json
+    - id: CONTRACT-CONTROL-VALIDATION-CONTEXT-V1
+      path: contracts/control/validation-context.v1.schema.json
     - id: CONTRACT-ERROR-CATALOG
       path: contracts/errors/catalog.yaml
   interfaces:
