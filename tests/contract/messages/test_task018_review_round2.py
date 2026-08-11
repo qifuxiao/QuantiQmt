@@ -391,23 +391,48 @@ def test_every_operation_has_an_exhaustive_canonical_outcome_code_matrix() -> No
     }
 
 
-def test_task_governance_remains_active_draft_pending_and_release_prohibited() -> None:
-    task_text = (ROOT / "tasks/active/TASK-018-ledger-portfolio-contracts.md").read_text(
+def test_task_governance_closeout_has_verified_evidence_and_prohibits_release() -> None:
+    task_text = (ROOT / "tasks/completed/TASK-018-ledger-portfolio-contracts.md").read_text(
         encoding="utf-8"
     )
     task = yaml.safe_load(task_text.split("---", 2)[1])
-    assert task["status"] == "active"
-    assert task["delivery"] == {
+    assert task["status"] == "completed"
+    delivery = task["delivery"]
+    assert {key: value for key, value in delivery.items() if key != "completion_evidence"} == {
         "schema_version": 1,
-        "contract_status": "draft",
-        "implementation_status": "in_progress",
+        "contract_status": "accepted",
+        "implementation_status": "merged",
         "acceptance_status": "passed",
-        "review_status": "pending",
+        "review_status": "approved",
         "release_status": "prohibited",
+    }
+    assert delivery["completion_evidence"] == {
+        "mode": "governance_closeout_after_independent_review",
+        "change_pr": "https://github.com/qifuxiao/QuantiQmt/pull/70",
+        "reviewed_head_sha": "847e4f01d20008cf542b04f368208483ca08509d",
+        "review_verdict": "APPROVE",
+        "reviewer": "qifuxiao",
+        "evidence_url": (
+            "https://github.com/qifuxiao/QuantiQmt/pull/70#pullrequestreview-4898813275"
+        ),
+        "merge_commit_sha": "e23a48767af138a061146f510e58885343c9e3a7",
+        "ci_evidence": (
+            "Reviewed Head 847e4f01d20008cf542b04f368208483ca08509d passed 4/4 "
+            "GitHub CI: quality jobs 93515143258 and 93515129866; "
+            "persistence-postgresql jobs 93515143227 and 93515129870."
+        ),
+        "human_authorization_evidence": (
+            "2026-08-11 human authorization added "
+            "tasks/completed/TASK-018-ledger-portfolio-contracts.md exactly to "
+            "TASK-018 allowed_paths solely to record PR #70 formal Review, CI, and merge "
+            "evidence and perform the TASK-018 active-to-completed closeout; it does not "
+            "activate or unlock TASK-007, TASK-019, TASK-020, TASK-022, or any other task "
+            "and does not authorize release."
+        ),
     }
     index = yaml.safe_load((ROOT / "tasks/index.yaml").read_text(encoding="utf-8"))
     tasks = {item["id"]: item for item in index["tasks"]}
-    assert tasks["TASK-018"]["status"] == "active"
+    assert tasks["TASK-018"]["status"] == "completed"
     assert tasks["TASK-007"]["status"] == "blocked"
 
 
