@@ -1,0 +1,38 @@
+workflow:
+  id: WF-CONTROL-PLANE
+  contract: CONTRACT-CONTROL-PLANE-V1
+  semantic_validator: CONTRACT-CONTROL-SEMANTIC-VALIDATION-V1
+  boundaries: [command_ingress, outbox_persist, event_publish, recovery_restore]
+  observability:
+    steps: [normalize_context, redact_sensitive_values, validate_correlation_chain, emit_metric_log_trace_audit]
+    failure: reject_record_and_emit_bounded_validation_metric
+  alerting:
+    trigger: authoritative_metric_threshold_and_sustained_window
+    recovery: recovery_threshold_and_window
+    dedupe: bounded_alert_id_and_dedupe_window
+    silence: explicit_operator_action_with_expiry
+    state_authority: forbidden
+  config_activation:
+    steps:
+      - {id: persist_candidate, owner: ConfigService}
+      - {id: schema_and_business_validate, owner: ConfigService, failure: reject_candidate}
+      - {id: prepare_components, owner: ConfigService, failure: reject_candidate}
+      - {id: atomic_active_event_outbox_commit, owner: ConfigService, transaction: "ActiveVersion + config.version_activated.v1 + Outbox"}
+      - {id: swap_at_safe_boundary, owner: Components, guard: immutable_version_and_checksum}
+      - {id: collect_acknowledgements, owner: ConfigService, failure: rollback_or_safe_scope}
+    forbidden: [partial_silent_activation, plaintext_secret_persistence, active_version_side_channel]
+    unknown: retain_same_candidate_identity_and_reconcile
+  kill_switch:
+    command_bus: required
+    on_effect: [block_new_order_intent, block_new_risk_approval, preserve_cancel, preserve_recovery, preserve_approved_reduce_risk]
+    stale_expected_version: reject_without_event
+    timeout_after_dispatch: UNKNOWN_and_reconcile_same_idempotency_key
+  lease:
+    acquire_before_side_effect: true
+    validate_before_each_side_effect: true
+    expiry_or_epoch_regression: fail_closed
+  recovery_barrier:
+    initial: CLOSED
+    open_requires: [CONFIG_VERIFIED, MARKET_FRESH, AUDIT_AVAILABLE, RECONCILIATION_COMPLETE, LEASE_FENCED, OUTBOX_HEALTHY]
+    closed_behavior: reject_new_order_intent_and_risk_approval
+    reconnect_auto_normal: forbidden

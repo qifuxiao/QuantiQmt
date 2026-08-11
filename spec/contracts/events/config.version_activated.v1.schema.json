@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:quantiqmt:event:config.version_activated:v1",
+  "title": "ConfigVersionActivatedPayloadV1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["event_id", "config_domain", "candidate_version", "candidate_checksum", "previous_version", "activation_mode", "safe_boundary", "component_acks", "outcome", "rollback_version", "secret_references", "occurred_at", "correlation_id", "source"],
+  "properties": {
+    "event_id": {"type": "string", "format": "uuid"},
+    "config_domain": {"type": "string", "pattern": "^[a-z][a-z0-9_.-]{1,63}$"},
+    "candidate_version": {"type": "string", "minLength": 1, "maxLength": 64},
+    "candidate_checksum": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "previous_version": {"type": ["string", "null"], "minLength": 1, "maxLength": 64},
+    "activation_mode": {"enum": ["HOT_RELOAD", "RESTART_REQUIRED"]},
+    "safe_boundary": {"enum": ["NEXT_ORDER_BOUNDARY", "NEXT_BAR_BOUNDARY", "RESTART_ONLY"]},
+    "component_acks": {"type": "object", "minProperties": 1, "additionalProperties": {"enum": ["PREPARED", "APPLIED", "REJECTED", "TIMED_OUT"]}},
+    "outcome": {"enum": ["APPLIED", "REJECTED", "PARTIAL", "ROLLED_BACK", "UNKNOWN"]},
+    "rollback_version": {"type": ["string", "null"], "minLength": 1, "maxLength": 64},
+    "secret_references": {"type": "array", "items": {"type": "string", "pattern": "^secret://[^\\s]+$"}, "uniqueItems": true},
+    "occurred_at": {"type": "string", "format": "date-time", "pattern": "Z$"},
+    "correlation_id": {"type": "string", "minLength": 16, "maxLength": 128},
+    "source": {"type": "string", "const": "ConfigService"}
+  },
+  "allOf": [
+    {"if": {"properties": {"outcome": {"enum": ["PARTIAL", "UNKNOWN"]}}}, "then": {"properties": {"rollback_version": {"type": "string"}}}},
+    {"if": {"properties": {"activation_mode": {"const": "RESTART_REQUIRED"}}}, "then": {"properties": {"safe_boundary": {"const": "RESTART_ONLY"}}}}
+  ]
+}

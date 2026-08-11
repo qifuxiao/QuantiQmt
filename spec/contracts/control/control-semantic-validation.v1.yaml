@@ -1,0 +1,53 @@
+contract:
+  id: CONTRACT-CONTROL-SEMANTIC-VALIDATION-V1
+  version: 1
+  status: draft
+  validator: ControlSemanticValidator
+  fail_closed: true
+  boundaries: [schema_parse, envelope_publish, outbox_persist, command_dispatch, state_transition, recovery_restore]
+rules:
+  observability:
+    required_context: [message_id, correlation_id, causation_id, source, service, instance, environment, error_code]
+    prohibited_values: [secret, credential, password, access_token, private_key, raw_secret]
+    high_cardinality_labels_forbidden: [order_id, trade_id, correlation_id, instrument_id, account_id, strategy_id, message_id]
+    correlation_chain: correlation_id_stable_and_causation_id_precedes_message
+  envelope_binding:
+    validate_together: [message_envelope, payload]
+    required_mapping: [message_type, schema_version, publisher_source, partition_key, aggregate_id, aggregate_version, idempotency_key]
+    collision: same_identity_same_fingerprint_duplicate; same_identity_different_fingerprint_reject
+  alerts:
+    severity: [P0, P1, P2]
+    critical_lag: {authoritative_measurement: source_received_watermark_delta, threshold_version_required: true, sustained_window_required: true, recovery_window_required: true}
+    alert_not_state_authority: true
+  config_activation:
+    candidate_checksum: canonical_payload_sha256
+    immutable_version: true
+    secrets_are_references: true
+    hard_limit_policy_must_match: true
+    atomic_commit: [active_version, config.version_activated.v1, outbox]
+    partial_activation: reject_and_rollback_or_safe_scope
+    unknown_outcome: retain_idempotency_and_reconcile
+    active_version_side_channel: forbidden
+  kill_switch:
+    command_bus_only: true
+    on_blocks: [new_order_intent, new_risk_approval]
+    on_allows: [cancel, recovery, approved_reduce_risk]
+    authorization_required: true
+    stale_version_or_fence: reject
+    unknown_outcome: reconcile_without_reissue
+  lease_fencing:
+    monotonic_epoch: true
+    unique_fencing_token_per_epoch: true
+    expires_before_side_effect: reject
+    renew_after_expiry: forbidden
+    stale_token_cache_success: forbidden
+  recovery_barrier:
+    initial_state: CLOSED
+    open_requires: [CONFIG_VERIFIED, MARKET_FRESH, AUDIT_AVAILABLE, RECONCILIATION_COMPLETE, LEASE_FENCED, OUTBOX_HEALTHY]
+    closed_rejects: [new_order_intent, new_risk_approval]
+    reconnect_auto_normal: forbidden
+    invalidation: conservative_mode_and_reopen_required
+  system_mode:
+    legal_transitions_source: SM-SYSTEM-MODE
+    strictest_scope_wins: true
+    illegal_transition: reject_without_event_or_state_change

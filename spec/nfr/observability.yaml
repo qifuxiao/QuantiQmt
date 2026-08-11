@@ -135,3 +135,21 @@ nfr:
     required_fields: [strategy_id, strategy_version, generation, from_state, to_state, reason_code, correlation_id, occurred_at]
     required_reasons: [CALLBACK_TIMEOUT, CALLBACK_EXCEPTION, OUTPUT_REJECTED, STALE_GENERATION, CHECKPOINT_INVALID, RESOURCE_LIMIT, DEPENDENCY_STALE]
     forbidden_payloads: [broker_credentials, database_credentials, raw_secret, arbitrary_network_target]
+  control_plane:
+    required_context_fields: [message_id, correlation_id, causation_id, source, service, instance, environment, occurred_at, received_at, error_code]
+    sensitive_values_forbidden: [secret, credential, password, access_token, private_key, raw_account_identifier]
+    metric_names:
+      - control_command_total{command,outcome,reason}
+      - config_activation_total{domain,outcome,mode}
+      - config_activation_latency_ms{domain,mode}
+      - kill_switch_transition_total{scope,desired_state,outcome}
+      - leader_fencing_rejection_total{component,reason}
+      - recovery_barrier_transition_total{from_state,to_state,reason}
+      - critical_lag_seconds{source,component}
+      - audit_record_rejection_total{source,reason}
+    metric_label_allowlist: [command, outcome, reason, domain, mode, scope, desired_state, component, from_state, to_state, source]
+    metric_label_forbidden: [order_id, trade_id, correlation_id, instrument_id, account_id, strategy_id, message_id, raw_account_id]
+    alert_taxonomy: [P0, P1, P2]
+    critical_lag_policy: {authoritative_source: source_received_watermark_delta, threshold_version_required: true, sustained_window_seconds_required: true, recovery_window_seconds_required: true}
+    alert_state_authority: forbidden
+    semantic_validator: CONTRACT-CONTROL-SEMANTIC-VALIDATION-V1

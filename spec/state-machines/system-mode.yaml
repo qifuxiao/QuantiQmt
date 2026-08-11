@@ -21,3 +21,11 @@ machine:
   invariants:
     - "when scopes conflict, stricter mode wins"
     - "dependency reconnect alone never restores NORMAL"
+    - "a closed or invalidated recovery barrier rejects new OrderIntent and Risk approval"
+    - "kill switch ON blocks new risk while preserving cancel, recovery and approved reduce-risk capacity"
+    - "control plane never mutates OMS business state or bypasses Risk/Execution"
+  control_guards:
+    recovery_barrier_open_requires: [CONFIG_VERIFIED, MARKET_FRESH, AUDIT_AVAILABLE, RECONCILIATION_COMPLETE, LEASE_FENCED, OUTBOX_HEALTHY]
+    kill_switch_on_allows: [CANCEL, RECOVERY, APPROVED_REDUCE_RISK]
+    kill_switch_on_forbids: [NEW_ORDER_INTENT, NEW_RISK_APPROVAL]
+    stale_lease_or_fencing_token: reject_without_side_effect

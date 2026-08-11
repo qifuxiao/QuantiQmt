@@ -14,7 +14,7 @@ delivery:
   schema_version: 1
   contract_status: draft
   implementation_status: in_progress
-  acceptance_status: not_run
+  acceptance_status: passed
   review_status: pending
   release_status: prohibited
 ---
@@ -37,12 +37,28 @@ delivery:
 - [ ] 定义 Kill Switch、system mode、leader lease/fencing 和 stale token 行为。
 - [ ] 为后续 Control/Observability implementation task 提供验收标准。
 
+### Acceptance evidence (machine-checked)
+
+- [x] End-to-end observability context, correlation/causation, redaction and bounded metric labels are frozen in `PORTS-CONTROL`, `NFR-OBSERVABILITY`, `CONTRACT-CONTROL-PLANE-V1` and tested by `test_control_contracts.py`.
+- [x] P0/P1/P2 alert severity, owner/runbook, critical-lag authority, trigger/recovery windows and recovery-barrier requirements are frozen in `CONTROL-SEMANTIC-VALIDATION-V1` and `WF-CONTROL-PLANE`.
+- [x] Config hot-reload/restart boundaries, immutable version/checksum, secret references, prepare/ack, atomic ActiveVersion+Event+Outbox, rollback and UNKNOWN behavior are schema- and semantic-tested.
+- [x] Kill switch, system-mode transitions, leader lease/fencing and stale-token rejection are frozen in the event schemas, `SM-SYSTEM-MODE`, `PORTS-CONTROL` and deterministic negative probes.
+- [x] TASK-025 references the frozen contract IDs, implementation owner, failure paths and bundle boundary while remaining blocked; no runtime or release behavior is implemented.
+
 ## Activation evidence
 
 - On 2026-08-11, a human explicitly authorized starting the next task after TASK-020/PR #74 completed its independent Review and closeout; the coordinator selected TASK-022 as the only backlog/ready candidate.
 - TASK-046 remains completed with trusted schema-v1 delivery, passed acceptance, formal independent APPROVE evidence, and a merge commit, satisfying TASK-022's sole dependency gate.
 - This PR only activates TASK-022 for Observability, Config, and Control L4 contract work. It does not represent contract completion, implementation completion, Review approval, release authorization, or downstream dependency unlock.
 - TASK-021, TASK-023, TASK-025, TASK-027 and all other blocked tasks remain blocked; no task is activated or unlocked by this PR.
+
+## Implementation evidence
+
+- `CONTRACT-CONTROL-PLANE-V1` freezes redacted observability context, bounded alert/runbook DTOs, immutable config candidates/results, kill-switch commands/results, leader lease/fencing and recovery-barrier evidence. `CONTRACT-CONTROL-SEMANTIC-VALIDATION-V1` requires the same fail-closed validator at publish, Outbox persistence, command dispatch, state transition and recovery restore boundaries.
+- `PORTS-CONTROL`, `WF-CONTROL-PLANE`, `SM-SYSTEM-MODE`, `NFR-OBSERVABILITY` and `NFR-RELIABILITY` freeze correlation/causation, prohibited sensitive/high-cardinality fields, P0/P1/P2 alert windows, atomic ActiveVersion+Event+Outbox, UNKNOWN reconciliation, stale fencing rejection, kill-switch capacity and recovery-barrier gates.
+- Four planned public messages are now registered with Draft 2020-12 schemas and complete disk golden fixture sets: `system.mode_changed.v1`, `system.component_health_changed.v1`, `system.kill_switch_changed.v1`, and `config.version_activated.v1`. Invalid transitions, missing evidence, additional properties, precision/type errors, partial activation, stale lease and incomplete barrier cases are rejected by schema or the normative semantic probe.
+- TASK-025 remains `blocked` with its original dependencies and now references the frozen control contracts, implementation owner, failure paths and bundle boundary. No runtime code, migration, monitoring product, OMS state mutation or release was implemented; `implementation_status` remains `in_progress`, `review_status` remains `pending`, and `release_status` remains `prohibited`.
+- Acceptance evidence: `poetry run python scripts/validate_specs.py` passed; `poetry run pytest tests/spec tests/contract` passed with 540 tests; targeted control/message suite passed with 237 tests.
 
 ## Review focus
 

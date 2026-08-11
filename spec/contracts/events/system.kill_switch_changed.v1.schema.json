@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:quantiqmt:event:system.kill_switch_changed:v1",
+  "title": "SystemKillSwitchChangedPayloadV1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["event_id", "scope", "desired_state", "effective_state", "reason_code", "actor", "authorization_evidence", "expected_version", "current_version", "deadline_at", "idempotency_key", "reserved_capacity", "outcome", "occurred_at", "correlation_id", "source"],
+  "properties": {
+    "event_id": {"type": "string", "format": "uuid"},
+    "scope": {"enum": ["GLOBAL", "ACCOUNT", "STRATEGY", "INSTRUMENT"]},
+    "desired_state": {"enum": ["ON", "OFF"]},
+    "effective_state": {"enum": ["ON", "OFF", "UNKNOWN"]},
+    "reason_code": {"enum": ["MANUAL_EMERGENCY", "RISK_BREACH", "RECOVERY_BARRIER", "CONFIGURATION", "OPERATOR_RELEASE"]},
+    "actor": {"type": "string", "minLength": 1, "maxLength": 128},
+    "authorization_evidence": {"type": "object", "additionalProperties": false, "required": ["authorization_id", "approver_ids", "approved_at"], "properties": {"authorization_id": {"type": "string", "minLength": 1}, "approver_ids": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1}}, "approved_at": {"type": "string", "format": "date-time", "pattern": "Z$"}}},
+    "expected_version": {"type": "integer", "minimum": 1, "maximum": 9007199254740991},
+    "current_version": {"type": "integer", "minimum": 1, "maximum": 9007199254740991},
+    "deadline_at": {"type": "string", "format": "date-time", "pattern": "Z$"},
+    "idempotency_key": {"type": "string", "minLength": 16, "maxLength": 256},
+    "reserved_capacity": {"type": "object", "additionalProperties": false, "required": ["cancel", "recovery"], "properties": {"cancel": {"type": "integer", "minimum": 1, "maximum": 9007199254740991}, "recovery": {"type": "integer", "minimum": 1, "maximum": 9007199254740991}}},
+    "outcome": {"enum": ["APPLIED", "REJECTED", "PARTIAL", "TIMEOUT", "UNKNOWN"]},
+    "occurred_at": {"type": "string", "format": "date-time", "pattern": "Z$"},
+    "correlation_id": {"type": "string", "minLength": 16, "maxLength": 128},
+    "source": {"type": "string", "const": "ControlPlane"}
+  },
+  "allOf": [
+    {"if": {"properties": {"desired_state": {"const": "ON"}}}, "then": {"properties": {"effective_state": {"enum": ["ON", "UNKNOWN"]}, "outcome": {"enum": ["APPLIED", "TIMEOUT", "UNKNOWN"]}}}},
+    {"if": {"properties": {"outcome": {"const": "APPLIED"}}}, "then": {"properties": {"effective_state": {"enum": ["ON", "OFF"]}}}}
+  ]
+}

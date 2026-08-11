@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:quantiqmt:event:system.mode_changed:v1",
+  "title": "SystemModeChangedPayloadV1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["event_id", "system_id", "scope", "from_mode", "to_mode", "reason_code", "generation", "aggregate_version", "correlation_id", "causation_id", "occurred_at", "source", "evidence"],
+  "properties": {
+    "event_id": {"type": "string", "format": "uuid"},
+    "system_id": {"type": "string", "minLength": 1, "maxLength": 128},
+    "scope": {"enum": ["GLOBAL", "ACCOUNT", "STRATEGY", "INSTRUMENT"]},
+    "from_mode": {"enum": ["STARTING", "NORMAL", "DEGRADED", "SAFE", "HALTED"]},
+    "to_mode": {"enum": ["NORMAL", "DEGRADED", "SAFE", "HALTED"]},
+    "reason_code": {"enum": ["RECOVERY_PASSED", "PARTIAL_AVAILABILITY", "NON_CRITICAL_DEGRADATION", "SAFETY_UNCERTAIN", "SEVERE_INCONSISTENCY", "HEALTHY_WINDOW_PASSED", "REPAIR_APPROVED", "DUAL_APPROVED_RECOVERY"]},
+    "generation": {"type": "integer", "minimum": 1, "maximum": 9007199254740991},
+    "aggregate_version": {"type": "integer", "minimum": 1, "maximum": 9007199254740991},
+    "correlation_id": {"type": "string", "minLength": 16, "maxLength": 128},
+    "causation_id": {"type": ["string", "null"], "minLength": 16, "maxLength": 128},
+    "occurred_at": {"type": "string", "format": "date-time", "pattern": "Z$"},
+    "source": {"type": "string", "const": "TradingCore"},
+    "evidence": {"$ref": "#/$defs/evidence"}
+  },
+  "oneOf": [
+    {"properties": {"from_mode": {"const": "STARTING"}, "to_mode": {"const": "NORMAL"}, "reason_code": {"const": "RECOVERY_PASSED"}}},
+    {"properties": {"from_mode": {"const": "STARTING"}, "to_mode": {"const": "SAFE"}, "reason_code": {"const": "PARTIAL_AVAILABILITY"}}},
+    {"properties": {"from_mode": {"const": "NORMAL"}, "to_mode": {"const": "DEGRADED"}, "reason_code": {"const": "NON_CRITICAL_DEGRADATION"}}},
+    {"properties": {"from_mode": {"enum": ["NORMAL", "DEGRADED"]}, "to_mode": {"const": "SAFE"}, "reason_code": {"const": "SAFETY_UNCERTAIN"}}},
+    {"properties": {"from_mode": {"const": "SAFE"}, "to_mode": {"const": "HALTED"}, "reason_code": {"const": "SEVERE_INCONSISTENCY"}}},
+    {"properties": {"from_mode": {"const": "DEGRADED"}, "to_mode": {"const": "NORMAL"}, "reason_code": {"const": "HEALTHY_WINDOW_PASSED"}}},
+    {"properties": {"from_mode": {"const": "SAFE"}, "to_mode": {"const": "DEGRADED"}, "reason_code": {"const": "REPAIR_APPROVED"}}},
+    {"properties": {"from_mode": {"const": "HALTED"}, "to_mode": {"const": "SAFE"}, "reason_code": {"const": "DUAL_APPROVED_RECOVERY"}}}
+  ],
+  "$defs": {
+    "evidence": {"type": "object", "additionalProperties": false, "required": ["recovery_barrier_id", "policy_version", "policy_checksum", "component_versions", "watermarks"], "properties": {"recovery_barrier_id": {"type": "string", "minLength": 1}, "policy_version": {"type": "string", "minLength": 1}, "policy_checksum": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "component_versions": {"type": "object", "minProperties": 1, "additionalProperties": {"type": "string", "minLength": 1}}, "watermarks": {"type": "object", "additionalProperties": {"type": "integer", "minimum": 0, "maximum": 9007199254740991}}}}
+  }
+}
