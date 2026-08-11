@@ -57,10 +57,15 @@ nfr:
     queue: bounded
     callback_blocking_io: forbidden
     silent_drop: forbidden
-    controlled_coalesce_requires_gap_evidence: true
+    tick_coalesce: forbidden_v1
+    overflow: reject_new_with_exact_lost_sequence_gap_evidence
+    combined_envelope_payload_validation: mandatory
+    idempotency_collision: fail_closed_and_retain_evidence
     quality_priority: [UNAVAILABLE, GAP, STALE, RECOVERING, DEGRADED, NORMAL]
     one_new_tick_restores_normal: false
-    recovery_gate: [version_matched_calendar, snapshot, bounded_backfill, contiguous_sequence, checkpoint_checksum, zero_unresolved_gaps]
+    recovery_gate: [version_matched_calendar_session, snapshot_identity_and_checksum, checkpoint_identity_and_checksum, bounded_backfill, contiguous_source_versions, watermark_covers_source_version, zero_unresolved_gaps]
+    validation_boundaries: [publish, persist, quality_transition, snapshot_restore, strategy_risk_delivery]
+    validation_failure_state_advance: forbidden
     final_bar_rewrite: forbidden
     replay_inputs: [normalized_events, calendar_version, aggregation_policy, checkpoint, watermark_sequence]
     wall_clock: forbidden

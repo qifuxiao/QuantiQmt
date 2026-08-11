@@ -44,6 +44,7 @@ rules:
   planned_message_must_be_activated_by_spec_change_task: true
 internal_contracts:
   - {id: CONTRACT-MARKET-DATA-V1, schema: market/market-data.v1.schema.json, status: draft, owner: MarketData}
+  - {id: CONTRACT-MARKET-SEMANTIC-VALIDATION-V1, schema: market/market-data.semantic-validation.v1.yaml, status: draft, owner: MarketData}
   - {id: CONTRACT-LEDGER-ACCOUNTING-V1, schema: ledger/ledger-accounting.v1.schema.json, status: draft, owner: AccountLedger}
   - {id: CONTRACT-PORTFOLIO-PROJECTION-V1, schema: portfolio/portfolio-projection.v1.schema.json, status: draft, owner: PortfolioProjection}
   - {id: CONTRACT-RECONCILIATION-V1, schema: reconciliation/reconciliation.v1.schema.json, status: draft, owner: Reconciliation}

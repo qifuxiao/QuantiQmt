@@ -93,6 +93,8 @@ catalogs:
       path: contracts/events/market.session_changed.v1.schema.json
     - id: CONTRACT-MARKET-DATA-V1
       path: contracts/market/market-data.v1.schema.json
+    - id: CONTRACT-MARKET-SEMANTIC-VALIDATION-V1
+      path: contracts/market/market-data.semantic-validation.v1.yaml
     - id: CONTRACT-ERROR-CATALOG
       path: contracts/errors/catalog.yaml
   interfaces:
@@ -181,16 +183,16 @@ catalogs:
 
 change:
   id: SPEC-0.10.0-MARKET-DATA-CONTRACTS
-  compatibility: additive_new_public_v1_market_events_and_internal_market_contracts_runtime_and_storage_implementation_deferred
+  compatibility: additive_unpublished_public_v1_market_events_corrected_before_first_release_with_fail_closed_binding_and_internal_contracts_runtime_and_storage_implementation_deferred
   previous_version: 0.9.0
-  public_message_schema_changes: "activates four previously planned V1 names with new payload schemas: market.tick_received.v1, market.bar_closed.v1, market.quality_changed.v1 and market.session_changed.v1; no previously active public schema changes"
+  public_message_schema_changes: "activates four previously planned and never-published V1 names with final fail-closed payload schemas: market.tick_received.v1, market.bar_closed.v1, market.quality_changed.v1 and market.session_changed.v1; Review corrections add provider/version/recovery/window/checksum evidence before first release; no previously active public schema changes"
   storage_schema_changes: "adds logical STORAGE-MARKET-DATA authority, optional tick/bar durability, immutable calendar/checkpoint semantics and explicit gap evidence; no database object or migration is created"
   error_catalog_change: none
   runtime_code_change: "none in TASK-020; TASK-023 remains blocked and owns a future implementation only after TASK-020 and TASK-022 trusted completion"
   review_change: none
-  contract_change: "freezes public Market event payloads, MarketGateway DTO/Port outcomes, versioned calendar/session/quality semantics, bounded backpressure, deterministic Bar aggregation, recovery and replay"
-  semantic_validation_change: "requires schema then semantic validation for time/order/version/identity, quality-reason and recovery evidence, gap ranges, snapshot health, capacity/watermarks, calendar/session binding, OHLC, finality, checksums and LIVE/REPLAY determinism"
-  internal_contracts_added: [CONTRACT-MARKET-DATA-V1, PORTS-MARKET, WF-MARKET-DATA, STORAGE-MARKET-DATA]
+  contract_change: "freezes public Market event payloads, complete envelope binding, MarketGateway DTO/Port outcomes, safe snapshot/health thresholds, versioned calendar/session/quality recovery evidence, V1 reject-with-gap backpressure, RFC8785 checksums, UUIDv5 Bar identity, deterministic aggregation and replay"
+  semantic_validation_change: "adds CONTRACT-MARKET-SEMANTIC-VALIDATION-V1 and requires schema, envelope/payload binding, then the same semantic validator before publish, persistence, quality transition, restore or Strategy/Risk delivery; validates identity collision, JCS projections, time/order/version, recovery ranges, snapshot availability, queue/lag thresholds, calendar/session mapping, OHLC, finality and LIVE/REPLAY vectors"
+  internal_contracts_added: [CONTRACT-MARKET-DATA-V1, CONTRACT-MARKET-SEMANTIC-VALIDATION-V1, PORTS-MARKET, WF-MARKET-DATA, STORAGE-MARKET-DATA]
   public_contracts_added: [CONTRACT-MARKET-TICK-RECEIVED-V1, CONTRACT-MARKET-BAR-CLOSED-V1, CONTRACT-MARKET-QUALITY-CHANGED-V1, CONTRACT-MARKET-SESSION-CHANGED-V1]
   task_queue_change: "TASK-020 remains active/draft/in-progress pending independent Review; TASK-023 remains blocked and is constrained to the frozen contracts; no other task changes state"
   affected_tasks: [TASK-020, TASK-021, TASK-023, TASK-024, TASK-026]
@@ -199,12 +201,14 @@ change:
     - human_authorized_TASK_020_closeout_with_trusted_delivery_evidence
     - keep_TASK_023_blocked_until_TASK_020_and_TASK_022_are_trusted_completed
     - separately_human_authorize_TASK_023_runtime_implementation
+    - generate_reviewed_immutable_schema_bundle_from_manifest_for_TASK_023
+    - verify_installed_wheel_bundle_digest_and_manifest_parity_without_source_checkout
     - deploy_schema_compatible_consumers_before_market_event_publishers
     - verify_shadow_ingress_gap_recovery_and_live_replay_determinism
     - enable_bounded_publishers_without_silent_drop
   migration:
-    runtime_data: "not applicable in TASK-020 because no Market runtime is implemented"
-    public_events: "new event names have no historical published payload; deploy accepted readers before future publishers and reject unknown versions fail-closed"
+    runtime_data: "not applicable in TASK-020 because no Market runtime is implemented; TASK-023 must load only a reviewed immutable manifest-indexed schema bundle and fail closed on missing, tampered or mismatched bundle"
+    public_events: "new event names have no historical published payload, so Review corrections are folded into V1 before first release; deploy accepted readers and immutable bundle before future publishers and reject unknown versions fail-closed"
     storage: "no migration is created or authorized; future persistence requires independently authorized expand-only storage work"
     task_queue: "TASK-020 remains active; TASK-023 remains blocked on TASK-020 and TASK-022; no downstream activation"
     historical_evidence: "missing upstream ranges remain explicit GAP/UNAVAILABLE evidence and are never inferred or silently backfilled"
@@ -213,6 +217,6 @@ change:
     runtime_data: not_applicable_no_runtime_change
     public_events: "before runtime adoption revert only unimplemented routes; after adoption stop publishers before readers and preserve every emitted event, gap and quality record"
     task_queue: "keep TASK-020 active until independent Review; keep TASK-023 and downstream tasks blocked"
-    contracts: "never reuse the four public names or change V1 meaning; rollback stops incompatible publishers and retains compatible readers"
+    contracts: "never reuse the four public names or weaken V1 meaning; rollback stops publishers, retains compatible readers and the last reviewed immutable schema bundle, and preserves collision/checksum/gap/quality evidence"
     storage: "no database rollback in TASK-020; future rollback preserves final bars, checkpoints, calendars and gap evidence"
     release: prohibited

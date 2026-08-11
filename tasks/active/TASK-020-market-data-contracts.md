@@ -3,7 +3,7 @@ id: TASK-020
 title: Complete Market data and MarketGateway L4 contracts
 status: active
 depends_on: [TASK-046]
-spec_refs: [PORTS-CORE, PORTS-MARKET, CONTRACT-CATALOG, CONTRACT-MESSAGE-ENVELOPE-V1, CONTRACT-MARKET-TICK-RECEIVED-V1, CONTRACT-MARKET-BAR-CLOSED-V1, CONTRACT-MARKET-QUALITY-CHANGED-V1, CONTRACT-MARKET-SESSION-CHANGED-V1, CONTRACT-MARKET-DATA-V1, WF-MARKET-DATA, STORAGE-SOT, STORAGE-MARKET-DATA, NFR-PERFORMANCE, NFR-RELIABILITY, NFR-OBSERVABILITY]
+spec_refs: [PORTS-CORE, PORTS-MARKET, CONTRACT-CATALOG, CONTRACT-MESSAGE-ENVELOPE-V1, CONTRACT-MARKET-TICK-RECEIVED-V1, CONTRACT-MARKET-BAR-CLOSED-V1, CONTRACT-MARKET-QUALITY-CHANGED-V1, CONTRACT-MARKET-SESSION-CHANGED-V1, CONTRACT-MARKET-DATA-V1, CONTRACT-MARKET-SEMANTIC-VALIDATION-V1, WF-MARKET-DATA, STORAGE-SOT, STORAGE-MARKET-DATA, NFR-PERFORMANCE, NFR-RELIABILITY, NFR-OBSERVABILITY]
 allowed_paths: [spec/manifest.yaml, spec/contracts/**, spec/interfaces/**, spec/workflows/**, spec/storage/**, spec/nfr/**, tests/contract/messages/**, tasks/active/TASK-020-market-data-contracts.md, tasks/active/README.md, tasks/backlog/TASK-023-market-gateway.md, tasks/index.yaml]
 forbidden_paths: [src/**, tests/unit/**, tests/property/**, tests/integration/**, migrations/**]
 verification:
@@ -53,6 +53,7 @@ delivery:
 - `STORAGE-MARKET-DATA`, `STORAGE-SOT`, and the NFR updates freeze upstream authority, non-authoritative cache behavior, optional tick durability, replay/checksum evidence, 50k msg/s assumptions, bounded thresholds, metrics, and low-cardinality alerts; no runtime or migration is authorized.
 - TASK-023 remains blocked on TASK-020 and TASK-022, but now references the frozen contracts and has executable implementation deliverables and contract verification.
 - Contract/schema/semantic fixtures are verified by `tests/contract/messages/test_market_data_contracts.py`; formal independent Review remains pending and release remains prohibited.
+- Review corrections for rejected Head `8e50df8b215141dc87a6c25da03d5c1e73cbc757` add fail-closed Snapshot/Health thresholds, complete envelope binding and identity-collision fencing, RFC 8785 checksum/UUIDv5 reference vectors, executable Quality/Calendar/Session recovery rules, V1 no-coalesce backpressure, and a deployable immutable schema-bundle boundary for TASK-023. These are pre-release corrections to the same unpublished Market V1 contracts; they do not authorize runtime or release.
 
 ## Review focus
 
