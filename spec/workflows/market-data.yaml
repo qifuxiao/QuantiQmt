@@ -1,0 +1,51 @@
+workflow:
+  id: WF-MARKET-DATA
+  version: 1
+  authority: PORTS-MARKET
+  clock: injected_utc_and_monotonic
+  stages:
+    - name: ingress
+      actions: [validate_provider_shape, normalize_decimal_strings, bind_provider_sequence]
+      timeout: callback_budget
+      forbidden: [blocking_io, persistence, business_processing, unbounded_enqueue]
+    - name: enqueue
+      actions: [validate_generation_and_fencing, bounded_nonblocking_enqueue]
+      overflow:
+        reject_new: emit_degraded_backpressure
+        controlled_coalesce: emit_exact_gap_range_before_next_data
+      never_drop: [trade, audit, session, quality, final_bar]
+    - name: quality
+      actions: [detect_duplicate, detect_out_of_order, detect_gap, detect_stale, advance_quality_version]
+      fail_closed: true
+    - name: publish
+      actions: [schema_validate, semantic_validate, persist_optional_evidence, publish_envelope]
+      envelope: CONTRACT-MESSAGE-ENVELOPE-V1
+      idempotency: event_id_plus_payload_hash
+    - name: aggregate
+      actions: [buffer_until_watermark, enforce_session_boundary, compute_decimal_ohlcv, close_final_bar, checksum]
+      final_revision: forbidden
+  reconnect_recovery:
+    order:
+      - enter_UNAVAILABLE
+      - reconnect_with_deadline
+      - load_version_matched_calendar
+      - fetch_snapshot
+      - bounded_backfill_from_checkpoint
+      - verify_contiguous_sequences
+      - verify_snapshot_and_checkpoint_checksums
+      - enter_RECOVERING
+      - publish_quality_evidence
+      - enter_NORMAL_only_after_zero_unresolved_gaps
+    one_new_tick_restores_normal: false
+    irrecoverable_gap: remain_fail_visible
+  replay:
+    inputs: [normalized_events, calendar_version, aggregation_policy, checkpoint, watermark_sequence]
+    deterministic_output: [event_identity, payload, checksum, order]
+    wall_clock: forbidden
+    ambient_randomness: forbidden
+    future_data: forbidden
+  rollback:
+    stop_publishers_before_readers: true
+    preserve_published_events_and_gap_evidence: true
+    preserve_final_bars: true
+    release: prohibited

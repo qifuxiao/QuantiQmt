@@ -448,23 +448,16 @@ def test_normative_text_freezes_ownership_unknown_and_determinism() -> None:
     ]
 
 
-def test_manifest_defers_runtime_storage_binding_to_task_048_fail_closed() -> None:
+def test_manifest_preserves_execution_contracts_across_market_spec_revision() -> None:
     manifest = yaml.safe_load(Path("spec/manifest.yaml").read_text(encoding="utf-8"))
     change = manifest["change"]
+    ids = {entry["id"] for entries in manifest["catalogs"].values() for entry in entries}
 
-    assert change["storage_schema_changes"] != "none"
-    assert change["runtime_code_change"] != "none"
-    assert "TASK-048" in change["storage_schema_changes"]
-    assert "TASK-048" in change["runtime_code_change"]
-    deployment_order = change["deployment_order"]
-    task_017 = deployment_order.index("independently_review_and_merge_task_017_contracts")
-    task_048 = deployment_order.index(
-        "activate_implement_review_and_merge_task_048_order_registration_binding"
-    )
-    task_006 = deployment_order.index(
-        "implement_task_006_only_against_the_versioned_contract_snapshot"
-    )
-    assert task_017 < task_048 < task_006
-    assert "unbound" in change["migration"]["runtime_data"]
-    assert "cannot dispatch" in change["migration"]["runtime_data"]
-    assert "never delete" in change["rollback"]["contracts"]
+    assert manifest["specification"]["version"] == "0.10.0"
+    assert change["previous_version"] == "0.9.0"
+    assert {
+        "CONTRACT-EXECUTION-BROKER-GATEWAY-V1",
+        "PORTS-BROKER-SIMULATOR",
+        "CONTRACT-ORDER-REGISTERED-V1",
+    } <= ids
+    assert change["rollback"]["release"] == "prohibited"

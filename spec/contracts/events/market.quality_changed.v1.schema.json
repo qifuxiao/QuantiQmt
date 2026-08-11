@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema", "$id": "urn:quantiqmt:event:market.quality_changed:v1", "title": "MarketQualityChangedPayloadV1",
+  "type": "object", "additionalProperties": false,
+  "required": ["event_id", "partition_key", "provider", "instrument_id", "exchange", "calendar_version", "session_id", "event_time", "received_at", "quality_version", "previous_quality", "quality", "reason_code", "source_sequence", "unresolved_gap_count", "gap_start_sequence", "gap_end_sequence", "recovery_checkpoint"],
+  "properties": {
+    "event_id": {"type": "string", "format": "uuid", "pattern": "^[0-9a-f-]{36}$"}, "partition_key": {"type": "string", "minLength": 1}, "provider": {"type": "string", "minLength": 1}, "instrument_id": {"type": "string", "minLength": 1}, "exchange": {"type": "string", "pattern": "^[A-Z0-9]{2,16}$"}, "calendar_version": {"type": "string", "minLength": 1}, "session_id": {"type": "string", "minLength": 1},
+    "event_time": {"type": "string", "format": "date-time", "pattern": "Z$"}, "received_at": {"type": "string", "format": "date-time", "pattern": "Z$"}, "quality_version": {"type": "integer", "minimum": 1},
+    "previous_quality": {"enum": ["NORMAL", "DEGRADED", "STALE", "GAP", "UNAVAILABLE", "RECOVERING"]}, "quality": {"enum": ["NORMAL", "DEGRADED", "STALE", "GAP", "UNAVAILABLE", "RECOVERING"]}, "reason_code": {"enum": ["INITIAL_BASELINE_VERIFIED", "RECOVERY_VERIFIED", "BACKPRESSURE", "SOURCE_LAG", "STALE_DEADLINE_EXCEEDED", "SOURCE_SEQUENCE_GAP", "CONTROLLED_DROP", "DISCONNECTED", "SNAPSHOT_UNAVAILABLE", "BACKFILL_STARTED", "SNAPSHOT_VERIFYING"]},
+    "source_sequence": {"type": "integer", "minimum": 0}, "unresolved_gap_count": {"type": "integer", "minimum": 0}, "gap_start_sequence": {"type": ["integer", "null"], "minimum": 0}, "gap_end_sequence": {"type": ["integer", "null"], "minimum": 0}, "recovery_checkpoint": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"}
+  },
+  "allOf": [{"if": {"properties": {"quality": {"const": "GAP"}}}, "then": {"properties": {"gap_start_sequence": {"type": "integer"}, "gap_end_sequence": {"type": "integer"}, "unresolved_gap_count": {"minimum": 1}}}, "else": {"properties": {"gap_start_sequence": {"type": "null"}, "gap_end_sequence": {"type": "null"}}}}, {"if": {"properties": {"quality": {"const": "NORMAL"}}}, "then": {"properties": {"unresolved_gap_count": {"const": 0}, "recovery_checkpoint": {"type": "string"}}}}],
+  "$defs": {"uuid": {"type": "string", "format": "uuid", "pattern": "^[0-9a-f-]{36}$"}, "time": {"type": "string", "format": "date-time", "pattern": "Z$"}, "quality": {"enum": ["NORMAL", "DEGRADED", "STALE", "GAP", "UNAVAILABLE", "RECOVERING"]}}
+}

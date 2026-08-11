@@ -3,7 +3,7 @@ id: TASK-020
 title: Complete Market data and MarketGateway L4 contracts
 status: active
 depends_on: [TASK-046]
-spec_refs: [PORTS-CORE, CONTRACT-CATALOG, NFR-PERFORMANCE, NFR-RELIABILITY, NFR-OBSERVABILITY]
+spec_refs: [PORTS-CORE, PORTS-MARKET, CONTRACT-CATALOG, CONTRACT-MESSAGE-ENVELOPE-V1, CONTRACT-MARKET-TICK-RECEIVED-V1, CONTRACT-MARKET-BAR-CLOSED-V1, CONTRACT-MARKET-QUALITY-CHANGED-V1, CONTRACT-MARKET-SESSION-CHANGED-V1, CONTRACT-MARKET-DATA-V1, WF-MARKET-DATA, STORAGE-SOT, STORAGE-MARKET-DATA, NFR-PERFORMANCE, NFR-RELIABILITY, NFR-OBSERVABILITY]
 allowed_paths: [spec/manifest.yaml, spec/contracts/**, spec/interfaces/**, spec/workflows/**, spec/storage/**, spec/nfr/**, tests/contract/messages/**, tasks/active/TASK-020-market-data-contracts.md, tasks/active/README.md, tasks/backlog/TASK-023-market-gateway.md, tasks/index.yaml]
 forbidden_paths: [src/**, tests/unit/**, tests/property/**, tests/integration/**, migrations/**]
 verification:
@@ -14,7 +14,7 @@ delivery:
   schema_version: 1
   contract_status: draft
   implementation_status: in_progress
-  acceptance_status: not_run
+  acceptance_status: passed
   review_status: pending
   release_status: prohibited
 ---
@@ -31,11 +31,11 @@ delivery:
 
 ## Acceptance criteria
 
-- [ ] 激活并定义市场事件 JSON Schema、fixtures 和 catalog 路由。
-- [ ] 定义 MarketGateway subscribe/unsubscribe/snapshot/health/backpressure 语义。
-- [ ] 定义 session、trading calendar、gap/stale/quality state 和恢复行为。
-- [ ] 定义 BarAggregator 输入、输出、watermark 和 replay determinism。
-- [ ] 为后续 MarketGateway implementation task 提供 allowed_paths、verification 和 Review 重点。
+- [x] 激活并定义市场事件 JSON Schema、fixtures 和 catalog 路由。
+- [x] 定义 MarketGateway subscribe/unsubscribe/snapshot/health/backpressure 语义。
+- [x] 定义 session、trading calendar、gap/stale/quality state 和恢复行为。
+- [x] 定义 BarAggregator 输入、输出、watermark 和 replay determinism。
+- [x] 为后续 MarketGateway implementation task 提供 allowed_paths、verification 和 Review 重点。
 
 ## Activation evidence
 
@@ -43,6 +43,16 @@ delivery:
 - TASK-046 is completed with trusted schema-v1 delivery, passed acceptance, formal independent APPROVE evidence, and a merge commit, satisfying TASK-020's sole dependency gate.
 - This change only activates TASK-020 for Market data and MarketGateway L4 contract work. It is not implementation completion, Review approval, release authorization, or downstream dependency unlock evidence.
 - TASK-022 remains backlog/ready and unactivated. TASK-021, TASK-023, and every other blocked task remain blocked.
+
+## Acceptance evidence
+
+- Four Draft 2020-12 event schemas, minimal/maximal fixtures, targeted invalid fixtures, catalog routes, and manifest contract IDs freeze Tick, Bar, Quality, and Session payloads using canonical Decimal strings and UTC/version identities.
+- `PORTS-MARKET` and `CONTRACT-MARKET-DATA-V1` freeze idempotent subscription fencing, absolute deadlines, bounded callback queues, exhaustive operation/health outcomes, snapshot evidence, and fail-visible backpressure.
+- The public event schemas and internal semantic-validation rules make quality/reason, gap/watermark, calendar/session, monotonic version, and recovery-evidence contradictions machine-rejectable.
+- `WF-MARKET-DATA` freezes ingress, normalization, quality publication, reconnect/backfill, and deterministic BarAggregator ordering, finality, late-data, and replay rules without ambient time or randomness.
+- `STORAGE-MARKET-DATA`, `STORAGE-SOT`, and the NFR updates freeze upstream authority, non-authoritative cache behavior, optional tick durability, replay/checksum evidence, 50k msg/s assumptions, bounded thresholds, metrics, and low-cardinality alerts; no runtime or migration is authorized.
+- TASK-023 remains blocked on TASK-020 and TASK-022, but now references the frozen contracts and has executable implementation deliverables and contract verification.
+- Contract/schema/semantic fixtures are verified by `tests/contract/messages/test_market_data_contracts.py`; formal independent Review remains pending and release remains prohibited.
 
 ## Review focus
 

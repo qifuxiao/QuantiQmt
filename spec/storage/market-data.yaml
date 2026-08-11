@@ -1,0 +1,39 @@
+storage:
+  id: STORAGE-MARKET-DATA
+  version: 1
+  authority:
+    raw_market_fact: market_upstream
+    trading_calendar: versioned_calendar_store
+    normalized_event: validated_market_event
+    derived_bar: deterministic_normalized_event_projection
+    cache: non_authoritative
+  records:
+    tick:
+      durable: optional
+      identity: [provider, instrument_id, source_sequence]
+      duplicate_policy: same_identity_same_hash_only
+      missing_durable_range: explicit_gap_required
+    bar:
+      durable: implementation_decision_requires_separate_authorization
+      identity: [instrument_id, calendar_version, session_id, timeframe_seconds, window_start, aggregation_policy_version]
+      final_overwrite: forbidden
+      checksum_required: true
+    calendar:
+      versioned_immutable: true
+      checksum_required: true
+      environment_timezone_inference: forbidden
+    checkpoint:
+      fields: [instrument_id, calendar_version, session_id, watermark_sequence, watermark_event_time, last_final_sequence, checkpoint_checksum]
+      invalid_action: discard_and_bounded_replay
+  recovery:
+    source: [versioned_calendar, validated_snapshot, bounded_backfill, checkpoint]
+    contiguous_sequence_required: true
+    unresolved_gap_remains_visible: true
+    redis_is_authority: false
+  migration:
+    database_objects_created_by_TASK_020: false
+    future_runtime_storage: independently_authorized_expand_only
+  rollback:
+    delete_published_market_facts: forbidden
+    delete_gap_or_quality_evidence: forbidden
+    rewrite_final_bar: forbidden

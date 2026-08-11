@@ -32,6 +32,25 @@ nfr:
     - correlation_id
     - instrument_id
     - raw_account_id
+  market_metrics:
+    - market_ingress_total{provider,event_type,outcome}
+    - market_queue_depth_ratio{provider,event_type}
+    - market_source_lag_ms{provider,exchange}
+    - market_gap_total{provider,reason}
+    - market_controlled_drop_total{provider,event_type}
+    - market_quality_transition_total{provider,from_state,to_state,reason}
+    - market_session_transition_total{exchange,from_state,to_state,reason}
+    - market_bar_close_latency_ms{exchange,timeframe_seconds,quality}
+  market_metric_forbidden_labels: [instrument_id, message_id, correlation_id, order_id, account_id, subscription_id]
+  market_alerts:
+    - market_queue_critical
+    - market_source_stale
+    - market_gap_unresolved
+    - market_unavailable
+    - market_recovery_failed
+    - market_session_calendar_mismatch
+    - market_watermark_regression
+    - market_final_bar_mutation_attempt
   safety_alerts:
     - dual_oms_leader
     - order_message_dropped

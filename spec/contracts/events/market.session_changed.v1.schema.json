@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema", "$id": "urn:quantiqmt:event:market.session_changed:v1", "title": "MarketSessionChangedPayloadV1",
+  "type": "object", "additionalProperties": false,
+  "required": ["event_id", "partition_key", "exchange", "calendar_id", "calendar_version", "session_calendar_version", "session_id", "trading_day", "event_time", "received_at", "session_open_at", "session_close_at", "transition_sequence", "from_state", "to_state", "reason_code"],
+  "properties": {
+    "event_id": {"type": "string", "format": "uuid", "pattern": "^[0-9a-f-]{36}$"}, "partition_key": {"type": "string", "minLength": 1}, "exchange": {"type": "string", "pattern": "^[A-Z0-9]{2,16}$"}, "calendar_id": {"type": "string", "minLength": 1}, "calendar_version": {"type": "string", "minLength": 1}, "session_calendar_version": {"type": "string", "minLength": 1}, "session_id": {"type": "string", "minLength": 1}, "trading_day": {"type": "string", "format": "date"},
+    "event_time": {"type": "string", "format": "date-time", "pattern": "Z$"}, "received_at": {"type": "string", "format": "date-time", "pattern": "Z$"}, "session_open_at": {"type": "string", "format": "date-time", "pattern": "Z$"}, "session_close_at": {"type": "string", "format": "date-time", "pattern": "Z$"}, "transition_sequence": {"type": "integer", "minimum": 1},
+    "from_state": {"enum": ["CLOSED", "PRE_OPEN", "OPEN", "BREAK", "CLOSING"]}, "to_state": {"enum": ["CLOSED", "PRE_OPEN", "OPEN", "BREAK", "CLOSING"]}, "reason_code": {"enum": ["CALENDAR_BOUNDARY", "DUPLICATE_SUPPRESSED"]}
+  },
+  "oneOf": [
+    {"properties": {"from_state": {"const": "CLOSED"}, "to_state": {"const": "PRE_OPEN"}, "reason_code": {"const": "CALENDAR_BOUNDARY"}}},
+    {"properties": {"from_state": {"const": "PRE_OPEN"}, "to_state": {"const": "OPEN"}, "reason_code": {"const": "CALENDAR_BOUNDARY"}}},
+    {"properties": {"from_state": {"const": "OPEN"}, "to_state": {"const": "BREAK"}, "reason_code": {"const": "CALENDAR_BOUNDARY"}}},
+    {"properties": {"from_state": {"const": "BREAK"}, "to_state": {"const": "OPEN"}, "reason_code": {"const": "CALENDAR_BOUNDARY"}}},
+    {"properties": {"from_state": {"const": "OPEN"}, "to_state": {"const": "CLOSING"}, "reason_code": {"const": "CALENDAR_BOUNDARY"}}},
+    {"properties": {"from_state": {"const": "CLOSING"}, "to_state": {"const": "CLOSED"}, "reason_code": {"const": "CALENDAR_BOUNDARY"}}},
+    {"properties": {"from_state": {"const": "CLOSED"}, "to_state": {"const": "CLOSED"}, "reason_code": {"const": "DUPLICATE_SUPPRESSED"}}}
+  ],
+  "$defs": {"uuid": {"type": "string", "format": "uuid", "pattern": "^[0-9a-f-]{36}$"}, "time": {"type": "string", "format": "date-time", "pattern": "Z$"}, "state": {"enum": ["CLOSED", "PRE_OPEN", "OPEN", "BREAK", "CLOSING"]}}
+}

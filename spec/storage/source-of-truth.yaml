@@ -80,6 +80,21 @@ catalog:
       durable: optional_market_store
       cache: memory_or_redis
       recovery: unavailable_gap_must_be_marked
+      contract: STORAGE-MARKET-DATA
+    - data: derived_bar
+      authority: deterministic_validated_tick_projection
+      durable: optional_market_store
+      cache: memory_or_redis
+      recovery: replay_with_calendar_policy_checkpoint_and_watermark
+      final_overwrite: forbidden
+      contract: STORAGE-MARKET-DATA
+    - data: trading_calendar
+      authority: versioned_calendar_store
+      durable: implementation_defined_after_separate_authorization
+      cache: immutable_memory_snapshot
+      recovery: load_exact_version_and_verify_checksum
+      environment_inference: forbidden
+      contract: STORAGE-MARKET-DATA
     - data: risk_rule_set
       authority: versioned_config_store
       durable: postgresql
@@ -97,3 +112,5 @@ catalog:
     order_journal_append_only: true
     outbox_delete_before_retention: forbidden
     snapshot_checksum_failure: fallback_to_full_journal
+    market_gap_silent_repair: forbidden
+    market_cache_is_authority: false

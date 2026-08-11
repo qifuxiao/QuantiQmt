@@ -959,7 +959,7 @@ def test_identity_algorithms_are_deterministic_and_namespaced() -> None:
 
 def test_manifest_catalogs_every_new_contract_and_defers_runtime_migration() -> None:
     manifest = yaml.safe_load((ROOT / "spec/manifest.yaml").read_text(encoding="utf-8"))
-    assert manifest["specification"]["version"] == "0.9.0"
+    assert manifest["specification"]["version"] == "0.10.0"
     ids = {entry["id"] for entries in manifest["catalogs"].values() for entry in entries}
     assert {
         "CONTRACT-LEDGER-ACCOUNTING-V1",
@@ -971,9 +971,9 @@ def test_manifest_catalogs_every_new_contract_and_defers_runtime_migration() -> 
         "WF-RECONCILIATION-REPAIR",
     } <= ids
     change = manifest["change"]
-    assert "additive optional fee" in change["public_message_schema_changes"]
-    assert "historical unbound input" in change["public_message_schema_changes"]
-    assert "no migration" in change["storage_schema_changes"]
+    assert change["previous_version"] == "0.9.0"
+    assert "no previously active public schema changes" in change["public_message_schema_changes"]
+    assert "no database object or migration" in change["storage_schema_changes"]
     assert change["rollback"]["release"] == "prohibited"
 
 
