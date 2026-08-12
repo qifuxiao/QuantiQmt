@@ -5,6 +5,7 @@ workflow:
   boundaries: [command_ingress, outbox_persist, event_publish, consumer_apply, control_transition, recovery_restore, external_side_effect]
   validation_order: [structural_envelope, payload_schema, combined_binding, cross_object_semantics]
   validation_failure: reject_without_repair_reorder_persist_publish_or_execute
+  schema_only_probe: never_authorizes_any_boundary
   observability:
     steps: [normalize_context, redact_sensitive_values, validate_correlation_chain, emit_metric_log_trace_audit]
     failure: reject_record_and_emit_bounded_validation_metric
@@ -15,6 +16,7 @@ workflow:
     silence: explicit_operator_action_with_expiry
     state_authority: forbidden
   config_activation:
+    authority: exact_versioned_config_required_components_and_component_capabilities
     steps:
       - {id: persist_candidate, owner: ConfigService}
       - {id: schema_and_business_validate, owner: ConfigService, failure: reject_candidate}
@@ -29,6 +31,7 @@ workflow:
     on_effect: [block_new_order_intent, block_new_risk_approval, preserve_cancel, preserve_recovery, preserve_approved_reduce_risk]
     stale_expected_version: reject_without_event
     timeout_after_dispatch: UNKNOWN_and_reconcile_same_idempotency_key
+    disable_recovery_authority: strict_open_barrier_identity_version_checksum_generation_digest_policy_authorization_and_freshness
   lease:
     acquire_before_side_effect: true
     validate_before_each_side_effect: true
@@ -38,6 +41,8 @@ workflow:
     open_requires: [CONFIG_VERIFIED, MARKET_FRESH, AUDIT_AVAILABLE, RECONCILIATION_COMPLETE, LEASE_FENCED, OUTBOX_HEALTHY]
     closed_behavior: reject_new_order_intent_and_risk_approval
     reconnect_auto_normal: forbidden
+    market_freshness: market_fresh_until_exact_authority_and_strictly_after_injected_evaluation_at
+    generic_fresh_until: forbidden
   lineage:
     causation_required_for_control_events: true
     parent_before_child_same_correlation: required

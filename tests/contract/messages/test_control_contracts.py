@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import hashlib
 import json
 import math
@@ -78,6 +79,7 @@ def _validator(relative: str) -> Draft202012Validator:
 
 
 SAFE_INTEGER_MAX = 9_007_199_254_740_991
+CONFIG_AUTHORITY_CHECKSUM = "1c4485d437bf9a7f090d58d7042ef0a0ee20996253b30d28c836301a8efa04cf"
 
 
 def _jcs(value: Any) -> str:
@@ -173,10 +175,6 @@ class ControlSemanticValidator:
         "raw_account_identifier",
     }
 
-    def validate_dto(self, dto: dict[str, Any]) -> None:
-        _validator("control/control-plane.v1.schema.json").validate(dto)
-        self._semantic_dto(dto)
-
     def validate_control_message(
         self,
         message: dict[str, Any],
@@ -192,6 +190,9 @@ class ControlSemanticValidator:
         if not required_context <= set(context) or not context["known_messages"]:
             raise ValueError("validation context is required")
         _validator("control/validation-context.v1.schema.json").validate(context)
+        for barrier_id, barrier_authority in context.get("accepted_recovery_barriers", {}).items():
+            if barrier_authority["barrier_id"] != barrier_id:
+                raise ValueError("recovery barrier authority key mismatch")
         _validator("control/combined-control-message.v1.schema.json").validate(message)
         recovery_barrier = context["accepted_state"].get("recovery_barrier")
         if recovery_barrier is not None:
@@ -280,20 +281,41 @@ class ControlSemanticValidator:
 
     def _validate_config_event(self, payload: dict[str, Any], context: dict[str, Any]) -> None:
         config = context["accepted_state"]["config"]
+        authority_projection = {
+            "config_version": config["config_version"],
+            "required_components": sorted(config["required_components"]),
+            "components": config["components"],
+            "policy_version": config["policy_version"],
+            "policy_checksum": config["policy_checksum"],
+        }
         if (
-            payload["candidate_version"] != config["version"]
-            or payload["candidate_checksum"] != config["checksum"]
+            _sha(authority_projection) != config["config_checksum"]
+            or payload["candidate_version"] != config["config_version"]
+            or payload["candidate_checksum"] != config["config_checksum"]
+            or payload["policy_version"] != config["policy_version"]
+            or payload["policy_checksum"] != config["policy_checksum"]
         ):
             raise ValueError("config policy/version authority mismatch")
-        required = set(payload["required_components"])
+        required = set(config["required_components"])
         acks = payload["component_acks"]
-        if set(acks) != required:
+        if (
+            set(config["components"]) != required
+            or set(payload["required_components"]) != required
+            or set(acks) != required
+        ):
             raise ValueError("component acknowledgement set mismatch")
         for component, ack in acks.items():
+            component_authority = config["components"].get(component)
             if (
-                ack["component_id"] != component
+                component_authority is None
+                or component_authority["component_id"] != component
+                or ack["component_id"] != component
                 or ack["candidate_version"] != payload["candidate_version"]
                 or ack["candidate_checksum"] != payload["candidate_checksum"]
+                or ack["generation"] != component_authority["generation"]
+                or ack["capability_version"] != component_authority["capability_version"]
+                or ack["activation_mode"] != component_authority["activation_mode"]
+                or ack["safe_boundary"] != component_authority["safe_boundary"]
             ):
                 raise ValueError("component acknowledgement binding mismatch")
             if (
@@ -338,6 +360,12 @@ class ControlSemanticValidator:
             "desired_state",
             "reason_code",
             "expected_version",
+            "recovery_evidence_reference",
+            "recovery_barrier_generation",
+            "recovery_barrier_version",
+            "recovery_barrier_checksum",
+            "recovery_evidence_digest",
+            "recovery_aggregate_evidence_digest",
         ):
             event_field = "command_fingerprint" if field == "command_fingerprint" else field
             if payload.get(event_field) != command[field]:
@@ -397,8 +425,21 @@ class ControlSemanticValidator:
             recovery = context.get("accepted_recovery_barriers", {}).get(recovery_id)
             if (
                 recovery is None
+                or recovery["barrier_id"] != recovery_id
                 or recovery.get("state") != "OPEN"
                 or recovery.get("kill_switch_version") != authority["current_version"]
+                or payload["recovery_barrier_generation"] != recovery["generation"]
+                or payload["recovery_barrier_version"] != recovery["barrier_version"]
+                or payload["recovery_barrier_checksum"] != recovery["barrier_checksum"]
+                or payload["recovery_evidence_digest"] != recovery["evidence_digest"]
+                or payload["recovery_aggregate_evidence_digest"]
+                != recovery["aggregate_evidence_digest"]
+                or recovery["policy_version"] != context["accepted_policy"]["version"]
+                or recovery["policy_checksum"] != context["accepted_policy"]["checksum"]
+                or recovery["authorization_id"] != authority["authorization_id"]
+                or recovery["authorization_version"] != authority["authorization_version"]
+                or recovery["authorization_checksum"] != authority["authorization_checksum"]
+                or recovery["observed_at"] > context["evaluation_at"]
                 or recovery.get("fresh_until", "") <= context["evaluation_at"]
             ):
                 raise ValueError("disable recovery evidence is not an accepted barrier")
@@ -442,20 +483,17 @@ class ControlSemanticValidator:
             raise ValueError("component policy mismatch")
 
     def _validate_recovery_barrier(self, barrier: dict[str, Any], context: dict[str, Any]) -> None:
-        self.validate_dto(barrier)
+        _validator("control/control-plane.v1.schema.json").validate(barrier)
         authority = context["accepted_state"]
         evidence = barrier["evidence"]
-        observed_at = evidence.get("observed_at")
-        fresh_until = evidence.get("fresh_until", authority["market"].get("fresh_until"))
-        if observed_at is not None and observed_at > context["evaluation_at"]:
+        observed_at = evidence["observed_at"]
+        market_fresh_until = evidence["market_fresh_until"]
+        if observed_at > context["evaluation_at"]:
             raise ValueError("barrier evidence observed in future")
-        if (
-            fresh_until is not None
-            and fresh_until <= context["evaluation_at"]
-            and not (
-                barrier["state"] == "INVALIDATED"
-                and barrier["invalidation_reason"] == "MARKET_STALE"
-            )
+        if market_fresh_until != authority["market"]["fresh_until"]:
+            raise ValueError("barrier market freshness authority mismatch")
+        if market_fresh_until <= context["evaluation_at"] and not (
+            barrier["state"] == "INVALIDATED" and barrier["invalidation_reason"] == "MARKET_STALE"
         ):
             raise ValueError("barrier evidence is stale")
         if barrier["state"] == "INVALIDATED":
@@ -481,8 +519,8 @@ class ControlSemanticValidator:
             ):
                 raise ValueError("invalidated reason has no component failure")
             if reason == "CONFIG_MISMATCH" and (
-                evidence["config_version"] == authority["config"]["version"]
-                and evidence["config_checksum"] == authority["config"]["checksum"]
+                evidence["config_version"] == authority["config"]["config_version"]
+                and evidence["config_checksum"] == authority["config"]["config_checksum"]
             ):
                 raise ValueError("invalidated reason has no config failure")
             if (
@@ -507,8 +545,8 @@ class ControlSemanticValidator:
         if barrier["state"] == "OPEN" and set(barrier["required_evidence"]) != required:
             raise ValueError("recovery barrier evidence incomplete")
         if (
-            evidence["config_version"] != authority["config"]["version"]
-            or evidence["config_checksum"] != authority["config"]["checksum"]
+            evidence["config_version"] != authority["config"]["config_version"]
+            or evidence["config_checksum"] != authority["config"]["config_checksum"]
         ):
             raise ValueError("barrier config evidence mismatch")
         if barrier["state"] == "OPEN" and (
@@ -630,93 +668,6 @@ class ControlSemanticValidator:
             for child in value:
                 self._scan_forbidden_keys(child)
 
-    def _semantic_dto(self, dto: dict[str, Any]) -> None:
-        dto_type = dto["dto_type"]
-        self._scan_forbidden_keys(dto)
-        if dto_type == "OBSERVABILITY_CONTEXT":
-            if dto["redaction_policy"] != "NO_SECRETS_OR_CREDENTIALS":
-                raise ValueError("redaction policy is not fail-closed")
-        elif dto_type == "ALERT_DEFINITION":
-            labels = set(dto.get("label_keys", []))
-            if not labels <= self.LABEL_ALLOWLIST:
-                raise ValueError("forbidden metric label")
-            if any(
-                field in {"order_id", "trade_id", "instrument_id", "account_id", "strategy_id"}
-                for field in dto["evidence_fields"]
-            ):
-                raise ValueError("high-cardinality alert evidence")
-        elif dto_type == "CONFIG_CANDIDATE":
-            if any(not ref.startswith("secret://") for ref in dto["secret_references"]):
-                raise ValueError("plaintext secret reference")
-            if (
-                dto["activation_mode"] == "RESTART_REQUIRED"
-                and dto["safe_boundary"] != "RESTART_ONLY"
-            ):
-                raise ValueError("restart-required config has unsafe boundary")
-        elif dto_type == "CONFIG_ACTIVATION_RESULT":
-            acks = dto["component_acks"]
-            if not dto.get("required_components") or set(dto["required_components"]) != set(acks):
-                raise ValueError("component acknowledgement set mismatch")
-            ack_results = set()
-            for component, ack in acks.items():
-                if not isinstance(ack, dict) or ack.get("component_id") != component:
-                    raise ValueError("component acknowledgement identity mismatch")
-                if (
-                    ack.get("candidate_version") != dto["candidate_version"]
-                    or ack.get("candidate_checksum") != dto["candidate_checksum"]
-                ):
-                    raise ValueError("component acknowledgement candidate mismatch")
-                if (
-                    not ack.get("generation")
-                    or not ack.get("capability_version")
-                    or not ack.get("observed_at")
-                    or not ack.get("ack_sequence")
-                ):
-                    raise ValueError("component acknowledgement evidence missing")
-                ack_results.add(ack["prepare_result"])
-            if dto["outcome"] == "APPLIED" and (
-                ack_results != {"APPLIED"}
-                or dto["active_version"] is None
-                or dto["rollback_version"] is not None
-            ):
-                raise ValueError("partial config activation")
-            if (
-                dto["outcome"] in {"PARTIAL", "UNKNOWN", "ROLLED_BACK"}
-                and dto["rollback_version"] is None
-            ):
-                raise ValueError("ambiguous config activation requires rollback")
-        elif dto_type == "KILL_SWITCH_COMMAND":
-            if (
-                not dto["authorization_evidence"]["approver_ids"]
-                or min(dto["reserved_capacity"].values()) < 1
-            ):
-                raise ValueError("kill switch authorization missing")
-        elif dto_type == "KILL_SWITCH_RESULT":
-            if dto["outcome"] == "APPLIED" and dto["effective_state"] == "UNKNOWN":
-                raise ValueError("applied kill switch cannot be unknown")
-            if dto["outcome"] == "APPLIED" and dto["current_version"] < 1:
-                raise ValueError("invalid applied version")
-        elif dto_type == "LEADER_LEASE":
-            if dto["status"] == "ACTIVE" and dto["expires_at"] <= dto["issued_at"]:
-                raise ValueError("active lease is expired")
-            if dto["renew_deadline_at"] >= dto["expires_at"]:
-                raise ValueError("renew deadline must precede expiry")
-        elif dto_type == "RECOVERY_BARRIER":
-            required = {
-                "CONFIG_VERIFIED",
-                "MARKET_FRESH",
-                "AUDIT_AVAILABLE",
-                "RECONCILIATION_COMPLETE",
-                "LEASE_FENCED",
-                "OUTBOX_HEALTHY",
-            }
-            if dto["state"] == "OPEN" and set(dto["required_evidence"]) != required:
-                raise ValueError("recovery barrier evidence incomplete")
-            if dto["state"] == "CLOSED" and dto["opened_at"] is not None:
-                raise ValueError("closed barrier cannot have opened_at")
-            if dto["state"] == "INVALIDATED" and not dto["invalidation_reason"]:
-                raise ValueError("invalidated barrier requires reason")
-
 
 def _combined_fixture(message_type: str, payload: dict[str, Any]) -> dict[str, Any]:
     source, aggregate_type, partition, aggregate = EVENT_BINDINGS[message_type]
@@ -764,7 +715,29 @@ def _validation_context(
         },
         "identity_history": {},
         "accepted_state": {
-            "config": {"version": "v2", "checksum": "a" * 64},
+            "config": {
+                "config_version": "v2",
+                "config_checksum": CONFIG_AUTHORITY_CHECKSUM,
+                "required_components": ["OMS", "RiskEngine"],
+                "components": {
+                    "OMS": {
+                        "component_id": "OMS",
+                        "generation": 2,
+                        "capability_version": "oms-cap-v1",
+                        "activation_mode": "HOT_RELOAD",
+                        "safe_boundary": "NEXT_ORDER_BOUNDARY",
+                    },
+                    "RiskEngine": {
+                        "component_id": "RiskEngine",
+                        "generation": 1,
+                        "capability_version": "risk-cap-v1",
+                        "activation_mode": "HOT_RELOAD",
+                        "safe_boundary": "NEXT_ORDER_BOUNDARY",
+                    },
+                },
+                "policy_version": "policy-v1",
+                "policy_checksum": "a" * 64,
+            },
             "market": {
                 "calendar_version": "cal-v1",
                 "calendar_checksum": "e" * 64,
@@ -827,6 +800,12 @@ def _validation_context(
                     "desired_state": "ON",
                     "reason_code": "MANUAL_EMERGENCY",
                     "expected_version": 1,
+                    "recovery_evidence_reference": None,
+                    "recovery_barrier_generation": None,
+                    "recovery_barrier_version": None,
+                    "recovery_barrier_checksum": None,
+                    "recovery_evidence_digest": None,
+                    "recovery_aggregate_evidence_digest": None,
                 },
                 "effect_ack_ids": ["ack-kill-000001"],
             },
@@ -840,11 +819,48 @@ def _validation_context(
     }
 
 
-def test_control_dtos_are_schema_and_semantic_valid() -> None:
+def test_control_dtos_are_structurally_schema_valid_only() -> None:
     document = _load(FIXTURES / "control-plane.v1/valid.json")
-    checker = ControlSemanticValidator()
+    schema_validator = _validator("control/control-plane.v1.schema.json")
     for dto in document["dtos"]:
-        checker.validate_dto(dto)
+        schema_validator.validate(dto)
+
+
+def test_control_semantic_validator_has_one_public_entrypoint_and_private_dispatch() -> None:
+    tree = ast.parse(Path(__file__).read_text(encoding="utf-8"))
+    validator_class = next(
+        node
+        for node in tree.body
+        if isinstance(node, ast.ClassDef) and node.name == "ControlSemanticValidator"
+    )
+    public_methods = [
+        node.name
+        for node in validator_class.body
+        if isinstance(node, ast.FunctionDef) and not node.name.startswith("_")
+    ]
+    assert public_methods == ["validate_control_message"]
+
+    callers: dict[str, set[str]] = {}
+    for method in validator_class.body:
+        if not isinstance(method, ast.FunctionDef):
+            continue
+        for node in ast.walk(method):
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and isinstance(node.func.value, ast.Name)
+                and node.func.value.id == "self"
+            ):
+                callers.setdefault(node.func.attr, set()).add(method.name)
+    assert callers["_validate_event_specific"] == {"validate_control_message"}
+    assert callers["_validate_recovery_barrier"] == {"validate_control_message"}
+    for branch in (
+        "_validate_config_event",
+        "_validate_kill_event",
+        "_validate_mode_event",
+        "_validate_health_event",
+    ):
+        assert callers[branch] == {"_validate_event_specific"}
 
 
 def test_recovery_barrier_all_states_use_unified_entrypoint_and_freshness() -> None:
@@ -860,8 +876,8 @@ def test_recovery_barrier_all_states_use_unified_entrypoint_and_freshness() -> N
     evidence = barrier["evidence"]
     evidence.update(
         {
-            "config_version": authority["config"]["version"],
-            "config_checksum": authority["config"]["checksum"],
+            "config_version": authority["config"]["config_version"],
+            "config_checksum": authority["config"]["config_checksum"],
             "market_watermark": authority["market"]["watermark"],
             "audit_watermark": authority["audit"]["outbox_position"],
             "reconciliation_case_count": authority["reconciliation"]["open_blocking_case_count"],
@@ -910,13 +926,32 @@ def test_recovery_barrier_all_states_use_unified_entrypoint_and_freshness() -> N
     context["accepted_state"]["recovery_barrier"] = barrier
     checker.validate_control_message(message, context)
 
-    stale = deepcopy(message)
     context_stale = deepcopy(context)
-    context_stale["accepted_state"]["recovery_barrier"]["evidence"]["fresh_until"] = (
-        "2026-08-11T00:59:59Z"
+    context_stale["accepted_state"]["recovery_barrier"]["evidence"]["market_fresh_until"] = (
+        context_stale["evaluation_at"]
     )
+    context_stale["accepted_state"]["market"]["fresh_until"] = context_stale["evaluation_at"]
     with pytest.raises(ValueError, match="stale"):
-        checker.validate_control_message(stale, context_stale)
+        checker.validate_control_message(message, context_stale)
+
+    future_observed = deepcopy(context)
+    future_observed["accepted_state"]["recovery_barrier"]["evidence"]["observed_at"] = (
+        "2026-08-11T01:00:02Z"
+    )
+    with pytest.raises(ValueError, match="future"):
+        checker.validate_control_message(message, future_observed)
+
+    missing_freshness = deepcopy(context)
+    missing_freshness["accepted_state"]["recovery_barrier"]["evidence"].pop("market_fresh_until")
+    with pytest.raises(ValidationError):
+        checker.validate_control_message(message, missing_freshness)
+
+    duplicate_freshness = deepcopy(context)
+    duplicate_freshness["accepted_state"]["recovery_barrier"]["evidence"]["fresh_until"] = (
+        "2099-01-01T00:00:00Z"
+    )
+    with pytest.raises(ValidationError):
+        checker.validate_control_message(message, duplicate_freshness)
 
     invalidated = deepcopy(context)
     invalidated["accepted_state"]["recovery_barrier"]["state"] = "INVALIDATED"
@@ -934,6 +969,10 @@ def test_recovery_barrier_all_states_use_unified_entrypoint_and_freshness() -> N
     forged["accepted_state"]["market"]["quality"] = "NORMAL"
     forged["accepted_state"]["market"]["unresolved_gap_count"] = 0
     forged["accepted_state"]["market"]["fresh_until"] = "2026-08-11T02:00:00Z"
+    forged["accepted_state"]["recovery_barrier"]["evidence"]["market_quality"] = "NORMAL"
+    forged["accepted_state"]["recovery_barrier"]["evidence"]["market_fresh_until"] = (
+        "2026-08-11T02:00:00Z"
+    )
     with pytest.raises(ValueError, match="market failure"):
         checker.validate_control_message(message, forged)
 
@@ -941,12 +980,15 @@ def test_recovery_barrier_all_states_use_unified_entrypoint_and_freshness() -> N
 @pytest.mark.parametrize(
     "case", _load(FIXTURES / "control-plane.v1/invalid.json")["cases"], ids=lambda c: c["name"]
 )
-def test_control_semantic_invalid_matrix_is_fail_closed(case: dict[str, Any]) -> None:
+def test_control_dto_schema_matrix_is_structural_only(case: dict[str, Any]) -> None:
     document = _load(FIXTURES / "control-plane.v1/valid.json")
     dto = deepcopy(next(item for item in document["dtos"] if item["dto_type"] == case["dto_type"]))
     dto[case["field"]] = case["value"]
-    with pytest.raises((ValueError, Exception)):
-        ControlSemanticValidator().validate_dto(dto)
+    schema_valid = _validator("control/control-plane.v1.schema.json").is_valid(dto)
+    if case["name"] in {"alert_high_cardinality_evidence", "lease_expired_status_active"}:
+        assert schema_valid, "cross-field semantics require the unified message validator"
+    else:
+        assert not schema_valid
 
 
 @pytest.mark.parametrize("message_type", list(EVENT_SCHEMAS))
@@ -997,6 +1039,91 @@ def test_unified_kill_event_rejects_command_result_and_recovery_mutations() -> N
         with pytest.raises((ValueError, ValidationError)):
             checker.validate_control_message(
                 _combined_fixture("system.kill_switch_changed.v1", invalid), context
+            )
+
+
+def test_kill_switch_disable_binds_strict_recovery_barrier_authority() -> None:
+    payload = deepcopy(_load(FIXTURES / "control-events.json")["system.kill_switch_changed.v1"])
+    payload.update(
+        {
+            "desired_state": "OFF",
+            "effective_state": "OFF",
+            "reason_code": "OPERATOR_RELEASE",
+            "recovery_evidence_reference": "barrier-1",
+            "recovery_barrier_generation": 4,
+            "recovery_barrier_version": "barrier-v1",
+            "recovery_barrier_checksum": "2" * 64,
+            "recovery_evidence_digest": "3" * 64,
+            "recovery_aggregate_evidence_digest": "4" * 64,
+        }
+    )
+    context = _validation_context(payload["correlation_id"])
+    command = context["accepted_state"]["kill_switch"]["command"]
+    for field in (
+        "desired_state",
+        "reason_code",
+        "recovery_evidence_reference",
+        "recovery_barrier_generation",
+        "recovery_barrier_version",
+        "recovery_barrier_checksum",
+        "recovery_evidence_digest",
+        "recovery_aggregate_evidence_digest",
+    ):
+        command[field] = payload[field]
+    context["accepted_recovery_barriers"] = {
+        "barrier-1": {
+            "barrier_id": "barrier-1",
+            "generation": 4,
+            "barrier_version": "barrier-v1",
+            "barrier_checksum": "2" * 64,
+            "evidence_digest": "3" * 64,
+            "state": "OPEN",
+            "kill_switch_version": 1,
+            "opened_at": "2026-08-11T00:59:00Z",
+            "observed_at": "2026-08-11T01:00:00Z",
+            "fresh_until": "2026-08-11T02:00:00Z",
+            "policy_version": "policy-v1",
+            "policy_checksum": "a" * 64,
+            "aggregate_evidence_digest": "4" * 64,
+            "authorization_id": "auth-1",
+            "authorization_version": "v1",
+            "authorization_checksum": "d" * 64,
+        }
+    }
+    checker = ControlSemanticValidator()
+    checker.validate_control_message(
+        _combined_fixture("system.kill_switch_changed.v1", payload), context
+    )
+
+    for event_field, value in (
+        ("recovery_evidence_reference", "barrier-forged"),
+        ("recovery_barrier_generation", 5),
+        ("recovery_barrier_version", "barrier-v2"),
+        ("recovery_barrier_checksum", "5" * 64),
+        ("recovery_evidence_digest", "6" * 64),
+        ("recovery_aggregate_evidence_digest", "7" * 64),
+    ):
+        invalid_payload = deepcopy(payload)
+        invalid_context = deepcopy(context)
+        invalid_payload[event_field] = value
+        invalid_context["accepted_state"]["kill_switch"]["command"][event_field] = value
+        with pytest.raises(ValueError, match="accepted barrier"):
+            checker.validate_control_message(
+                _combined_fixture("system.kill_switch_changed.v1", invalid_payload),
+                invalid_context,
+            )
+
+    for mutate in (
+        lambda barrier: barrier.update({"state": "CLOSED"}),
+        lambda barrier: barrier.update({"fresh_until": "2026-08-11T01:00:01Z"}),
+        lambda barrier: barrier.update({"unexpected": True}),
+        lambda barrier: barrier.pop("barrier_checksum"),
+    ):
+        invalid_context = deepcopy(context)
+        mutate(invalid_context["accepted_recovery_barriers"]["barrier-1"])
+        with pytest.raises((ValueError, ValidationError)):
+            checker.validate_control_message(
+                _combined_fixture("system.kill_switch_changed.v1", payload), invalid_context
             )
 
 
@@ -1154,6 +1281,46 @@ def test_config_event_ack_mode_and_active_identity_bindings_are_fail_closed() ->
         invalid_message = _combined_fixture("config.version_activated.v1", invalid)
         with pytest.raises((ValueError, ValidationError)):
             checker.validate_control_message(invalid_message, context)
+
+
+def test_config_authority_required_components_are_exact_and_versioned() -> None:
+    payload = deepcopy(_load(FIXTURES / "control-events.json")["config.version_activated.v1"])
+    message = _combined_fixture("config.version_activated.v1", payload)
+    checker = ControlSemanticValidator()
+    context = _validation_context(payload["correlation_id"])
+    checker.validate_control_message(message, context)
+
+    unknown_payload = deepcopy(payload)
+    unknown_payload["required_components"].append("RISK")
+    unknown_ack = deepcopy(unknown_payload["component_acks"]["RiskEngine"])
+    unknown_ack["component_id"] = "RISK"
+    unknown_payload["component_acks"]["RISK"] = unknown_ack
+    with pytest.raises(ValueError, match="set mismatch"):
+        checker.validate_control_message(
+            _combined_fixture("config.version_activated.v1", unknown_payload), context
+        )
+
+    for mutate in (
+        lambda config: config.pop("required_components"),
+        lambda config: config["required_components"].append("OMS"),
+        lambda config: config["components"].update(
+            {
+                "Unknown": {
+                    "component_id": "Unknown",
+                    "generation": 1,
+                    "capability_version": "unknown-v1",
+                    "activation_mode": "HOT_RELOAD",
+                    "safe_boundary": "NEXT_ORDER_BOUNDARY",
+                }
+            }
+        ),
+        lambda config: config.update({"config_checksum": "0" * 64}),
+        lambda config: config["components"]["OMS"].update({"capability_version": "oms-cap-v2"}),
+    ):
+        invalid_context = deepcopy(context)
+        mutate(invalid_context["accepted_state"]["config"])
+        with pytest.raises((ValueError, ValidationError)):
+            checker.validate_control_message(message, invalid_context)
 
 
 def test_control_events_reject_additional_properties_and_invalid_transitions() -> None:

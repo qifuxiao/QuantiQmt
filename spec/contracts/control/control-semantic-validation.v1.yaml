@@ -7,6 +7,10 @@ contract:
   public_entrypoints: [validate_control_message]
   private_event_branches_only: true
   forbidden_partial_validators: [candidate_result_only, command_result_only, dto_only, barrier_only]
+  schema_only_validation:
+    purpose: structural_probe_only
+    semantic_decision: never
+    forbidden_boundaries: [outbox_persist, publish, consumer_apply, state_transition, recovery_restore, external_side_effect]
   decision: [ACCEPTED, DUPLICATE, REJECTED, CONFLICT]
   fail_closed: true
   boundaries: [schema_parse, envelope_publish, outbox_persist, command_dispatch, state_transition, recovery_restore]
@@ -63,7 +67,15 @@ rules:
       sha256: lowercase_hex
       payload_fingerprint_uses_same_algorithm: true
     version_checksum_content_identity_immutable: true
+    authority_context:
+      source: validation_context.accepted_state.config
+      required: [config_version, config_checksum, required_components, components, policy_version, policy_checksum]
+      additional_properties: forbidden
+      checksum_projection: [config_version, sorted_required_components, components_by_component_id, policy_version, policy_checksum]
+      checksum_algorithm: SHA256_RFC8785_JCS_UTF8_NO_BOM_LOWER_HEX
     required_components_exact: true
+    exact_sets: [payload.required_components, payload.component_acks.keys, authority.required_components, authority.components.keys]
+    component_authority_binding: [component_id, generation, capability_version, activation_mode, safe_boundary]
     component_ack_binding: [component_id, candidate_version, candidate_checksum, generation, capability_version, prepare_result, activation_mode, safe_boundary, observed_at, ack_sequence]
     missing_duplicate_extra_unknown_ack: reject
     partial_silent_activation: forbidden
@@ -93,7 +105,14 @@ rules:
     applied_version: current_version_must_equal_expected_version_plus_one
     stale_expected_version: reject
     idempotency_replay: same_key_same_payload_same_result; same_key_different_payload_conflict
-    command_result_binding: [command_id, idempotency_key, command_fingerprint, scope, desired_state, reason_code, expected_version, previous_version, current_version, authorization_id, authorization_version, authorization_checksum, leader_lease_id, leader_id, lease_epoch, fencing_token, recovery_evidence_reference]
+    command_result_binding: [command_id, idempotency_key, command_fingerprint, scope, desired_state, reason_code, expected_version, previous_version, current_version, authorization_id, authorization_version, authorization_checksum, leader_lease_id, leader_id, lease_epoch, fencing_token, recovery_evidence_reference, recovery_barrier_generation, recovery_barrier_version, recovery_barrier_checksum, recovery_evidence_digest, recovery_aggregate_evidence_digest]
+    accepted_recovery_barrier_authority:
+      source: validation_context.accepted_recovery_barriers[recovery_evidence_reference]
+      strict_dto: true
+      map_key_equals_barrier_id: true
+      exact_bindings: [barrier_id, generation, barrier_version, barrier_checksum, evidence_digest, aggregate_evidence_digest, state, kill_switch_version, policy_version, policy_checksum, authorization_id, authorization_version, authorization_checksum]
+      required_state: OPEN
+      freshness: observed_at_lte_evaluation_at_and_fresh_until_gt_evaluation_at
     possible_commit_timeout: UNKNOWN_with_reconciliation_required
     disable_does_not_restore_normal: true
   lease_fencing:
@@ -108,7 +127,9 @@ rules:
     closed_rejects: [new_order_intent, new_risk_approval]
     reconnect_auto_normal: forbidden
     invalidation: typed_reason_and_actual_failure_evidence_required
-    freshness: observed_at_lte_evaluation_at_and_fresh_until_gt_evaluation_at
+    freshness: observed_at_lte_evaluation_at_and_market_fresh_until_gt_evaluation_at
+    single_freshness_authority: evidence.market_fresh_until_exactly_equals_validation_context.accepted_state.market.fresh_until
+    generic_evidence_fresh_until: forbidden
     all_states_common_validation: true
     state_matrix:
       CLOSED: {opened_at: null, invalidation_reason: null}

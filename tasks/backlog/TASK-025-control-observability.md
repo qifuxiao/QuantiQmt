@@ -16,6 +16,8 @@ implementation_contract:
     - load only the reviewed immutable manifest-indexed control schema bundle; source checkout access is forbidden
     - implement exactly one `validate_control_message(message, validation_context)` entrypoint at command, outbox, publish, transition and recovery-restore boundaries; return canonical ACCEPTED/DUPLICATE/REJECTED/CONFLICT decisions and remove bypass validators
     - event-specific config, kill-switch, mode, health and recovery-barrier checks are private dispatcher branches only; candidate/result-only or command/result-only validators are forbidden runtime APIs
+    - direct schema-only probes never authorize persist/publish/apply/transition/restore/side effects; runtime exposes only the canonical semantic entrypoint
+    - load immutable typed config-component and accepted-recovery-barrier authorities, verify their RFC 8785 checksums/digests and exact version/generation/capability/freshness bindings fail-closed
     - invoke one equivalent validator on the canonical MessageEnvelope path for all four control events; source checkout schema loading is forbidden
     - require the validation-context DTO (evaluation time, lineage, identity history and accepted authorities) at every persist/publish/apply/transition/restore/side-effect boundary; omitted context is fail-closed
     - implement redacted correlation-chain logs/traces, bounded metrics and P0/P1/P2 alert runbooks

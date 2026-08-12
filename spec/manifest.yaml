@@ -203,7 +203,7 @@ change:
   runtime_code_change: "none in TASK-022; TASK-025 remains blocked and owns future ControlPlane/Observability runtime implementation only after TASK-022 trusted completion"
   review_change: none
   contract_change: "adds ControlPlane DTOs, four system/config events, envelope and redaction bindings, config activation/rollback, kill switch, lease/fencing and recovery barrier contracts; existing active schemas remain unchanged"
-  semantic_validation_change: "adds CONTRACT-CONTROL-SEMANTIC-VALIDATION-V1 and requires the same validator before publish, outbox persistence, command dispatch, state transition and recovery restore; enforces correlation, redaction, immutable version/checksum, exact system-mode transitions, fencing and complete recovery evidence"
+  semantic_validation_change: "adds CONTRACT-CONTROL-SEMANTIC-VALIDATION-V1 with one canonical validate_control_message entrypoint before publish, outbox persistence, command dispatch, state transition and recovery restore; schema-only probes never authorize side effects; enforces correlation, redaction, immutable typed config component authority, strict accepted recovery-barrier authority, single market freshness evidence, exact system-mode transitions, fencing and complete recovery evidence"
   internal_contracts_added: [CONTRACT-CONTROL-PLANE-V1, CONTRACT-CONTROL-SEMANTIC-VALIDATION-V1, PORTS-CONTROL, WF-CONTROL-PLANE]
   public_contracts_added: [system.mode_changed.v1, system.component_health_changed.v1, system.kill_switch_changed.v1, config.version_activated.v1]
   task_queue_change: "TASK-022 remains active/draft/in-progress pending independent Review; TASK-025 remains blocked and constrained to the frozen contracts; no other task changes state"

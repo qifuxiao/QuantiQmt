@@ -29,6 +29,9 @@ Event-specific config, kill-switch, mode, health and recovery-barrier checks are
 private branches of that dispatcher only. Candidate/result-only, command/result-
 only, DTO-only or barrier-only helpers are not validator APIs and MUST NOT be
 used as runtime implementation entrypoints.
+Direct Draft 2020-12 validation is a structural probe only. It never returns a
+semantic acceptance decision and MUST NOT authorize persistence, publication,
+consumer apply, state transition, recovery restore or an external side effect.
 
 When the accepted authority context carries a recovery barrier, its CLOSED,
 OPEN or INVALIDATED evidence is validated by the same entrypoint before the
@@ -60,6 +63,13 @@ command identity is reconciled and never reissued with a new identity.
 
 `KillSwitchCommand` and `ConfigCandidate` are validated by schema and then by
 the same semantic validator at dispatch, persistence and recovery restore.
+The accepted config authority is immutable and versioned: its checksum is
+SHA-256 over RFC 8785 JCS bytes for config version, sorted required components,
+the complete component authority map, and policy version/checksum. Payload
+required components, ACK keys, authority required components and authority
+component keys MUST be the same set. Each ACK MUST exactly bind component ID,
+generation, capability version, activation mode and safe boundary; missing or
+unknown authority components fail closed.
 Kill-switch command/result pairs MUST bind command identity and canonical
 fingerprint, expected/previous/current versions, authorization identity and
 checksum, leader lease/fencing evidence, absolute deadline and reconciliation
@@ -67,6 +77,12 @@ evidence. `UNKNOWN` is returned for possible commit and requires an
 authoritative query; a new idempotency identity is forbidden. Disabling the
 switch requires a verified recovery-evidence reference and MUST NOT restore
 NORMAL automatically.
+That reference resolves only through the strict
+`accepted_recovery_barriers` authority registry. Its map key and barrier ID,
+generation, barrier version/checksum, evidence and aggregate digests, OPEN
+state, kill-switch version, policy, authorization and injected-time freshness
+MUST all match the command and event; arbitrary objects and stale evidence are
+rejected.
 Kill switch ON blocks new OrderIntent and new Risk approval but preserves
 cancel, recovery and explicitly approved reduce-risk capacity. It cannot change
 OMS business state or bypass Risk/Execution.
@@ -87,6 +103,10 @@ component versions, checksums and watermarks. While closed, new OrderIntent and
 Risk approval are rejected. Reconnect alone never opens the barrier or restores
 NORMAL. Evidence invalidation moves the barrier to conservative INVALIDATED
 state and requires a new verified opening transition.
+`market_fresh_until` is the sole Market freshness authority in barrier
+evidence. It MUST exactly match the accepted Market authority and be strictly
+later than injected `evaluation_at`; a generic `fresh_until` field is forbidden.
+Evidence `observed_at` MUST NOT be later than `evaluation_at`.
 
 ## Alerts and runbooks
 
