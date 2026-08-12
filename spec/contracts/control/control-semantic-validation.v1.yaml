@@ -4,6 +4,9 @@ contract:
   status: draft
   validator: ControlSemanticValidator
   entrypoint: validate_control_message(message, validation_context)
+  public_entrypoints: [validate_control_message]
+  private_event_branches_only: true
+  forbidden_partial_validators: [candidate_result_only, command_result_only, dto_only, barrier_only]
   decision: [ACCEPTED, DUPLICATE, REJECTED, CONFLICT]
   fail_closed: true
   boundaries: [schema_parse, envelope_publish, outbox_persist, command_dispatch, state_transition, recovery_restore]
@@ -12,6 +15,8 @@ contract:
   combined_message_schema: CONTRACT-CONTROL-COMBINED-MESSAGE-V1
   required_context: [evaluation_at, accepted_policy, known_messages, identity_history, accepted_state]
   validation_context_schema: CONTRACT-CONTROL-VALIDATION-CONTEXT-V1
+  recovery_barrier_context: accepted_state.recovery_barrier_when_present
+  recovery_barrier_dispatch: unified_entry_only_before_event_specific_decision
 rules:
   observability:
     required_context: [message_id, correlation_id, causation_id, source, service, instance, environment, error_code]
@@ -41,6 +46,7 @@ rules:
       system.mode_changed.v1: system_mode_transition
       system.component_health_changed.v1: component_health_transition
     missing_authority_context: reject_without_mutation
+    recovery_barrier: _validate_recovery_barrier_private_branch
   accepted_policy_binding:
     fields: [policy_version, policy_checksum]
     source: payload.policy_fields_or_payload.evidence
@@ -87,7 +93,7 @@ rules:
     applied_version: current_version_must_equal_expected_version_plus_one
     stale_expected_version: reject
     idempotency_replay: same_key_same_payload_same_result; same_key_different_payload_conflict
-    command_result_binding: [command_id, command_fingerprint, previous_version, current_version, authorization_id, leader_lease_id, fencing_token]
+    command_result_binding: [command_id, idempotency_key, command_fingerprint, scope, desired_state, reason_code, expected_version, previous_version, current_version, authorization_id, authorization_version, authorization_checksum, leader_lease_id, leader_id, lease_epoch, fencing_token, recovery_evidence_reference]
     possible_commit_timeout: UNKNOWN_with_reconciliation_required
     disable_does_not_restore_normal: true
   lease_fencing:
@@ -101,7 +107,9 @@ rules:
     open_requires: [CONFIG_VERIFIED, MARKET_FRESH, AUDIT_AVAILABLE, RECONCILIATION_COMPLETE, LEASE_FENCED, OUTBOX_HEALTHY]
     closed_rejects: [new_order_intent, new_risk_approval]
     reconnect_auto_normal: forbidden
-    invalidation: conservative_mode_and_reopen_required
+    invalidation: typed_reason_and_actual_failure_evidence_required
+    freshness: observed_at_lte_evaluation_at_and_fresh_until_gt_evaluation_at
+    all_states_common_validation: true
     state_matrix:
       CLOSED: {opened_at: null, invalidation_reason: null}
       OPEN: {opened_at: required, invalidation_reason: null, evidence: exact_required_set}

@@ -25,6 +25,16 @@ without repair, reordering, persistence, publication or execution. Same identity
 fingerprint is a duplicate; same identity with a different fingerprint is a
 fail-closed collision and MUST retain evidence.
 
+Event-specific config, kill-switch, mode, health and recovery-barrier checks are
+private branches of that dispatcher only. Candidate/result-only, command/result-
+only, DTO-only or barrier-only helpers are not validator APIs and MUST NOT be
+used as runtime implementation entrypoints.
+
+When the accepted authority context carries a recovery barrier, its CLOSED,
+OPEN or INVALIDATED evidence is validated by the same entrypoint before the
+event-specific decision; no barrier-only shortcut may bypass freshness,
+authority or lineage checks.
+
 `validation_context` is mandatory and is the `CONTRACT-CONTROL-VALIDATION-CONTEXT-V1`
 DTO: it contains injected `evaluation_at`, accepted policy identity, known
 message lineage, identity/fingerprint history, and accepted config/market/audit/
