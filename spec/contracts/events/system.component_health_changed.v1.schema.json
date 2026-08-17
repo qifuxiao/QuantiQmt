@@ -1,0 +1,265 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:quantiqmt:event:system.component_health_changed:v1",
+  "title": "SystemComponentHealthChangedPayloadV1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "component_id",
+    "component_type",
+    "from_state",
+    "to_state",
+    "reason_code",
+    "checks",
+    "changed_at",
+    "component_version",
+    "generation",
+    "evidence"
+  ],
+  "properties": {
+    "component_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "component_type": {
+      "type": "string",
+      "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+    },
+    "from_state": {
+      "enum": [
+        "HEALTHY",
+        "DEGRADED",
+        "UNAVAILABLE",
+        "RECOVERING"
+      ]
+    },
+    "to_state": {
+      "enum": [
+        "HEALTHY",
+        "DEGRADED",
+        "UNAVAILABLE",
+        "RECOVERING"
+      ]
+    },
+    "reason_code": {
+      "enum": [
+        "PROBE_PASSED",
+        "PROBE_FAILED",
+        "DEPENDENCY_STALE",
+        "DISCONNECTED",
+        "RECOVERY_STARTED",
+        "RECOVERY_VERIFIED",
+        "CAPACITY_EXHAUSTED",
+        "AUDIT_UNAVAILABLE"
+      ]
+    },
+    "checks": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "status",
+          "latency_ms"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "status": {
+            "enum": [
+              "PASS",
+              "FAIL",
+              "UNKNOWN"
+            ]
+          },
+          "latency_ms": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "detail_code": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 128
+          }
+        }
+      }
+    },
+    "changed_at": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d{1,6})?Z$"
+    },
+    "component_version": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64
+    },
+    "generation": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "probe_id",
+        "policy_version",
+        "policy_checksum"
+      ],
+      "properties": {
+        "probe_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "policy_version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "policy_checksum": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      }
+    }
+  },
+  "oneOf": [
+    {
+      "properties": {
+        "from_state": {
+          "const": "HEALTHY"
+        },
+        "to_state": {
+          "const": "DEGRADED"
+        },
+        "reason_code": {
+          "enum": [
+            "DEPENDENCY_STALE",
+            "PROBE_FAILED",
+            "CAPACITY_EXHAUSTED",
+            "AUDIT_UNAVAILABLE"
+          ]
+        }
+      }
+    },
+    {
+      "properties": {
+        "from_state": {
+          "const": "HEALTHY"
+        },
+        "to_state": {
+          "const": "UNAVAILABLE"
+        },
+        "reason_code": {
+          "enum": [
+            "PROBE_FAILED",
+            "DISCONNECTED",
+            "AUDIT_UNAVAILABLE"
+          ]
+        }
+      }
+    },
+    {
+      "properties": {
+        "from_state": {
+          "const": "DEGRADED"
+        },
+        "to_state": {
+          "const": "HEALTHY"
+        },
+        "reason_code": {
+          "enum": [
+            "PROBE_PASSED",
+            "RECOVERY_VERIFIED"
+          ]
+        }
+      }
+    },
+    {
+      "properties": {
+        "from_state": {
+          "const": "DEGRADED"
+        },
+        "to_state": {
+          "const": "UNAVAILABLE"
+        },
+        "reason_code": {
+          "enum": [
+            "PROBE_FAILED",
+            "DISCONNECTED",
+            "CAPACITY_EXHAUSTED",
+            "AUDIT_UNAVAILABLE"
+          ]
+        }
+      }
+    },
+    {
+      "properties": {
+        "from_state": {
+          "const": "DEGRADED"
+        },
+        "to_state": {
+          "const": "RECOVERING"
+        },
+        "reason_code": {
+          "const": "RECOVERY_STARTED"
+        }
+      }
+    },
+    {
+      "properties": {
+        "from_state": {
+          "const": "UNAVAILABLE"
+        },
+        "to_state": {
+          "const": "RECOVERING"
+        },
+        "reason_code": {
+          "const": "RECOVERY_STARTED"
+        }
+      }
+    },
+    {
+      "properties": {
+        "from_state": {
+          "const": "RECOVERING"
+        },
+        "to_state": {
+          "const": "HEALTHY"
+        },
+        "reason_code": {
+          "enum": [
+            "PROBE_PASSED",
+            "RECOVERY_VERIFIED"
+          ]
+        }
+      }
+    },
+    {
+      "properties": {
+        "from_state": {
+          "const": "RECOVERING"
+        },
+        "to_state": {
+          "const": "UNAVAILABLE"
+        },
+        "reason_code": {
+          "enum": [
+            "PROBE_FAILED",
+            "DISCONNECTED",
+            "AUDIT_UNAVAILABLE"
+          ]
+        }
+      }
+    }
+  ]
+}

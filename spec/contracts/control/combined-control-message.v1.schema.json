@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:quantiqmt:contract:combined-control-message:v1",
+  "title": "CombinedControlMessageV1",
+  "oneOf": [{"$ref": "#/$defs/mode"}, {"$ref": "#/$defs/component"}, {"$ref": "#/$defs/kill"}, {"$ref": "#/$defs/config"}],
+  "$defs": {
+    "controlEnvelope": {
+      "allOf": [
+        {"$ref": "urn:quantiqmt:contract:message-envelope:v1"},
+        {"type": "object", "required": ["causation_id", "aggregate_id", "aggregate_version", "idempotency_key"], "properties": {
+          "occurred_at": {"$ref": "#/$defs/controlTimestamp"},
+          "received_at": {"$ref": "#/$defs/controlTimestamp"},
+          "causation_id": {"type": "string", "minLength": 16, "maxLength": 64},
+          "aggregate_id": {"type": "string", "minLength": 1, "maxLength": 128},
+          "aggregate_version": {"type": "integer", "minimum": 1, "maximum": 9007199254740991},
+          "idempotency_key": {"type": "string", "minLength": 1, "maxLength": 256}
+        }}
+      ]
+    },
+    "mode": {"allOf": [{"$ref": "#/$defs/controlEnvelope"}, {"type": "object", "properties": {"message_type": {"const": "system.mode_changed.v1"}, "schema_version": {"const": 1}, "source": {"const": "TradingCore"}, "payload": {"$ref": "urn:quantiqmt:event:system.mode_changed:v1"}}}]},
+    "component": {"allOf": [{"$ref": "#/$defs/controlEnvelope"}, {"type": "object", "properties": {"message_type": {"const": "system.component_health_changed.v1"}, "schema_version": {"const": 1}, "source": {"const": "HealthService"}, "payload": {"$ref": "urn:quantiqmt:event:system.component_health_changed:v1"}}}]},
+    "kill": {"allOf": [{"$ref": "#/$defs/controlEnvelope"}, {"type": "object", "properties": {"message_type": {"const": "system.kill_switch_changed.v1"}, "schema_version": {"const": 1}, "source": {"const": "ControlPlane"}, "payload": {"$ref": "urn:quantiqmt:event:system.kill_switch_changed:v1"}}}]},
+    "config": {"allOf": [{"$ref": "#/$defs/controlEnvelope"}, {"type": "object", "properties": {"message_type": {"const": "config.version_activated.v1"}, "schema_version": {"const": 1}, "source": {"const": "ConfigService"}, "payload": {"$ref": "urn:quantiqmt:event:config.version_activated:v1"}}}]},
+    "controlTimestamp": {"type": "string", "format": "date-time", "pattern": "^\\d{4}-\\d{2}-\\d{2}T(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d{1,6})?Z$"}
+  }
+}

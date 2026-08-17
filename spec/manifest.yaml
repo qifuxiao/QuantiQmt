@@ -1,6 +1,6 @@
 specification:
   name: quantiqmt
-  version: 0.10.0
+  version: 0.11.0
   status: accepted
   updated: 2026-08-11
   normative_root: spec
@@ -95,6 +95,12 @@ catalogs:
       path: contracts/market/market-data.v1.schema.json
     - id: CONTRACT-MARKET-SEMANTIC-VALIDATION-V1
       path: contracts/market/market-data.semantic-validation.v1.yaml
+    - id: CONTRACT-CONTROL-PLANE-V1
+      path: contracts/control/control-plane.v1.schema.json
+    - id: CONTRACT-CONTROL-SEMANTIC-VALIDATION-V1
+      path: contracts/control/control-semantic-validation.v1.yaml
+    - id: CONTRACT-CONTROL-COMBINED-MESSAGE-V1
+      path: contracts/control/combined-control-message.v1.schema.json
     - id: CONTRACT-ERROR-CATALOG
       path: contracts/errors/catalog.yaml
   interfaces:
@@ -112,6 +118,8 @@ catalogs:
       path: interfaces/ledger-portfolio-ports.md
     - id: PORTS-MARKET
       path: interfaces/market-ports.md
+    - id: PORTS-CONTROL
+      path: interfaces/control-ports.md
   state_machines:
     - id: SM-ORDER
       path: state-machines/order.yaml
@@ -150,6 +158,8 @@ catalogs:
       path: workflows/reconciliation-repair.yaml
     - id: WF-MARKET-DATA
       path: workflows/market-data.yaml
+    - id: WF-CONTROL-PLANE
+      path: workflows/control-plane.yaml
   repositories:
     - id: REPO-ORDER
       path: repositories/order-repository.md
@@ -182,42 +192,40 @@ catalogs:
       path: reviews/IMPLEMENTATION-READINESS-0.7.md
 
 change:
-  id: SPEC-0.10.0-MARKET-DATA-CONTRACTS
-  compatibility: additive_unpublished_public_v1_market_events_corrected_before_first_release_with_fail_closed_binding_and_internal_contracts_runtime_and_storage_implementation_deferred
-  previous_version: 0.9.0
-  public_message_schema_changes: "activates four previously planned and never-published V1 names with final fail-closed payload schemas: market.tick_received.v1, market.bar_closed.v1, market.quality_changed.v1 and market.session_changed.v1; Review corrections add provider/version/recovery/window/checksum evidence before first release; no previously active public schema changes"
-  storage_schema_changes: "adds logical STORAGE-MARKET-DATA authority, optional tick/bar durability, immutable calendar/checkpoint semantics and explicit gap evidence; no database object or migration is created"
+  id: SPEC-0.11.0-OBSERVABILITY-CONTROL-CONTRACTS
+  compatibility: first_freeze_correction_for_pre_release_control_V1_events_and_internal_DTOs; canonical_MessageEnvelopeV1_unchanged; release_prohibited_until_independent_review_and_runtime_owner_delivery
+  previous_version: 0.10.0
+  public_message_schema_changes: "first-freeze correction for four previously planned and unreleased Control V1 events: occurred facts only, addressable scope and canonical MessageEnvelopeV1 fields; no previously active public schema changes"
+  storage_schema_changes: "references existing STORAGE-SOT PostgreSQL control_journal authority and recovery order only; no database object or migration is created; any physical storage contract requires an independent spec-change task"
   error_catalog_change: none
-  runtime_code_change: "none in TASK-020; TASK-023 remains blocked and owns a future implementation only after TASK-020 and TASK-022 trusted completion"
+  runtime_code_change: "none in TASK-022; TASK-025 remains blocked and owns future ControlPlane/Observability runtime implementation only after TASK-022 trusted completion"
   review_change: none
-  contract_change: "freezes public Market event payloads, complete envelope binding, MarketGateway DTO/Port outcomes, immutable checksum-bound validation policy, request/result/context Snapshot and Health validation, I-JSON safe integers, IANA tzdb/fold replay evidence, versioned calendar/session/quality recovery, V1 reject-with-gap backpressure, RFC8785 checksums, UUIDv5 Bar identity and deterministic replay"
-  semantic_validation_change: "adds CONTRACT-MARKET-SEMANTIC-VALIDATION-V1 and requires canonical integer token, schema, envelope/payload binding, then the same semantic validator before publish, persistence, quality transition, snapshot/health return, restore or Strategy/Risk delivery; recomputes freshness and health from accepted policy, validates all rejected snapshot reasons, identity collision, RFC8785/I-JSON projections, tzdb/fold mapping, recovery ranges, OHLC, finality and LIVE/REPLAY vectors"
-  internal_contracts_added: [CONTRACT-MARKET-DATA-V1, CONTRACT-MARKET-SEMANTIC-VALIDATION-V1, PORTS-MARKET, WF-MARKET-DATA, STORAGE-MARKET-DATA]
-  public_contracts_added: [CONTRACT-MARKET-TICK-RECEIVED-V1, CONTRACT-MARKET-BAR-CLOSED-V1, CONTRACT-MARKET-QUALITY-CHANGED-V1, CONTRACT-MARKET-SESSION-CHANGED-V1]
-  task_queue_change: "TASK-020 remains active/draft/in-progress pending independent Review; TASK-023 remains blocked and is constrained to the frozen contracts; no other task changes state"
-  affected_tasks: [TASK-020, TASK-021, TASK-023, TASK-024, TASK-026]
+  contract_change: "freezes ControlPlane DTOs, four occurred-fact system/config events, canonical envelope refinement, config activation/rollback, scoped kill switch, lease/fencing and recovery barrier behavior; shared MessageEnvelopeV1 remains unchanged"
+  semantic_validation_change: "defines typed per-operation facts, validation order and fail-closed decisions without freezing runtime APIs or storage layout; duplicate authority is one prior persisted Control Journal/Inbox fact; preserves exact numeric/time, hard-limit, ACK, recovery, redaction and label invariants"
+  internal_contracts_added: [CONTRACT-CONTROL-PLANE-V1, CONTRACT-CONTROL-SEMANTIC-VALIDATION-V1, CONTRACT-CONTROL-COMBINED-MESSAGE-V1, PORTS-CONTROL, WF-CONTROL-PLANE]
+  public_contracts_added: [system.mode_changed.v1, system.component_health_changed.v1, system.kill_switch_changed.v1, config.version_activated.v1]
+  task_queue_change: "TASK-022 remains active/draft/in-progress pending independent Review; TASK-025 remains blocked and constrained to the frozen contracts; no other task changes state"
+  affected_tasks: [TASK-022, TASK-025]
   deployment_order:
-    - independently_review_and_merge_TASK_020_contracts
-    - human_authorized_TASK_020_closeout_with_trusted_delivery_evidence
-    - keep_TASK_023_blocked_until_TASK_020_and_TASK_022_are_trusted_completed
-    - separately_human_authorize_TASK_023_runtime_implementation
-    - generate_reviewed_immutable_schema_bundle_from_manifest_for_TASK_023
-    - verify_installed_wheel_bundle_digest_and_manifest_parity_without_source_checkout
-    - deploy_schema_compatible_consumers_before_market_event_publishers
-    - verify_shadow_ingress_gap_recovery_and_live_replay_determinism
-    - activate_immutable_market_validation_policy_and_tzdb_bundle_before_snapshot_or_health_traffic
-    - enable_bounded_publishers_without_silent_drop
+    - preserve_TASK_020_trusted_market_contracts
+    - independently_review_and_merge_TASK_022_control_contracts
+    - human_authorize_TASK_022_closeout_with_trusted_delivery_evidence
+    - keep_TASK_025_blocked_until_TASK_022_trusted_completed
+    - separately_human_authorize_TASK_025_runtime_implementation
+    - generate_reviewed_immutable_schema_bundle_for_future_control_runtime
+    - deploy_control_schema_consumers_before_control_publishers
+    - activate_immutable_config_and_recovery_policies_before_control_traffic
   migration:
-    runtime_data: "not applicable in TASK-020 because no Market runtime is implemented; TASK-023 must load only a reviewed immutable manifest-indexed schema bundle plus accepted policy/tzdb versions and fail closed on missing, tampered or mismatched content"
+    runtime_data: "not applicable in TASK-022 because no Control runtime is implemented; TASK-025 must load only a reviewed immutable manifest-indexed schema bundle and fail closed on missing, tampered or mismatched content"
     public_events: "new event names have no historical published payload, so Review corrections are folded into V1 before first release; deploy accepted readers and immutable bundle before future publishers and reject unknown versions fail-closed"
     storage: "no migration is created or authorized; future persistence requires independently authorized expand-only storage work"
-    task_queue: "TASK-020 remains active; TASK-023 remains blocked on TASK-020 and TASK-022; no downstream activation"
+    task_queue: "TASK-022 remains active; TASK-025 remains blocked on TASK-004 and TASK-022; no downstream activation"
     historical_evidence: "missing upstream ranges remain explicit GAP/UNAVAILABLE evidence and are never inferred or silently backfilled"
     destructive_backfill: forbidden
   rollback:
     runtime_data: not_applicable_no_runtime_change
     public_events: "before runtime adoption revert only unimplemented routes; after adoption stop publishers before readers and preserve every emitted event, gap and quality record"
-    task_queue: "keep TASK-020 active until independent Review; keep TASK-023 and downstream tasks blocked"
+    task_queue: "keep TASK-022 active until independent Review; keep TASK-025 and downstream tasks blocked"
     contracts: "never reuse the four public names or weaken V1 meaning; rollback stops publishers, retains compatible readers and the last reviewed immutable schema bundle, and preserves collision/checksum/gap/quality evidence"
-    storage: "no database rollback in TASK-020; future rollback preserves final bars, checkpoints, calendars and gap evidence"
+    storage: "no database rollback in TASK-022; future rollback preserves control audit, ActiveVersion, barrier and fencing evidence"
     release: prohibited

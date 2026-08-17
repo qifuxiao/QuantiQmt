@@ -79,3 +79,12 @@ nfr:
     wall_clock: forbidden
     ambient_randomness: forbidden
     future_data: forbidden
+  control_plane:
+    config_activation: atomic_active_version_event_outbox
+    partial_silent_activation: forbidden
+    unknown_command_outcome: reconcile_same_identity
+    stale_fencing_side_effect: forbidden
+    recovery_barrier_initial: CLOSED
+    recovery_barrier_open_requires: [CONFIG_VERIFIED, MARKET_FRESH, AUDIT_AVAILABLE, RECONCILIATION_COMPLETE, LEASE_FENCED, OUTBOX_HEALTHY]
+    reconnect_auto_normal: forbidden
+    unbounded_alert_queue: forbidden

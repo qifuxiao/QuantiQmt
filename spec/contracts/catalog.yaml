@@ -34,10 +34,10 @@ messages:
   - {name: portfolio.snapshot_observed.v1, kind: event, publisher: BrokerAdapter, consumers: [Reconciliation, Risk], status: planned}
   - {name: reconciliation.case_opened.v1, kind: event, publisher: Reconciliation, consumers: [ControlPlane, Alert], status: planned}
   - {name: reconciliation.case_resolved.v1, kind: event, publisher: Reconciliation, consumers: [OMS, Ledger, Audit], status: planned}
-  - {name: system.mode_changed.v1, kind: event, publisher: TradingCore, consumers: [TradingComponents], status: planned}
-  - {name: system.component_health_changed.v1, kind: event, publisher: HealthService, consumers: [ControlPlane, Alert], status: planned}
-  - {name: system.kill_switch_changed.v1, kind: event, publisher: ControlPlane, consumers: [Risk, OMS, Execution, Audit], status: planned}
-  - {name: config.version_activated.v1, kind: event, publisher: ConfigService, consumers: [AffectedComponents, Audit], status: planned}
+  - {name: system.mode_changed.v1, kind: event, publisher: TradingCore, consumers: [TradingComponents, Audit], schema: events/system.mode_changed.v1.schema.json, status: active}
+  - {name: system.component_health_changed.v1, kind: event, publisher: HealthService, consumers: [ControlPlane, Alert, Audit], schema: events/system.component_health_changed.v1.schema.json, status: active}
+  - {name: system.kill_switch_changed.v1, kind: event, publisher: ControlPlane, consumers: [Risk, OMS, Execution, Audit], schema: events/system.kill_switch_changed.v1.schema.json, status: active}
+  - {name: config.version_activated.v1, kind: event, publisher: ConfigService, consumers: [AffectedComponents, Audit], schema: events/config.version_activated.v1.schema.json, status: active}
 rules:
   active_requires_schema: true
   published_name_reuse: forbidden
@@ -48,6 +48,9 @@ internal_contracts:
   - {id: CONTRACT-LEDGER-ACCOUNTING-V1, schema: ledger/ledger-accounting.v1.schema.json, status: draft, owner: AccountLedger}
   - {id: CONTRACT-PORTFOLIO-PROJECTION-V1, schema: portfolio/portfolio-projection.v1.schema.json, status: draft, owner: PortfolioProjection}
   - {id: CONTRACT-RECONCILIATION-V1, schema: reconciliation/reconciliation.v1.schema.json, status: draft, owner: Reconciliation}
+  - {id: CONTRACT-CONTROL-PLANE-V1, schema: control/control-plane.v1.schema.json, status: draft, owner: ControlPlane}
+  - {id: CONTRACT-CONTROL-SEMANTIC-VALIDATION-V1, schema: control/control-semantic-validation.v1.yaml, status: draft, owner: ControlPlane}
+  - {id: CONTRACT-CONTROL-COMBINED-MESSAGE-V1, schema: control/combined-control-message.v1.schema.json, status: draft, owner: ControlPlane}
 internal_rules:
   schema_required: true
   schema_and_semantic_validation_required: true

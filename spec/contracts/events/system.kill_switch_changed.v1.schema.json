@@ -1,0 +1,228 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:quantiqmt:event:system.kill_switch_changed:v1",
+  "title": "SystemKillSwitchChangedPayloadV1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "scope_type",
+    "scope_id",
+    "command_id",
+    "command_fingerprint",
+    "idempotency_key",
+    "enabled",
+    "previous_enabled",
+    "cancel_active_orders",
+    "reason",
+    "reason_code",
+    "operator_id",
+    "changed_at",
+    "previous_version",
+    "current_version",
+    "authorization_id",
+    "leader_lease_id",
+    "fencing_token",
+    "effect_evidence",
+    "policy_version",
+    "policy_checksum",
+    "recovery_evidence_reference"
+  ],
+  "properties": {
+    "scope_type": {
+      "enum": [
+        "GLOBAL",
+        "ACCOUNT",
+        "STRATEGY",
+        "INSTRUMENT"
+      ]
+    },
+    "scope_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "command_id": {
+      "type": "string",
+      "minLength": 16,
+      "maxLength": 256
+    },
+    "command_fingerprint": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "idempotency_key": {
+      "type": "string",
+      "minLength": 16,
+      "maxLength": 256
+    },
+    "enabled": {
+      "type": "boolean"
+    },
+    "previous_enabled": {
+      "type": "boolean"
+    },
+    "cancel_active_orders": {
+      "type": "boolean"
+    },
+    "reason": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 512
+    },
+    "reason_code": {
+      "enum": [
+        "MANUAL_EMERGENCY",
+        "RISK_BREACH",
+        "RECOVERY_BARRIER",
+        "CONFIGURATION",
+        "OPERATOR_RELEASE"
+      ]
+    },
+    "operator_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "approval_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "changed_at": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d{1,6})?Z$"
+    },
+    "previous_version": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "current_version": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991
+    },
+    "authorization_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "leader_lease_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "fencing_token": {
+      "type": "string",
+      "minLength": 16,
+      "maxLength": 256
+    },
+    "effect_evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "control_journal_position",
+        "persisted_at"
+      ],
+      "properties": {
+        "control_journal_position": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "persisted_at": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d{1,6})?Z$"
+        }
+      }
+    },
+    "policy_version": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64
+    },
+    "policy_checksum": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "recovery_evidence_reference": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "minLength": 1,
+      "maxLength": 128
+    }
+  },
+  "allOf": [
+    {
+      "oneOf": [
+        {
+          "properties": {
+            "scope_type": {
+              "const": "GLOBAL"
+            },
+            "scope_id": {
+              "type": "null"
+            }
+          }
+        },
+        {
+          "properties": {
+            "scope_type": {
+              "enum": [
+                "ACCOUNT",
+                "STRATEGY",
+                "INSTRUMENT"
+              ]
+            },
+            "scope_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          }
+        }
+      ]
+    },
+    {
+      "oneOf": [
+        {
+          "properties": {
+            "enabled": {
+              "const": true
+            },
+            "previous_enabled": {
+              "const": false
+            },
+            "recovery_evidence_reference": {
+              "type": "null"
+            }
+          }
+        },
+        {
+          "properties": {
+            "enabled": {
+              "const": false
+            },
+            "previous_enabled": {
+              "const": true
+            },
+            "recovery_evidence_reference": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      ]
+    }
+  ]
+}
