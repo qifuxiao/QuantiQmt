@@ -16,16 +16,19 @@ account, strategy, message and correlation identifiers are prohibited labels.
 
 Only `validate_control_message(message, validation_context)` is a usable
 ControlSemanticValidator entrypoint for combined public events and the
-`CONFIG_CANDIDATE` / `KILL_SWITCH_COMMAND` command DTOs; it returns one canonical decision:
+`CONFIG_CANDIDATE`, `KILL_SWITCH_COMMAND` and `KILL_SWITCH_RESULT` DTOs; it returns one canonical decision:
 `ACCEPTED`, `DUPLICATE`, `REJECTED` or `CONFLICT`. It MUST validate envelope and payload together before
 publish or outbox persistence. Its normative order is structural envelope,
 payload schema, combined event binding, then cross-object semantics. The same
 validator MUST run at command ingress and before Outbox persist, event publish,
 consumer apply, control transition, restore/replay and every external side
 effect. Failure rejects
-without repair, reordering, persistence, publication or execution. Same identity
-plus the same canonical payload or command fingerprint is a duplicate before
-current authority, barrier or lineage state is consulted; same identity with a
+without repair, reordering, persistence, publication or execution. Structural
+schema validation, canonical payload/checksum/fingerprint recomputation and all
+immutable envelope/payload source, aggregate, idempotency, correlation and
+causation bindings run before duplicate classification. Only then is a trusted
+same-identity plus same-fingerprint replay a duplicate before mutable current
+authority, barrier or lineage state is consulted; same identity with a
 different fingerprint is a fail-closed collision and MUST retain evidence.
 
 Event-specific config, kill-switch, mode, health and recovery-barrier checks are
@@ -71,12 +74,21 @@ The accepted config authority is immutable and versioned: its checksum is
 SHA-256 over RFC 8785 JCS bytes for the complete candidate security projection:
 config domain/version, actual candidate payload, sorted secret references and
 required components, activation mode and safe boundary, system hard-limit
-policy version/checksum, plus the complete component authority map and policy
-identity. Payload
+policy identity and content (including valuation currency and every accepted
+system hard limit), candidate dynamic limits, plus the complete component
+authority map and control policy identity. Only secret-reference and required-
+component arrays are sorted as sets; other arrays preserve wire order, object
+keys use RFC 8785 ordering, and Unicode is not normalized. Candidate currency
+MUST equal policy currency, policy content MUST hash to the accepted checksum,
+and no dynamic upper bound may exceed its accepted system hard limit. Payload
 required components, ACK keys, authority required components and authority
 component keys MUST be the same set. Each ACK MUST exactly bind component ID,
 generation, capability version, activation mode and safe boundary; missing or
 unknown authority components fail closed.
+The public config activation event MUST exactly bind its secret references,
+required components, activation mode, safe boundary, policy identity and
+candidate checksum to that accepted candidate; changing any security field
+without a new checksum is rejected.
 Kill-switch command/result pairs MUST bind command identity and canonical
 fingerprint, expected/previous/current versions, authorization identity and
 checksum, leader lease/fencing evidence, absolute deadline and reconciliation
@@ -90,6 +102,12 @@ generation, barrier version/checksum, evidence and aggregate digests, OPEN
 state, kill-switch version, policy, authorization and injected-time freshness
 MUST all match the command and event; arbitrary objects and stale evidence are
 rejected.
+Kill-switch outcomes are exhaustive and identical for the public event and
+internal result DTO: APPLIED advances exactly one version and reaches desired
+state; REJECTED keeps accepted state/version; PARTIAL stays fail-closed ON with
+unchanged version and reconciliation required; TIMEOUT/UNKNOWN use UNKNOWN,
+unchanged version and reconciliation under the same command identity and
+fingerprint. Every outcome forbids implicit NORMAL restoration.
 Kill switch ON blocks new OrderIntent and new Risk approval but preserves
 cancel, recovery and explicitly approved reduce-risk capacity. It cannot change
 OMS business state or bypass Risk/Execution.

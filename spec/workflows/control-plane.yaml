@@ -3,10 +3,10 @@ workflow:
   contract: CONTRACT-CONTROL-PLANE-V1
   semantic_validator: CONTRACT-CONTROL-SEMANTIC-VALIDATION-V1
   boundaries: [command_ingress, outbox_persist, event_publish, consumer_apply, control_transition, recovery_restore, external_side_effect]
-  validation_order: [validation_context_schema, structural_envelope, payload_schema, combined_binding, lineage_identity_policy, event_or_command_semantics, final_decision]
+  validation_order: [validation_context_schema, structural_envelope_or_dto, payload_schema, canonical_fingerprint_recompute, immutable_envelope_payload_binding, identity_collision_decision, mutable_lineage_policy_authority, event_or_command_semantics, final_decision]
   validation_failure: reject_without_repair_reorder_persist_publish_or_execute
   schema_only_probe: never_authorizes_any_boundary
-  unified_validator_inputs: [public_control_event, CONFIG_CANDIDATE, KILL_SWITCH_COMMAND]
+  unified_validator_inputs: [public_control_event, CONFIG_CANDIDATE, KILL_SWITCH_COMMAND, KILL_SWITCH_RESULT]
   observability:
     steps: [normalize_context, redact_sensitive_values, validate_correlation_chain, emit_metric_log_trace_audit]
     failure: reject_record_and_emit_bounded_validation_metric
@@ -27,12 +27,16 @@ workflow:
       - {id: collect_acknowledgements, owner: ConfigService, failure: rollback_or_safe_scope}
     forbidden: [partial_silent_activation, plaintext_secret_persistence, active_version_side_channel]
     unknown: retain_same_candidate_identity_and_reconcile
+    canonical_checksum: complete_candidate_security_projection_with_RFC8785_and_only_secret_reference_and_required_component_set_sorting
+    hard_limit_guard: exact_currency_policy_content_hash_and_dynamic_limits_not_greater_than_accepted_system_hard_limits
   kill_switch:
     command_bus: required
     on_effect: [block_new_order_intent, block_new_risk_approval, preserve_cancel, preserve_recovery, preserve_approved_reduce_risk]
     stale_expected_version: reject_without_event
     timeout_after_dispatch: UNKNOWN_and_reconcile_same_idempotency_key
     disable_recovery_authority: strict_open_barrier_identity_version_checksum_generation_digest_policy_authorization_and_freshness
+    disable_recovery_validation: same_complete_recovery_barrier_validator_as_mode_recovery
+    outcomes: {APPLIED: desired_state_and_increment_once, REJECTED: accepted_state_and_version_unchanged, PARTIAL: fail_closed_ON_version_unchanged_reconcile, TIMEOUT: UNKNOWN_version_unchanged_reconcile_same_identity, UNKNOWN: UNKNOWN_version_unchanged_reconcile_same_identity}
   lease:
     acquire_before_side_effect: true
     validate_before_each_side_effect: true

@@ -15,7 +15,7 @@
     "generation": {"type": "integer", "minimum": 1, "maximum": 9007199254740991},
     "aggregate_version": {"type": "integer", "minimum": 1, "maximum": 9007199254740991},
     "correlation_id": {"type": "string", "minLength": 16, "maxLength": 128},
-    "causation_id": {"type": "string", "minLength": 16, "maxLength": 128},
+    "causation_id": {"type": "string", "minLength": 16, "maxLength": 64},
     "occurred_at": {"type": "string", "format": "date-time", "pattern": "Z$"},
     "source": {"type": "string", "const": "TradingCore"},
     "evidence": {"$ref": "#/$defs/evidence"}

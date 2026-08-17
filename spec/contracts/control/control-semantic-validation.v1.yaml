@@ -14,12 +14,12 @@ contract:
   decision: [ACCEPTED, DUPLICATE, REJECTED, CONFLICT]
   fail_closed: true
   boundaries: [schema_parse, command_ingress, envelope_publish, outbox_persist, event_publish, consumer_apply, command_dispatch, control_transition, state_transition, recovery_restore, external_side_effect]
-  order: [validation_context_schema, structural_envelope, payload_schema, combined_binding, lineage_identity_policy, event_specific_semantics, final_decision]
+  order: [validation_context_schema, structural_envelope_or_dto, payload_schema, canonical_fingerprint_recompute, immutable_envelope_payload_binding, identity_collision_decision, mutable_lineage_policy_authority, event_or_dto_semantics, final_decision]
   result: {valid: continue, invalid: reject_without_mutation}
   combined_message_schema: CONTRACT-CONTROL-COMBINED-MESSAGE-V1
   required_context: [evaluation_at, accepted_policy, known_messages, identity_history, accepted_state]
   validation_context_schema: CONTRACT-CONTROL-VALIDATION-CONTEXT-V1
-  recovery_barrier_context: accepted_state.recovery_barrier_when_present
+  recovery_barrier_context: accepted_state.recovery_barrier_or_registry_entry_as_strict_authority_record_with_embedded_complete_RECOVERY_BARRIER
   recovery_barrier_dispatch: unified_entry_only_before_event_specific_decision
 rules:
   observability:
@@ -30,7 +30,7 @@ rules:
   envelope_binding:
     validate_together: [message_envelope, payload]
     required_mapping: [message_type, schema_version, publisher_source, partition_key, aggregate_id, aggregate_version, idempotency_key]
-    collision: same_identity_same_fingerprint_duplicate_before_current_authority_checks; same_identity_different_fingerprint_conflict_reject_and_retain_evidence
+    collision: schema_canonical_fingerprint_and_immutable_binding_before_identity_decision; trusted_same_identity_same_fingerprint_duplicate_before_mutable_authority_checks; same_identity_different_fingerprint_conflict_reject_and_retain_evidence
     event_matrix:
       system.mode_changed.v1: {source: TradingCore, publisher: TradingCore, aggregate_type: SYSTEM_MODE, partition_key: system}
       system.component_health_changed.v1: {source: HealthService, publisher: HealthService, aggregate_type: SYSTEM_COMPONENT, partition_key: component}
@@ -47,6 +47,7 @@ rules:
     exhaustive:
       CONFIG_CANDIDATE: config_candidate
       KILL_SWITCH_COMMAND: kill_switch_command
+      KILL_SWITCH_RESULT: kill_switch_result
       config.version_activated.v1: config_cross_object
       system.kill_switch_changed.v1: kill_switch
       system.mode_changed.v1: system_mode_transition
@@ -61,7 +62,20 @@ rules:
   config_cross_object:
     candidate_checksum: sha256_rfc8785_jcs_candidate_security_projection_utf8_no_bom_lower_hex
     checksum_excludes: [candidate_checksum]
-    checksum_projection: [config_domain, candidate_version, payload, sorted_secret_references, sorted_required_components, activation_mode, safe_boundary, system_hard_limit_policy_version, system_hard_limit_policy_checksum]
+    checksum_projection_order: [config_domain, candidate_version, payload, secret_references, required_components, activation_mode, safe_boundary, valuation_currency, dynamic_limits, system_hard_limit_policy, component_authority, policy]
+    checksum_projection:
+      config_domain: candidate.config_domain
+      candidate_version: candidate.candidate_version
+      payload: candidate.payload
+      secret_references: lexicographically_sorted_unique_candidate.secret_references
+      required_components: lexicographically_sorted_unique_candidate.required_components
+      activation_mode: candidate.activation_mode
+      safe_boundary: candidate.safe_boundary
+      valuation_currency: candidate.valuation_currency
+      dynamic_limits: candidate.dynamic_limits_complete_map
+      system_hard_limit_policy: {version: candidate.system_hard_limit_policy_version, checksum: candidate.system_hard_limit_policy_checksum, content: candidate.system_hard_limit_policy}
+      component_authority: candidate.component_authority_complete_map_by_component_id
+      policy: {version: candidate.policy_version, checksum: candidate.policy_checksum}
     canonicalization:
       algorithm: RFC8785_JCS
       utf8: no_bom
@@ -69,17 +83,25 @@ rules:
       number_domain: I_JSON_safe_integers_or_decimal_strings
       sha256: lowercase_hex
       payload_fingerprint_uses_same_algorithm: true
+      object_keys: RFC8785_UTF16_code_unit_order
+      set_arrays: [secret_references, required_components]
+      set_array_order: ascending_unicode_scalar_lexicographic
+      all_other_arrays: preserve_wire_order
+      decimal_strings: no_plus_no_leading_zero_no_trailing_fractional_zero
     version_checksum_content_identity_immutable: true
     authority_context:
       source: validation_context.accepted_state.config
-      required: [config_domain, config_version, config_checksum, candidate_payload, secret_references, required_components, components, activation_mode, safe_boundary, system_hard_limit_policy_version, system_hard_limit_policy_checksum, policy_version, policy_checksum]
+      required: [config_domain, config_version, config_checksum, candidate_payload, secret_references, required_components, components, activation_mode, safe_boundary, valuation_currency, dynamic_limits, system_hard_limit_policy_version, system_hard_limit_policy_checksum, system_hard_limit_policy, policy_version, policy_checksum]
       additional_properties: forbidden
-      checksum_projection: [config_domain, config_version, candidate_payload, sorted_secret_references, sorted_required_components, components_by_component_id, activation_mode, safe_boundary, system_hard_limit_policy_version, system_hard_limit_policy_checksum, policy_version, policy_checksum]
+      checksum_projection: same_config_cross_object_checksum_projection_with_authority_field_mapping_config_version_to_candidate_version_candidate_payload_to_payload_components_to_component_authority
       checksum_algorithm: SHA256_RFC8785_JCS_UTF8_NO_BOM_LOWER_HEX
     required_components_exact: true
     exact_sets: [payload.required_components, payload.component_acks.keys, authority.required_components, authority.components.keys]
     component_authority_binding: [component_id, generation, capability_version, activation_mode, safe_boundary]
     component_ack_binding: [component_id, candidate_version, candidate_checksum, generation, capability_version, prepare_result, activation_mode, safe_boundary, observed_at, ack_sequence]
+    event_candidate_binding: [candidate_version, candidate_checksum, sorted_secret_references, sorted_required_components, activation_mode, safe_boundary, policy_version, policy_checksum]
+    hard_limit_binding: [valuation_currency, canonical_policy_content_and_checksum, complete_dynamic_limit_map]
+    dynamic_limit_rule: every_candidate_dynamic_upper_bound_lte_corresponding_accepted_system_hard_limit
     missing_duplicate_extra_unknown_ack: reject
     partial_silent_activation: forbidden
     active_event_outbox_atomic: true
@@ -91,7 +113,7 @@ rules:
     alert_not_state_authority: true
   config_activation:
     candidate_checksum: SHA256_RFC8785_JCS_candidate_security_projection_excluding_checksum
-    checksum_covers: [actual_candidate_payload, activation_mode, safe_boundary, system_hard_limit_policy_version, system_hard_limit_policy_checksum]
+    checksum_covers: [actual_candidate_payload, sorted_secret_references, sorted_required_components, activation_mode, safe_boundary, valuation_currency, complete_dynamic_limits, system_hard_limit_policy_identity_and_content, complete_component_authority_map, policy_identity]
     immutable_version: true
     secrets_are_references: true
     hard_limit_policy_must_match: true
@@ -110,14 +132,21 @@ rules:
     stale_expected_version: reject
     idempotency_replay: same_key_same_payload_same_result; same_key_different_payload_conflict
     command_result_binding: [command_id, idempotency_key, command_fingerprint, scope, desired_state, reason_code, expected_version, previous_version, current_version, authorization_id, authorization_version, authorization_checksum, leader_lease_id, leader_id, lease_epoch, fencing_token, recovery_evidence_reference, recovery_barrier_generation, recovery_barrier_version, recovery_barrier_checksum, recovery_evidence_digest, recovery_aggregate_evidence_digest]
+    command_fingerprint: SHA256_RFC8785_JCS_over_complete_KILL_SWITCH_COMMAND_excluding_command_fingerprint
     accepted_recovery_barrier_authority:
       source: validation_context.accepted_recovery_barriers[recovery_evidence_reference]
-      strict_dto: true
+      strict_dto: embedded_complete_RECOVERY_BARRIER_validated_by_same_private_validator
       map_key_equals_barrier_id: true
-      exact_bindings: [barrier_id, generation, barrier_version, barrier_checksum, evidence_digest, aggregate_evidence_digest, state, kill_switch_version, policy_version, policy_checksum, authorization_id, authorization_version, authorization_checksum]
+      exact_bindings: [barrier_id, generation, barrier_version, barrier_checksum, evidence_digest, aggregate_evidence_digest, state, kill_switch_version, opened_at, observed_at, fresh_until, policy_version, policy_checksum, authorization_id, authorization_version, authorization_checksum]
       required_state: OPEN
       freshness: observed_at_lte_evaluation_at_and_fresh_until_gt_evaluation_at
     timeout_or_unknown: effective_state_UNKNOWN_and_reconciliation_required_and_same_command_identity_reconciliation
+    outcome_matrix:
+      APPLIED: effective_state_equals_desired_state_and_version_increments_once_and_no_reconciliation
+      REJECTED: effective_state_equals_accepted_authority_and_version_unchanged_and_no_reconciliation
+      PARTIAL: effective_state_ON_fail_closed_and_version_unchanged_and_reconciliation_required
+      TIMEOUT: effective_state_UNKNOWN_and_version_unchanged_and_reconciliation_required
+      UNKNOWN: effective_state_UNKNOWN_and_version_unchanged_and_reconciliation_required
     possible_commit_timeout: UNKNOWN_with_reconciliation_required
     disable_does_not_restore_normal: true
   lease_fencing:

@@ -24,7 +24,7 @@
     "policy_checksum": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
     "occurred_at": {"type": "string", "format": "date-time", "pattern": "Z$"},
     "correlation_id": {"type": "string", "minLength": 16, "maxLength": 128},
-    "causation_id": {"type": "string", "minLength": 16, "maxLength": 128},
+    "causation_id": {"type": "string", "minLength": 16, "maxLength": 64},
     "source": {"type": "string", "const": "ConfigService"}
   },
   "allOf": [

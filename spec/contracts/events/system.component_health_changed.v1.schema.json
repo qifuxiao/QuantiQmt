@@ -15,7 +15,7 @@
     "reason_code": {"enum": ["PROBE_PASSED", "PROBE_FAILED", "DEPENDENCY_STALE", "DISCONNECTED", "RECOVERY_STARTED", "RECOVERY_VERIFIED", "CAPACITY_EXHAUSTED", "AUDIT_UNAVAILABLE"]},
     "observed_at": {"type": "string", "format": "date-time", "pattern": "Z$"},
     "correlation_id": {"type": "string", "minLength": 16, "maxLength": 128},
-    "causation_id": {"type": "string", "minLength": 16, "maxLength": 128},
+    "causation_id": {"type": "string", "minLength": 16, "maxLength": 64},
     "source": {"type": "string", "const": "HealthService"},
     "evidence": {"type": "object", "additionalProperties": false, "required": ["probe_id", "policy_version", "policy_checksum"], "properties": {"probe_id": {"type": "string", "minLength": 1}, "policy_version": {"type": "string", "minLength": 1}, "policy_checksum": {"type": "string", "pattern": "^[0-9a-f]{64}$"}}}
   },
