@@ -81,6 +81,8 @@ rules:
       utf8: no_bom
       unicode: preserve_scalars_without_normalization
       number_domain: I_JSON_safe_integers_or_decimal_strings
+      non_integer_json_numbers: recursively_forbidden_in_every_checksum_security_projection
+      monetary_values: canonical_decimal_strings_never_binary_float
       sha256: lowercase_hex
       payload_fingerprint_uses_same_algorithm: true
       object_keys: RFC8785_UTF16_code_unit_order
@@ -133,6 +135,26 @@ rules:
     idempotency_replay: same_key_same_payload_same_result; same_key_different_payload_conflict
     command_result_binding: [command_id, idempotency_key, command_fingerprint, scope, desired_state, reason_code, expected_version, previous_version, current_version, authorization_id, authorization_version, authorization_checksum, leader_lease_id, leader_id, lease_epoch, fencing_token, recovery_evidence_reference, recovery_barrier_generation, recovery_barrier_version, recovery_barrier_checksum, recovery_evidence_digest, recovery_aggregate_evidence_digest]
     command_fingerprint: SHA256_RFC8785_JCS_over_complete_KILL_SWITCH_COMMAND_excluding_command_fingerprint
+    result_identity:
+      namespace: KILL_SWITCH_RESULT
+      identity_field: result_id
+      fingerprint_field: result_fingerprint
+      registry_key: "KILL_SWITCH_RESULT:{result_id}"
+      command_identity_is_not_result_identity: true
+      fingerprint: SHA256_RFC8785_JCS_over_complete_KILL_SWITCH_RESULT_excluding_result_fingerprint
+      fingerprint_projection: [dto_type, schema_version, correlation_id, created_at, result_id, command_id, command_fingerprint, idempotency_key, expected_version, scope, desired_state, effective_state, outcome, previous_version, current_version, reason_code, applied_at, reconciliation_required, effect_evidence, authorization_id, leader_lease_id, fencing_token, restores_normal]
+      duplicate_order: structural_schema_then_canonical_result_fingerprint_then_result_identity_collision_then_mutable_authority
+      collision: same_namespaced_result_identity_same_canonical_result_duplicate; same_namespaced_result_identity_different_canonical_result_conflict
+    effect_evidence:
+      authority: validation_context.accepted_state.kill_switch.effect_ack_ids
+      ack_ids: unique_subset_of_accepted_authority
+      observed_at: not_after_evaluation_at
+      APPLIED: exact_complete_expected_ack_set
+      REJECTED: empty_ack_set
+      PARTIAL: nonempty_strict_expected_ack_subset
+      TIMEOUT: incomplete_expected_ack_subset_and_reconciliation_required
+      UNKNOWN: incomplete_expected_ack_subset_and_reconciliation_required
+      unknown_ack: reject
     accepted_recovery_barrier_authority:
       source: validation_context.accepted_recovery_barriers[recovery_evidence_reference]
       strict_dto: embedded_complete_RECOVERY_BARRIER_validated_by_same_private_validator

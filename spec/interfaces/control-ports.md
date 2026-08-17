@@ -81,6 +81,10 @@ component arrays are sorted as sets; other arrays preserve wire order, object
 keys use RFC 8785 ordering, and Unicode is not normalized. Candidate currency
 MUST equal policy currency, policy content MUST hash to the accepted checksum,
 and no dynamic upper bound may exceed its accepted system hard limit. Payload
+and every nested checksum projection value permit only I-JSON safe integers or
+strings; every non-integer JSON number is rejected recursively. Prices, money,
+fees and other decimal quantities remain canonical decimal strings and never
+binary floating point.
 required components, ACK keys, authority required components and authority
 component keys MUST be the same set. Each ACK MUST exactly bind component ID,
 generation, capability version, activation mode and safe boundary; missing or
@@ -96,6 +100,12 @@ evidence. `UNKNOWN` is returned for possible commit and requires an
 authoritative query; a new idempotency identity is forbidden. Disabling the
 switch requires a verified recovery-evidence reference and MUST NOT restore
 NORMAL automatically.
+An internal `KILL_SWITCH_RESULT` has its own `result_id` and canonical
+`result_fingerprint`; identity history uses the `KILL_SWITCH_RESULT` namespace
+and never aliases the command identity. The fingerprint covers the complete
+result except itself, including command/idempotency bindings, outcome and
+versions, authorization, lease/fencing and effect evidence. Only an identical
+namespaced result replay is `DUPLICATE`; changed content is a collision.
 That reference resolves only through the strict
 `accepted_recovery_barriers` authority registry. Its map key and barrier ID,
 generation, barrier version/checksum, evidence and aggregate digests, OPEN
@@ -108,6 +118,11 @@ state; REJECTED keeps accepted state/version; PARTIAL stays fail-closed ON with
 unchanged version and reconciliation required; TIMEOUT/UNKNOWN use UNKNOWN,
 unchanged version and reconciliation under the same command identity and
 fingerprint. Every outcome forbids implicit NORMAL restoration.
+Effect ACKs are authority-bound for both forms: APPLIED requires the complete
+expected set, REJECTED requires none, PARTIAL requires a non-empty strict
+subset, and TIMEOUT/UNKNOWN may retain only an incomplete known subset while
+reconciliation is required. Unknown, forged, future-observed or falsely
+complete ACK evidence is rejected.
 Kill switch ON blocks new OrderIntent and new Risk approval but preserves
 cancel, recovery and explicitly approved reduce-risk capacity. It cannot change
 OMS business state or bypass Risk/Execution.

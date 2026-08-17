@@ -26,7 +26,7 @@
     "idempotency_key": {"type": "string", "minLength": 16, "maxLength": 256},
     "reserved_capacity": {"type": "object", "additionalProperties": false, "required": ["cancel", "recovery"], "properties": {"cancel": {"type": "integer", "minimum": 1, "maximum": 9007199254740991}, "recovery": {"type": "integer", "minimum": 1, "maximum": 9007199254740991}}},
     "recovery_evidence_reference": {"type": ["string", "null"], "minLength": 1},
-    "effect_evidence": {"type": "object", "additionalProperties": false, "required": ["ack_ids", "observed_at"], "properties": {"ack_ids": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1}}, "observed_at": {"type": "string", "format": "date-time", "pattern": "Z$"}}},
+    "effect_evidence": {"type": "object", "additionalProperties": false, "required": ["ack_ids", "observed_at"], "properties": {"ack_ids": {"type": "array", "minItems": 0, "uniqueItems": true, "items": {"type": "string", "minLength": 1}}, "observed_at": {"type": "string", "format": "date-time", "pattern": "Z$"}}},
     "outcome": {"enum": ["APPLIED", "REJECTED", "PARTIAL", "TIMEOUT", "UNKNOWN"]},
     "reconciliation_required": {"type": "boolean"},
     "restores_normal": {"const": false},

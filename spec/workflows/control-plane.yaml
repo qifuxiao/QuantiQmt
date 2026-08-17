@@ -34,6 +34,9 @@ workflow:
     on_effect: [block_new_order_intent, block_new_risk_approval, preserve_cancel, preserve_recovery, preserve_approved_reduce_risk]
     stale_expected_version: reject_without_event
     timeout_after_dispatch: UNKNOWN_and_reconcile_same_idempotency_key
+    result_identity: namespaced_result_id_plus_canonical_complete_result_fingerprint_distinct_from_command_identity
+    result_duplicate: only_same_namespaced_result_identity_and_same_canonical_result_content
+    result_effect_evidence: authority_bound_APPLIED_complete_REJECTED_empty_PARTIAL_strict_subset_TIMEOUT_UNKNOWN_incomplete_known_subset
     disable_recovery_authority: strict_open_barrier_identity_version_checksum_generation_digest_policy_authorization_and_freshness
     disable_recovery_validation: same_complete_recovery_barrier_validator_as_mode_recovery
     outcomes: {APPLIED: desired_state_and_increment_once, REJECTED: accepted_state_and_version_unchanged, PARTIAL: fail_closed_ON_version_unchanged_reconcile, TIMEOUT: UNKNOWN_version_unchanged_reconcile_same_identity, UNKNOWN: UNKNOWN_version_unchanged_reconcile_same_identity}

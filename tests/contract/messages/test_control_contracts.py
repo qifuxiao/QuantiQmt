@@ -3,7 +3,6 @@ from __future__ import annotations
 import ast
 import hashlib
 import json
-import math
 from copy import deepcopy
 from decimal import Decimal
 from pathlib import Path
@@ -11,7 +10,8 @@ from typing import Any, ClassVar
 
 import pytest
 import yaml
-from jsonschema import Draft202012Validator, FormatChecker, RefResolver, ValidationError
+from jsonschema import Draft202012Validator, FormatChecker, ValidationError
+from referencing import Registry, Resource
 from test_market_data_contracts import _jcs as _market_jcs
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -57,29 +57,6 @@ def _schema_store() -> dict[str, Any]:
 
 def _validator(relative: str) -> Draft202012Validator:
     schema = _load(SCHEMAS / relative)
-    if relative == "control/validation-context.v1.schema.json":
-        control_plane = deepcopy(_load(SCHEMAS / "control/control-plane.v1.schema.json"))
-        control_plane.pop("$id", None)
-
-        def rebase_refs(value: Any, *, local_control_plane: bool) -> None:
-            if isinstance(value, dict):
-                if (
-                    local_control_plane
-                    and isinstance(value.get("$ref"), str)
-                    and value["$ref"].startswith("#/")
-                ):
-                    value["$ref"] = "#/$defs/controlPlane/" + value["$ref"][2:]
-                elif value.get("$ref") == "urn:quantiqmt:contract:control-plane:v1":
-                    value["$ref"] = "#/$defs/controlPlane"
-                for child in value.values():
-                    rebase_refs(child, local_control_plane=local_control_plane)
-            elif isinstance(value, list):
-                for child in value:
-                    rebase_refs(child, local_control_plane=local_control_plane)
-
-        rebase_refs(schema, local_control_plane=False)
-        rebase_refs(control_plane, local_control_plane=True)
-        schema["$defs"]["controlPlane"] = control_plane
     if relative == "control/combined-control-message.v1.schema.json":
         store = _schema_store()
         envelope = deepcopy(store["urn:quantiqmt:contract:message-envelope:v1"])
@@ -95,12 +72,13 @@ def _validator(relative: str) -> Draft202012Validator:
                 store[EVENT_IDS[message_type]]
             )
     Draft202012Validator.check_schema(schema)
-    store = _schema_store()
-    store[""] = schema
+    registry = Registry().with_resources(
+        (uri, Resource.from_contents(document)) for uri, document in _schema_store().items()
+    )
     return Draft202012Validator(
         schema,
         format_checker=FormatChecker(),
-        resolver=RefResolver.from_schema(schema, store=store),
+        registry=registry,
     )
 
 
@@ -141,67 +119,22 @@ HEALTH_TRANSITIONS = {
 
 
 def _jcs(value: Any) -> str:
-    """Small RFC 8785-compatible reference for the contract test vectors."""
-    _validate_safe_integers(value)
-    if not _contains_float(value):
-        return _market_jcs(value)
-    if value is None:
-        return "null"
-    if value is True:
-        return "true"
-    if value is False:
-        return "false"
-    if isinstance(value, int) and not isinstance(value, bool):
-        if abs(value) > SAFE_INTEGER_MAX:
-            raise ValueError("I-JSON safe integer required")
-        return str(value)
+    """RFC 8785 JCS restricted to safe integers and decimal strings."""
+    _validate_checksum_number_domain(value)
+    return _market_jcs(value)
+
+
+def _validate_checksum_number_domain(value: Any) -> None:
     if isinstance(value, float):
-        if not math.isfinite(value):
-            raise ValueError("non-finite number")
-        if value == 0:
-            return "0"
-        text = repr(value).lower()
-        if "e" not in text:
-            return text
-        mantissa, exponent = text.split("e")
-        exponent_value = int(exponent)
-        absolute = abs(value)
-        if 1e-6 <= absolute < 1e21:
-            fixed = format(Decimal(text), "f")
-            if "." in fixed:
-                fixed = fixed.rstrip("0").rstrip(".")
-            return fixed
-        sign = "+" if exponent_value >= 0 else "-"
-        return f"{mantissa}e{sign}{abs(exponent_value)}"
-    if isinstance(value, str):
-        return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
-    if isinstance(value, list):
-        return "[" + ",".join(_jcs(item) for item in value) + "]"
-    if isinstance(value, dict):
-        keys = sorted(value, key=lambda key: key.encode("utf-16-be", "surrogatepass"))
-        return "{" + ",".join(f"{_jcs(key)}:{_jcs(value[key])}" for key in keys) + "}"
-    raise TypeError(f"unsupported canonical value: {type(value).__name__}")
-
-
-def _contains_float(value: Any) -> bool:
-    if isinstance(value, float):
-        return True
-    if isinstance(value, list):
-        return any(_contains_float(item) for item in value)
-    if isinstance(value, dict):
-        return any(_contains_float(item) for item in value.values())
-    return False
-
-
-def _validate_safe_integers(value: Any) -> None:
+        raise ValueError("non-integer JSON number is outside checksum number domain")
     if isinstance(value, int) and not isinstance(value, bool) and abs(value) > SAFE_INTEGER_MAX:
         raise ValueError("I-JSON safe integer required")
     if isinstance(value, list):
         for item in value:
-            _validate_safe_integers(item)
+            _validate_checksum_number_domain(item)
     if isinstance(value, dict):
         for item in value.values():
-            _validate_safe_integers(item)
+            _validate_checksum_number_domain(item)
 
 
 def _canonical(value: Any) -> bytes:
@@ -251,6 +184,10 @@ def _hard_limit_policy_projection(policy: dict[str, Any]) -> dict[str, Any]:
 
 def _kill_command_fingerprint_projection(command: dict[str, Any]) -> dict[str, Any]:
     return {key: value for key, value in command.items() if key != "command_fingerprint"}
+
+
+def _kill_result_fingerprint_projection(result: dict[str, Any]) -> dict[str, Any]:
+    return {key: value for key, value in result.items() if key != "result_fingerprint"}
 
 
 class ControlSemanticValidator:
@@ -308,8 +245,10 @@ class ControlSemanticValidator:
                 if fingerprint != _sha(_kill_command_fingerprint_projection(message)):
                     raise ValueError("kill command fingerprint mismatch")
             elif dto_type == "KILL_SWITCH_RESULT":
-                identity_key = message["command_id"]
-                fingerprint = message["command_fingerprint"]
+                identity_key = f"KILL_SWITCH_RESULT:{message['result_id']}"
+                fingerprint = message["result_fingerprint"]
+                if fingerprint != _sha(_kill_result_fingerprint_projection(message)):
+                    raise ValueError("kill result fingerprint mismatch")
             else:
                 raise ValueError("unsupported control DTO type")
             decision = self._identity_decision(identity_key, fingerprint, context)
@@ -619,11 +558,7 @@ class ControlSemanticValidator:
             self._validate_accepted_recovery_barrier(payload, context)
         if payload["desired_state"] == "ON" and payload["recovery_evidence_reference"] is not None:
             raise ValueError("enable cannot carry recovery evidence")
-        expected_ack_ids = authority.get("effect_ack_ids")
-        if expected_ack_ids is not None and set(payload["effect_evidence"]["ack_ids"]) != set(
-            expected_ack_ids
-        ):
-            raise ValueError("kill switch effect acknowledgement binding mismatch")
+        self._validate_kill_effect_evidence(payload, authority, context)
         if (
             payload["policy_version"] != context["accepted_policy"]["version"]
             or payload["policy_checksum"] != context["accepted_policy"]["checksum"]
@@ -693,6 +628,7 @@ class ControlSemanticValidator:
         ):
             raise ValueError("kill result authority mismatch")
         self._validate_kill_outcome(result, authority)
+        self._validate_kill_effect_evidence(result, authority, context)
         if result["outcome"] == "APPLIED" and result["applied_at"] is None:
             raise ValueError("applied result requires applied_at")
         if result["outcome"] != "APPLIED" and result["applied_at"] is not None:
@@ -724,6 +660,28 @@ class ControlSemanticValidator:
             result["reconciliation_required"],
         ) != expected:
             raise ValueError("kill switch outcome matrix mismatch")
+
+    def _validate_kill_effect_evidence(
+        self,
+        result: dict[str, Any],
+        authority: dict[str, Any],
+        context: dict[str, Any],
+    ) -> None:
+        expected_ack_ids = set(authority["effect_ack_ids"])
+        acknowledged = set(result["effect_evidence"]["ack_ids"])
+        if result["effect_evidence"]["observed_at"] > context["evaluation_at"]:
+            raise ValueError("kill switch effect evidence observed in future")
+        if not acknowledged <= expected_ack_ids:
+            raise ValueError("kill switch effect evidence contains unknown acknowledgement")
+        outcome = result["outcome"]
+        if outcome == "APPLIED" and acknowledged != expected_ack_ids:
+            raise ValueError("applied kill switch requires every expected effect acknowledgement")
+        if outcome == "REJECTED" and acknowledged:
+            raise ValueError("rejected kill switch cannot claim effect acknowledgement")
+        if outcome == "PARTIAL" and (not acknowledged or acknowledged == expected_ack_ids):
+            raise ValueError("partial kill switch requires a strict acknowledgement subset")
+        if outcome in {"TIMEOUT", "UNKNOWN"} and acknowledged == expected_ack_ids:
+            raise ValueError("uncertain kill switch outcome cannot claim complete effect evidence")
 
     def _validate_accepted_recovery_barrier(
         self, reference: dict[str, Any], context: dict[str, Any]
@@ -1725,27 +1683,31 @@ def test_control_lineage_context_is_mandatory_and_collision_safe() -> None:
     assert checker.validate_control_message(message, rejected)["status"] == "DUPLICATE"
 
 
-@pytest.mark.parametrize(
-    ("value", "expected"),
-    [
-        (1e-7, "1e-7"),
-        (1e-6, "0.000001"),
-        (1e20, "100000000000000000000"),
-        (1e21, "1e+21"),
-        (-0.0, "0"),
-        (1.2345678901234567e-5, "0.000012345678901234568"),
-        (333333333.33333329, "333333333.3333333"),
-    ],
-)
-def test_control_rfc8785_reference_number_vectors(value: float, expected: str) -> None:
-    assert _jcs(value) == expected
-
-
 def test_control_rfc8785_rejects_non_finite_and_unsafe_numbers() -> None:
     for value in (float("nan"), float("inf"), -float("inf"), SAFE_INTEGER_MAX + 1):
         with pytest.raises(ValueError):
             _canonical(value)
     assert _canonical({"𐀀": 1, "\ue000": 2}).decode("utf-8").startswith('{"𐀀":1')
+
+
+def test_control_checksum_numeric_domain_rejects_nested_floats() -> None:
+    candidate = deepcopy(
+        next(
+            item
+            for item in _load(FIXTURES / "control-plane.v1/valid.json")["dtos"]
+            if item["dto_type"] == "CONFIG_CANDIDATE"
+        )
+    )
+    candidate["payload"]["nested"] = {"unsafe_number": 1.25}
+    assert not _validator("control/control-plane.v1.schema.json").is_valid(candidate)
+    with pytest.raises(ValueError, match=r"non-integer|number domain"):
+        _canonical({"payload": {"nested": [1.25]}})
+
+    assert _canonical({"minimum": -SAFE_INTEGER_MAX, "maximum": SAFE_INTEGER_MAX})
+    assert _canonical({"amount": "123.45"}) == _market_jcs({"amount": "123.45"}).encode("utf-8")
+    for value in (-SAFE_INTEGER_MAX - 1, SAFE_INTEGER_MAX + 1):
+        with pytest.raises(ValueError, match="safe integer"):
+            _canonical({"nested": [value]})
 
 
 def test_control_dtos_reject_arbitrary_and_high_cardinality_fields() -> None:
@@ -1922,6 +1884,21 @@ def test_open_recovery_barrier_requires_opened_at() -> None:
         _validator("control/validation-context.v1.schema.json").validate(context)
 
 
+@pytest.mark.parametrize("dto_type", ["CONFIG_CANDIDATE", "KILL_SWITCH_COMMAND"])
+def test_recovery_barrier_authority_embeds_only_recovery_barrier(dto_type: str) -> None:
+    document = _load(FIXTURES / "control-plane.v1/valid.json")
+    context = _validation_context("corr-mode-000001")
+    validator = _validator("control/validation-context.v1.schema.json")
+    validator.validate(context)
+
+    invalid = deepcopy(context)
+    invalid["accepted_recovery_barriers"]["barrier-1"]["barrier"] = deepcopy(
+        next(item for item in document["dtos"] if item["dto_type"] == dto_type)
+    )
+    with pytest.raises(ValidationError):
+        validator.validate(invalid)
+
+
 def test_same_identity_same_fingerprint_is_stable_duplicate_before_authority_checks() -> None:
     payload = _load(FIXTURES / "control-events.json")["system.mode_changed.v1"]
     message = _combined_fixture("system.mode_changed.v1", payload)
@@ -1960,6 +1937,10 @@ def test_control_dispatch_includes_commands_and_all_side_effect_boundaries() -> 
     assert {"CONFIG_CANDIDATE", "KILL_SWITCH_COMMAND", "KILL_SWITCH_RESULT"}.issubset(
         document["rules"]["event_specific_dispatch"]["exhaustive"]
     )
+    kill_switch = document["rules"]["kill_switch"]
+    assert kill_switch["result_identity"]["namespace"] == "KILL_SWITCH_RESULT"
+    assert kill_switch["result_identity"]["identity_field"] == "result_id"
+    assert kill_switch["result_identity"]["fingerprint_field"] == "result_fingerprint"
 
 
 def test_config_candidate_checksum_covers_payload_boundary_and_hard_limit_policy() -> None:
@@ -2298,17 +2279,21 @@ def test_config_event_binds_secret_references_and_all_candidate_security_fields(
 
 
 @pytest.mark.parametrize(
-    ("outcome", "effective_state", "current_version", "reconciliation_required"),
+    ("outcome", "effective_state", "current_version", "reconciliation_required", "ack_ids"),
     [
-        ("APPLIED", "ON", 2, False),
-        ("REJECTED", "OFF", 1, False),
-        ("PARTIAL", "ON", 1, True),
-        ("TIMEOUT", "UNKNOWN", 1, True),
-        ("UNKNOWN", "UNKNOWN", 1, True),
+        ("APPLIED", "ON", 2, False, ["ack-kill-000001"]),
+        ("REJECTED", "OFF", 1, False, []),
+        ("PARTIAL", "ON", 1, True, ["ack-kill-000001"]),
+        ("TIMEOUT", "UNKNOWN", 1, True, []),
+        ("UNKNOWN", "UNKNOWN", 1, True, []),
     ],
 )
 def test_public_kill_switch_outcome_matrix(
-    outcome: str, effective_state: str, current_version: int, reconciliation_required: bool
+    outcome: str,
+    effective_state: str,
+    current_version: int,
+    reconciliation_required: bool,
+    ack_ids: list[str],
 ) -> None:
     payload = deepcopy(_load(FIXTURES / "control-events.json")["system.kill_switch_changed.v1"])
     payload.update(
@@ -2317,7 +2302,13 @@ def test_public_kill_switch_outcome_matrix(
         current_version=current_version,
         reconciliation_required=reconciliation_required,
     )
+    payload["effect_evidence"]["ack_ids"] = ack_ids
     context = _validation_context(payload["correlation_id"])
+    if outcome == "PARTIAL":
+        context["accepted_state"]["kill_switch"]["effect_ack_ids"] = [
+            "ack-kill-000001",
+            "ack-kill-000002",
+        ]
     ControlSemanticValidator().validate_control_message(
         _combined_fixture("system.kill_switch_changed.v1", payload), context
     )
@@ -2334,19 +2325,9 @@ def test_public_kill_switch_outcome_matrix(
             )
 
 
-@pytest.mark.parametrize(
-    ("outcome", "effective_state", "current_version", "reconciliation_required"),
-    [
-        ("APPLIED", "ON", 3, False),
-        ("REJECTED", "OFF", 2, False),
-        ("PARTIAL", "ON", 2, True),
-        ("TIMEOUT", "UNKNOWN", 2, True),
-        ("UNKNOWN", "UNKNOWN", 2, True),
-    ],
-)
-def test_internal_kill_switch_result_outcome_matrix(
-    outcome: str, effective_state: str, current_version: int, reconciliation_required: bool
-) -> None:
+def _prepared_kill_result(
+    outcome: str = "APPLIED",
+) -> tuple[dict[str, Any], dict[str, Any]]:
     document = _load(FIXTURES / "control-plane.v1/valid.json")
     result = deepcopy(
         next(item for item in document["dtos"] if item["dto_type"] == "KILL_SWITCH_RESULT")
@@ -2354,28 +2335,128 @@ def test_internal_kill_switch_result_outcome_matrix(
     command = deepcopy(
         next(item for item in document["dtos"] if item["dto_type"] == "KILL_SWITCH_COMMAND")
     )
+    expected = {
+        "APPLIED": ("ON", 3, False, "2026-08-11T01:00:00Z", ["ack-kill-000001", "ack-kill-000002"]),
+        "REJECTED": ("OFF", 2, False, None, []),
+        "PARTIAL": ("ON", 2, True, None, ["ack-kill-000001"]),
+        "TIMEOUT": ("UNKNOWN", 2, True, None, []),
+        "UNKNOWN": ("UNKNOWN", 2, True, None, []),
+    }[outcome]
     result.update(
+        result_id=f"kill-result-{outcome.lower()}-0001",
+        result_fingerprint="0" * 64,
         outcome=outcome,
-        effective_state=effective_state,
-        current_version=current_version,
-        reconciliation_required=reconciliation_required,
-        applied_at="2026-08-11T01:00:00Z" if outcome == "APPLIED" else None,
+        effective_state=expected[0],
+        current_version=expected[1],
+        reconciliation_required=expected[2],
+        applied_at=expected[3],
+        effect_evidence={
+            "ack_ids": expected[4],
+            "observed_at": "2026-08-11T01:00:00Z",
+        },
     )
     context = _validation_context(result["correlation_id"])
     command["correlation_id"] = result["correlation_id"]
     command["command_fingerprint"] = _sha(_kill_command_fingerprint_projection(command))
     result["command_fingerprint"] = command["command_fingerprint"]
+    result["result_fingerprint"] = _sha(_kill_result_fingerprint_projection(result))
     context["accepted_state"]["kill_switch"].update(
         current_version=2,
         effective_state="OFF",
         command=command,
+        effect_ack_ids=["ack-kill-000001", "ack-kill-000002"],
     )
+    return result, context
+
+
+def test_kill_result_uses_independent_identity_and_canonical_fingerprint() -> None:
+    result, context = _prepared_kill_result()
+    context["identity_history"][result["command_id"]] = {
+        "fingerprint": result["command_fingerprint"],
+        "decision": "ACCEPTED",
+    }
+    checker = ControlSemanticValidator()
+    assert checker.validate_control_message(result, context)["status"] == "ACCEPTED"
+
+    duplicate = deepcopy(context)
+    duplicate["identity_history"][f"KILL_SWITCH_RESULT:{result['result_id']}"] = {
+        "fingerprint": result["result_fingerprint"],
+        "decision": "ACCEPTED",
+    }
+    duplicate["accepted_state"]["kill_switch"]["current_version"] = 99
+    assert checker.validate_control_message(result, duplicate)["status"] == "DUPLICATE"
+
+    tamper_mutations = (
+        lambda item: item.update({"idempotency_key": "idem-kill-forged-01"}),
+        lambda item: item.update(
+            {
+                "outcome": "UNKNOWN",
+                "effective_state": "UNKNOWN",
+                "current_version": 2,
+                "applied_at": None,
+                "reconciliation_required": True,
+                "effect_evidence": {
+                    "ack_ids": [],
+                    "observed_at": "2026-08-11T01:00:00Z",
+                },
+            }
+        ),
+        lambda item: item.update({"previous_version": 8, "current_version": 9}),
+        lambda item: item.update({"authorization_id": "forged-authorization"}),
+        lambda item: item.update({"leader_lease_id": "forged-lease"}),
+        lambda item: item["effect_evidence"].update({"ack_ids": ["forged-ack"]}),
+    )
+    for mutate in tamper_mutations:
+        tampered = deepcopy(result)
+        mutate(tampered)
+        with pytest.raises(ValueError, match="result fingerprint"):
+            checker.validate_control_message(tampered, duplicate)
+
+    conflict = deepcopy(result)
+    conflict["effect_evidence"]["ack_ids"] = ["forged-ack"]
+    conflict["result_fingerprint"] = _sha(_kill_result_fingerprint_projection(conflict))
+    with pytest.raises(ValueError, match="conflict"):
+        checker.validate_control_message(conflict, duplicate)
+
+
+@pytest.mark.parametrize(
+    "outcome",
+    ["APPLIED", "REJECTED", "PARTIAL", "TIMEOUT", "UNKNOWN"],
+)
+def test_internal_kill_switch_result_outcome_and_effect_matrix(outcome: str) -> None:
+    result, context = _prepared_kill_result(outcome)
     ControlSemanticValidator().validate_control_message(result, context)
 
-    invalid = deepcopy(result)
-    invalid["current_version"] += 5
+    invalid_ack_sets = {
+        "APPLIED": [[], ["ack-kill-000001"], ["forged-ack"]],
+        "REJECTED": [["ack-kill-000001"], ["forged-ack"]],
+        "PARTIAL": [
+            ["ack-kill-000001", "ack-kill-000002"],
+            ["ack-kill-000001", "forged-ack"],
+        ],
+        "TIMEOUT": [
+            ["ack-kill-000001", "ack-kill-000002"],
+            ["forged-ack"],
+        ],
+        "UNKNOWN": [
+            ["ack-kill-000001", "ack-kill-000002"],
+            ["forged-ack"],
+        ],
+    }[outcome]
+    for ack_ids in invalid_ack_sets:
+        invalid = deepcopy(result)
+        invalid["effect_evidence"]["ack_ids"] = ack_ids
+        invalid["result_fingerprint"] = _sha(_kill_result_fingerprint_projection(invalid))
+        with pytest.raises((ValueError, ValidationError), match=r"effect|ack|outcome"):
+            ControlSemanticValidator().validate_control_message(invalid, context)
+
+    invalid_version = deepcopy(result)
+    invalid_version["current_version"] += 5
+    invalid_version["result_fingerprint"] = _sha(
+        _kill_result_fingerprint_projection(invalid_version)
+    )
     with pytest.raises((ValueError, ValidationError), match=r"outcome|version"):
-        ControlSemanticValidator().validate_control_message(invalid, context)
+        ControlSemanticValidator().validate_control_message(invalid_version, context)
 
 
 @pytest.mark.parametrize("message_type", list(EVENT_SCHEMAS))
@@ -2392,3 +2473,17 @@ def test_public_control_causation_length_matches_envelope(message_type: str) -> 
     message = _combined_fixture(message_type, payload)
     message["causation_id"] = payload["causation_id"]
     assert not _validator("control/combined-control-message.v1.schema.json").is_valid(message)
+
+
+def test_task022_verification_evidence_does_not_claim_full_suite_passed() -> None:
+    task = (ROOT / "tasks/active/TASK-022-observability-control-contracts.md").read_text(
+        encoding="utf-8"
+    )
+    assert "passes 563 tests" not in task
+    assert "6 failed" in task
+    assert "4 errors" in task
+    assert "22 control-contract failures" in task
+    assert "2026-08-13" in task
+    assert "acceptance_status: partial" in task
+    assert "review_status: pending" in task
+    assert "release_status: prohibited" in task
