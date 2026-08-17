@@ -46,8 +46,9 @@ event-specific decision; no barrier-only shortcut may bypass freshness,
 authority or lineage checks.
 
 `validation_context` is mandatory and is the `CONTRACT-CONTROL-VALIDATION-CONTEXT-V1`
-DTO: it contains injected `evaluation_at`, accepted policy identity, known
-message lineage, identity/fingerprint history, and accepted config/market/audit/
+DTO: it contains injected `evaluation_at`, the validation boundary, accepted
+policy identity, known message lineage, generic identity/fingerprint history,
+the independent bounded Kill Switch aggregate registry, and accepted config/market/audit/
 lease/component/reconciliation/critical-lag authorities. Omitting or supplying
 an empty context is a validation error; a missing parent is never treated as a
 root event.
@@ -113,24 +114,29 @@ evidence. `UNKNOWN` is returned for possible commit and requires an
 authoritative query; a new idempotency identity is forbidden. Disabling the
 switch requires a verified recovery-evidence reference and MUST NOT restore
 NORMAL automatically.
-Internal command history always uses `KILL_SWITCH_COMMAND:{command_id}`; raw
-external IDs are never registry keys. A `KILL_SWITCH_RESULT` has its own
-`result_id` and canonical `result_fingerprint` under the disjoint
-`KILL_SWITCH_RESULT:{result_id}` namespace. A second command-result index is
-`KILL_SWITCH_COMMAND_RESULT:` plus SHA-256 of RFC 8785 JCS over exactly
-`{command_id,idempotency_key,scope}`. It permits exactly one result per command.
-The immutable command-history, command-result and result-entity records MUST be
-registered atomically. Both result records carry command identity/idempotency,
-scope and fingerprint plus result identity/fingerprint and reciprocal pointers.
-Before every result acceptance or duplicate decision, the complete namespaced
-registry is audited as a bijection: result-only or command-result-only orphans,
-missing/wrong backlinks, multiple results for one command, one result linked to
-multiple commands, or divergent decision/fingerprint evidence fail closed.
-Recovery restore has the same global audit and cannot continue from a partial
-snapshot. Only a replay matching both indexes and the original immutable command
-history is `DUPLICATE`; it is stable after current command authority advances.
-First results alone consult current command/authorization/lease/version/effect
-authority before atomically recording all three histories.
+Kill Switch idempotency uses one dedicated, bounded `kill_switch_registry`, not
+generic `identity_history`. Its exact map key is lowercase SHA-256 over RFC 8785
+JCS for `{identity_type:"KILL_SWITCH_COMMAND",command_id,idempotency_key,scope}`;
+external IDs and strings that resemble internal prefixes are never registry
+keys or discriminators. Each append-once entry contains one complete immutable,
+semantically `ACCEPTED` command snapshot, accepted authorization/lease/effect
+authority, and either `result:null` at record version 1 or one complete immutable
+result at record version 2. Rejected commands remain audit facts and can never
+authorize a result. The first result performs an O(1) exact lookup and CAS from
+`result:null` to the exact result. An exact result replay is `DUPLICATE` before
+mutable current authority; changed result ID, outcome, effect or other content is
+`CONFLICT`. A first result after the current aggregate advances is stale and
+fails closed for same-identity reconciliation; it is not a duplicate.
+
+The registry hard cap is 4096 entries: the smallest power of two above the NFR
+workload's 2000 active instruments plus 100 strategy instances, leaving bounded
+account/global and transition headroom. At capacity, new command registration
+fails closed as existing `QQ-STORAGE-7001 IDEMPOTENCY_CONFLICT` until a verified
+durable audit checkpoint covers terminal entries and compaction completes.
+Recovery parses the single registry and verifies every command identity,
+command/result fingerprint, record version and aggregate checksum before any
+entry is loaded; partial restore is forbidden. Business result validation never
+scans the registry or interprets generic-history prefixes.
 That reference resolves only through the strict
 `accepted_recovery_barriers` authority registry. Its map key and barrier ID,
 generation, barrier version/checksum, evidence and aggregate digests, OPEN

@@ -17,7 +17,7 @@ contract:
   order: [validation_context_schema, structural_envelope_or_dto, payload_schema, canonical_fingerprint_recompute, immutable_envelope_payload_binding, identity_collision_decision, mutable_lineage_policy_authority, event_or_dto_semantics, final_decision]
   result: {valid: continue, invalid: reject_without_mutation}
   combined_message_schema: CONTRACT-CONTROL-COMBINED-MESSAGE-V1
-  required_context: [evaluation_at, accepted_policy, known_messages, identity_history, accepted_state]
+  required_context: [evaluation_at, validation_boundary, accepted_policy, known_messages, identity_history, kill_switch_registry, accepted_state]
   validation_context_schema: CONTRACT-CONTROL-VALIDATION-CONTEXT-V1
   recovery_barrier_context: accepted_state.recovery_barrier_or_registry_entry_as_strict_authority_record_with_embedded_complete_RECOVERY_BARRIER
   recovery_barrier_dispatch: unified_entry_only_before_event_specific_decision
@@ -145,34 +145,31 @@ rules:
     command_result_binding: [command_id, idempotency_key, command_fingerprint, scope, desired_state, reason_code, expected_version, previous_version, current_version, authorization_id, authorization_version, authorization_checksum, leader_lease_id, leader_id, lease_epoch, fencing_token, recovery_evidence_reference, recovery_barrier_generation, recovery_barrier_version, recovery_barrier_checksum, recovery_evidence_digest, recovery_aggregate_evidence_digest]
     command_fingerprint: SHA256_RFC8785_JCS_over_complete_KILL_SWITCH_COMMAND_excluding_command_fingerprint
     command_identity:
-      namespace: KILL_SWITCH_COMMAND
-      registry_key: "KILL_SWITCH_COMMAND:{command_id}"
-      raw_external_id_never_used_as_internal_registry_key: true
-    result_identity:
-      namespace: KILL_SWITCH_RESULT
-      identity_field: result_id
-      fingerprint_field: result_fingerprint
-      registry_key: "KILL_SWITCH_RESULT:{result_id}"
-      command_identity_is_not_result_identity: true
-      fingerprint: SHA256_RFC8785_JCS_over_complete_KILL_SWITCH_RESULT_excluding_result_fingerprint
-      fingerprint_projection: [dto_type, schema_version, correlation_id, created_at, result_id, command_id, command_fingerprint, idempotency_key, expected_version, scope, desired_state, effective_state, outcome, previous_version, current_version, reason_code, applied_at, reconciliation_required, effect_evidence, authorization_id, leader_lease_id, fencing_token, restores_normal]
-      duplicate_order: structural_schema_then_canonical_result_fingerprint_then_immutable_self_binding_then_global_registry_consistency_audit_then_dual_index_exact_match_then_immutable_command_history_binding_then_duplicate_before_current_authority
-      collision: same_namespaced_result_identity_same_canonical_result_duplicate; same_namespaced_result_identity_different_canonical_result_conflict
-    command_result_identity:
-      namespace: KILL_SWITCH_COMMAND_RESULT
-      projection: [command_id, idempotency_key, scope]
-      registry_key: "KILL_SWITCH_COMMAND_RESULT:{sha256_rfc8785_jcs(projection)}"
-      cardinality: exactly_one_result_per_command_identity
-      duplicate: command_result_and_result_entity_indexes_both_exist_with_same_result_fingerprint
-      collision: existing_command_result_with_different_result_id_or_fingerprint_or_content_reject
-      result_entity_record: [record_type, decision, fingerprint, command_identity, command_id, command_idempotency_key, command_scope, command_fingerprint, result_identity, result_id, result_fingerprint, command_result_identity]
-      command_result_record: same_immutable_fields_as_result_entity_with_record_type_KILL_SWITCH_COMMAND_RESULT_and_backlink_to_unique_result_identity
-      command_history_record: [record_type, decision, fingerprint, command_identity, command_id, command_idempotency_key, command_scope, command_fingerprint]
-      atomic_registration: immutable_command_history_and_command_result_index_and_result_entity_index_same_transaction
-      global_registry_audit: before_every_first_result_or_duplicate_scan_all_namespaced_result_and_command_result_records_for_orphans_missing_or_wrong_backlinks_duplicate_command_or_result_mappings_and_decision_or_fingerprint_divergence
-      recovery_restore: entire_registry_bijection_and_immutable_command_history_required_or_fail_closed_without_accepting_a_new_result
-      late_duplicate: complete_dual_index_and_original_immutable_command_history_exact_match_returns_stable_DUPLICATE_without_reading_current_accepted_command
-      first_result: current_accepted_command_authorization_lease_version_and_effect_authority_required_then_atomic_three_record_registration
+      discriminator: KILL_SWITCH_COMMAND
+      projection_order: [identity_type, command_id, idempotency_key, scope]
+      projection: {identity_type: KILL_SWITCH_COMMAND, command_id: command.command_id, idempotency_key: command.idempotency_key, scope: command.scope}
+      algorithm: SHA256_RFC8785_JCS_UTF8_NO_BOM_LOWER_HEX
+      registry_key: exact_64_lower_hex_digest
+      raw_external_id_or_prefix_never_used_as_internal_registry_key: true
+    aggregate_registry:
+      context_field: kill_switch_registry
+      storage: independent_from_generic_identity_history
+      lookup: O_1_exact_entries_get_command_identity
+      prefix_scan: forbidden
+      capacity: 4096
+      capacity_basis: smallest_power_of_two_above_NFR_2000_active_instruments_plus_100_strategy_instances_with_account_global_and_transition_headroom
+      full_behavior: fail_closed_QQ_STORAGE_7001_IDEMPOTENCY_CONFLICT_until_verified_checkpoint_compaction
+      entry: [command_identity, command_decision_ACCEPTED, complete_immutable_command, accepted_at, lease_authority, authorization_authority, expected_effect_ack_ids, result_nullable, record_version, aggregate_checksum]
+      accepted_commands_only: true
+      rejected_command_audit_location: generic_audit_history_not_result_authority
+      command_replay: same_identity_and_exact_command_fingerprint_and_content_DUPLICATE_otherwise_CONFLICT
+      first_result: exact_lookup_then_bind_immutable_command_then_current_version_staleness_outcome_effect_validation_then_CAS_result_null_record_version_1_to_exact_result_record_version_2
+      result_replay: exact_result_id_fingerprint_and_complete_content_DUPLICATE_before_mutable_current_authority
+      result_collision: any_changed_result_id_or_content_CONFLICT
+      recovery_restore: schema_then_validate_every_entry_identity_command_and_result_fingerprints_aggregate_checksum_and_record_version_before_load
+      malformed_or_partial_restore: fail_closed_without_partial_load
+      checkpoint_compaction: only_after_verified_durable_audit_checkpoint_covers_removed_terminal_aggregates
+      generic_identity_history_prefix_like_keys: ordinary_identity_only_and_never_inspected_by_kill_registry
     effect_evidence:
       authority: validation_context.accepted_state.kill_switch.effect_ack_ids
       ack_ids: unique_subset_of_accepted_authority

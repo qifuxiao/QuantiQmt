@@ -12,11 +12,32 @@
     "common": {
       "unevaluatedProperties": false,
       "allOf": [
-        {"$ref": "urn:quantiqmt:contract:message-envelope:v1"},
+        {
+          "$comment": "Control-owned closed composition of MessageEnvelopeV1; the shared envelope remains unchanged and independently valid.",
+          "type": "object",
+          "required": ["message_id", "message_type", "schema_version", "occurred_at", "received_at", "correlation_id", "source", "partition_key", "payload"],
+          "properties": {
+            "message_id": {"type": "string", "minLength": 16, "maxLength": 64},
+            "message_type": {"type": "string", "pattern": "^[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*\\.v[1-9][0-9]*$"},
+            "schema_version": {"type": "integer", "minimum": 1},
+            "occurred_at": {"type": "string", "format": "date-time"},
+            "received_at": {"type": "string", "format": "date-time"},
+            "correlation_id": {"type": "string", "minLength": 16, "maxLength": 64},
+            "causation_id": {"type": ["string", "null"], "minLength": 16, "maxLength": 64},
+            "aggregate_id": {"type": ["string", "null"], "minLength": 1, "maxLength": 128},
+            "aggregate_version": {"type": ["integer", "null"], "minimum": 1},
+            "source": {"type": "string", "minLength": 1, "maxLength": 128},
+            "partition_key": {"type": "string", "minLength": 1, "maxLength": 256},
+            "idempotency_key": {"type": ["string", "null"], "minLength": 1, "maxLength": 256},
+            "payload": {"type": "object"}
+          }
+        },
         {
           "type": "object",
           "required": ["publisher", "aggregate_type", "aggregate_id", "aggregate_version", "idempotency_key", "payload_fingerprint", "causation_id", "payload"],
           "properties": {
+            "occurred_at": {"type": "string", "format": "date-time", "pattern": "^\\d{4}-\\d{2}-\\d{2}T(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d{1,6})?Z$"},
+            "received_at": {"type": "string", "format": "date-time", "pattern": "^\\d{4}-\\d{2}-\\d{2}T(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d{1,6})?Z$"},
             "publisher": {"type": "string", "minLength": 1},
             "aggregate_type": {"type": "string", "minLength": 1},
             "aggregate_id": {"type": "string", "minLength": 1},

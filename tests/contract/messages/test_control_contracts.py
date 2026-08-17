@@ -72,9 +72,6 @@ def _validator(relative: str) -> Draft202012Validator:
     schema = _load(SCHEMAS / relative)
     if relative == "control/combined-control-message.v1.schema.json":
         store = _schema_store()
-        envelope = deepcopy(store["urn:quantiqmt:contract:message-envelope:v1"])
-        envelope.pop("$id", None)
-        schema["$defs"]["common"]["allOf"][0] = envelope
         for name, message_type in (
             ("mode", "system.mode_changed.v1"),
             ("component", "system.component_health_changed.v1"),
@@ -96,6 +93,7 @@ def _validator(relative: str) -> Draft202012Validator:
 
 
 SAFE_INTEGER_MAX = 9_007_199_254_740_991
+KILL_SWITCH_REGISTRY_CAPACITY = 4096
 CONFIG_AUTHORITY_CHECKSUM = "a3022467272c3fda695728c1dd75e408258ff871dcedfbdc60d3c8f9f5dff03b"
 
 MODE_TRANSITIONS = {
@@ -248,20 +246,18 @@ def _kill_result_fingerprint_projection(result: dict[str, Any]) -> dict[str, Any
 
 
 def _kill_command_identity(command: dict[str, Any]) -> str:
-    return f"KILL_SWITCH_COMMAND:{command['command_id']}"
+    return _sha(
+        {
+            "identity_type": "KILL_SWITCH_COMMAND",
+            "command_id": command["command_id"],
+            "idempotency_key": command["idempotency_key"],
+            "scope": command["scope"],
+        }
+    )
 
 
-def _kill_result_identity(result: dict[str, Any]) -> str:
-    return f"KILL_SWITCH_RESULT:{result['result_id']}"
-
-
-def _kill_command_result_identity(result: dict[str, Any]) -> str:
-    projection = {
-        "command_id": result["command_id"],
-        "idempotency_key": result["idempotency_key"],
-        "scope": result["scope"],
-    }
-    return f"KILL_SWITCH_COMMAND_RESULT:{_sha(projection)}"
+def _kill_aggregate_checksum(entry: dict[str, Any]) -> str:
+    return _sha({key: value for key, value in entry.items() if key != "aggregate_checksum"})
 
 
 class ControlSemanticValidator:
@@ -292,14 +288,18 @@ class ControlSemanticValidator:
     ) -> dict[str, Any]:
         required_context = {
             "evaluation_at",
+            "validation_boundary",
             "accepted_policy",
             "known_messages",
             "identity_history",
+            "kill_switch_registry",
             "accepted_state",
         }
         if not required_context <= set(context):
             raise ValueError("validation context is required")
         _validator("control/validation-context.v1.schema.json").validate(context)
+        if context["validation_boundary"] == "recovery_restore":
+            self._validate_kill_switch_registry_restore(context)
         for barrier_id, barrier_authority in context.get("accepted_recovery_barriers", {}).items():
             if barrier_authority["barrier_id"] != barrier_id:
                 raise ValueError("recovery barrier authority key mismatch")
@@ -309,30 +309,31 @@ class ControlSemanticValidator:
             self._scan_forbidden_keys(message)
             dto_type = message["dto_type"]
             if dto_type == "CONFIG_CANDIDATE":
-                identity_key = message["idempotency_key"]
                 fingerprint = message["candidate_checksum"]
                 if fingerprint != _sha(_candidate_checksum_projection(message, {})):
                     raise ValueError("config candidate checksum mismatch")
             elif dto_type == "KILL_SWITCH_COMMAND":
-                identity_key = _kill_command_identity(message)
                 fingerprint = message["command_fingerprint"]
                 if fingerprint != _sha(_kill_command_fingerprint_projection(message)):
                     raise ValueError("kill command fingerprint mismatch")
+                decision = self._validate_kill_command_registry_decision(message, context)
+                if decision["status"] == "DUPLICATE":
+                    return decision
+                self._validate_kill_command(message, context)
+                return decision
             elif dto_type == "KILL_SWITCH_RESULT":
                 fingerprint = message["result_fingerprint"]
                 if fingerprint != _sha(_kill_result_fingerprint_projection(message)):
                     raise ValueError("kill result fingerprint mismatch")
-                self._audit_kill_result_registry(context)
-                decision = self._kill_result_identity_decision(message, context)
+                decision, aggregate = self._validate_kill_result_registry_decision(message, context)
                 if decision["status"] == "DUPLICATE":
-                    self._validate_kill_result_duplicate_binding(message, context)
                     return decision
-                self._validate_kill_result_binding(message, context)
-                self._validate_kill_result(message, context)
+                self._validate_kill_result_binding(message, aggregate["command"])
+                self._validate_kill_result(message, context, aggregate)
                 return decision
             else:
                 raise ValueError("unsupported control DTO type")
-            decision = self._identity_decision(identity_key, fingerprint, context)
+            decision = self._identity_decision(message["idempotency_key"], fingerprint, context)
             if decision["status"] == "DUPLICATE":
                 return decision
             self._validate_control_dto(message, context)
@@ -436,162 +437,124 @@ class ControlSemanticValidator:
             "prior_decision": identity["decision"],
         }
 
-    def _kill_result_identity_decision(
-        self, result: dict[str, Any], context: dict[str, Any]
-    ) -> dict[str, Any]:
-        history = context["identity_history"]
-        result_key = _kill_result_identity(result)
-        command_result_key = _kill_command_result_identity(result)
-        result_record = history.get(result_key)
-        command_result_record = history.get(command_result_key)
-        fingerprint = result["result_fingerprint"]
-        if command_result_record is not None:
-            expected = {
-                "command_identity": f"KILL_SWITCH_COMMAND:{result['command_id']}",
-                "command_id": result["command_id"],
-                "command_idempotency_key": result["idempotency_key"],
-                "command_scope": result["scope"],
-                "command_fingerprint": result["command_fingerprint"],
-                "result_identity": result_key,
-                "result_id": result["result_id"],
-                "result_fingerprint": fingerprint,
-                "command_result_identity": command_result_key,
-            }
-            if command_result_record["fingerprint"] != fingerprint:
-                raise ValueError("command-result identity fingerprint conflict")
-            if (
-                result_record is None
-                or result_record["fingerprint"] != fingerprint
-                or result_record["decision"] != command_result_record["decision"]
-                or any(result_record[field] != value for field, value in expected.items())
-                or any(command_result_record[field] != value for field, value in expected.items())
-            ):
-                raise ValueError("command-result canonical result conflict")
-            return {
-                "status": "DUPLICATE",
-                "identity": result_key,
-                "command_result_identity": command_result_key,
-                "prior_decision": command_result_record["decision"],
-            }
-        if result_record is not None:
-            raise ValueError("orphan result identity without command-result authority")
-        return {
-            "status": "ACCEPTED",
-            "identity": result_key,
-            "command_result_identity": command_result_key,
-        }
-
-    def _audit_kill_result_registry(self, context: dict[str, Any]) -> None:
-        history = context["identity_history"]
-        result_records = {
-            key: record for key, record in history.items() if key.startswith("KILL_SWITCH_RESULT:")
-        }
-        command_result_records = {
-            key: record
-            for key, record in history.items()
-            if key.startswith("KILL_SWITCH_COMMAND_RESULT:")
-        }
-        command_to_results: dict[str, set[str]] = {}
-        result_to_commands: dict[str, set[str]] = {}
-        shared_fields = (
-            "fingerprint",
-            "decision",
-            "command_identity",
-            "command_id",
-            "command_idempotency_key",
-            "command_scope",
-            "command_fingerprint",
-            "result_identity",
-            "result_id",
-            "result_fingerprint",
-            "command_result_identity",
-        )
-        required_record_fields = set(shared_fields) | {"record_type"}
-
-        for key, record in (*result_records.items(), *command_result_records.items()):
-            expected_type = (
-                "KILL_SWITCH_RESULT"
-                if key.startswith("KILL_SWITCH_RESULT:")
-                else "KILL_SWITCH_COMMAND_RESULT"
-            )
-            if not required_record_fields <= set(record):
-                raise ValueError("kill result registry record is incomplete")
-            if record.get("record_type") != expected_type:
-                raise ValueError("kill result registry record type mismatch")
-            expected_result_identity = f"KILL_SWITCH_RESULT:{record['result_id']}"
-            expected_command_identity = f"KILL_SWITCH_COMMAND:{record['command_id']}"
-            expected_command_result_identity = _kill_command_result_identity(
-                {
-                    "command_id": record["command_id"],
-                    "idempotency_key": record["command_idempotency_key"],
-                    "scope": record["command_scope"],
-                }
-            )
-            expected_key = (
-                expected_result_identity
-                if expected_type == "KILL_SWITCH_RESULT"
-                else expected_command_result_identity
-            )
-            if (
-                key != expected_key
-                or record["result_identity"] != expected_result_identity
-                or record["command_identity"] != expected_command_identity
-                or record["command_result_identity"] != expected_command_result_identity
-                or record["fingerprint"] != record["result_fingerprint"]
-            ):
-                raise ValueError("kill result registry pointer mismatch")
-            command_record = history.get(expected_command_identity)
-            if (
-                command_record is None
-                or command_record.get("record_type") != "KILL_SWITCH_COMMAND"
-                or command_record.get("command_identity") != expected_command_identity
-                or command_record.get("command_id") != record["command_id"]
-                or command_record.get("command_idempotency_key")
-                != record["command_idempotency_key"]
-                or command_record.get("command_scope") != record["command_scope"]
-                or command_record.get("command_fingerprint") != record["command_fingerprint"]
-                or command_record.get("fingerprint") != record["command_fingerprint"]
-            ):
-                raise ValueError("kill result immutable command history mismatch")
-            command_to_results.setdefault(expected_command_identity, set()).add(
-                expected_result_identity
-            )
-            result_to_commands.setdefault(expected_result_identity, set()).add(
-                expected_command_identity
-            )
-
-        for record in result_records.values():
-            counterpart = command_result_records.get(record["command_result_identity"])
-            if counterpart is None or any(
-                record[field] != counterpart[field] for field in shared_fields
-            ):
-                raise ValueError("orphan or divergent kill result registry backlink")
-        for command_result_identity, record in command_result_records.items():
-            counterpart = result_records.get(record["result_identity"])
-            if counterpart is None or any(
-                record[field] != counterpart[field] for field in shared_fields
-            ):
-                raise ValueError("orphan or divergent command-result registry backlink")
-            if record["command_result_identity"] != command_result_identity:
-                raise ValueError("command-result registry key mismatch")
-        if any(len(results) != 1 for results in command_to_results.values()) or any(
-            len(commands) != 1 for commands in result_to_commands.values()
+    def _validate_kill_aggregate_entry(self, command_identity: str, entry: dict[str, Any]) -> None:
+        command = entry["command"]
+        if entry["command_decision"] != "ACCEPTED":
+            raise ValueError("kill switch registry stores ACCEPTED commands only")
+        if command_identity != entry["command_identity"] or command_identity != (
+            _kill_command_identity(command)
         ):
-            raise ValueError("kill result registry cardinality violation")
-
-    def _validate_kill_result_duplicate_binding(
-        self, result: dict[str, Any], context: dict[str, Any]
-    ) -> None:
-        history = context["identity_history"]
-        result_record = history[_kill_result_identity(result)]
-        command_record = history[result_record["command_identity"]]
+            raise ValueError("kill switch registry command identity mismatch")
+        if command["command_fingerprint"] != _sha(_kill_command_fingerprint_projection(command)):
+            raise ValueError("kill switch registry command fingerprint mismatch")
+        authorization = entry["authorization_authority"]
+        command_authorization = command["authorization_evidence"]
         if (
-            command_record["command_id"] != result["command_id"]
-            or command_record["command_idempotency_key"] != result["idempotency_key"]
-            or command_record["command_scope"] != result["scope"]
-            or command_record["command_fingerprint"] != result["command_fingerprint"]
+            authorization["authorization_id"],
+            authorization["authorization_version"],
+            authorization["authorization_checksum"],
+        ) != (
+            command_authorization["authorization_id"],
+            command_authorization["authorization_version"],
+            command_authorization["authorization_checksum"],
         ):
-            raise ValueError("duplicate result immutable command history mismatch")
+            raise ValueError("kill switch registry authorization snapshot mismatch")
+        lease = entry["lease_authority"]
+        if (
+            command["leader_lease_id"] != lease["lease_id"]
+            or command["fencing_token"] != lease["fencing_token"]
+        ):
+            raise ValueError("kill switch registry lease snapshot mismatch")
+        accepted_at = _utc_instant(entry["accepted_at"])
+        if (
+            _utc_instant(command_authorization["approved_at"]) > accepted_at
+            or _utc_instant(command_authorization["valid_until"]) <= accepted_at
+            or _utc_instant(lease["expires_at"]) <= accepted_at
+            or _utc_instant(command["deadline_at"]) <= accepted_at
+        ):
+            raise ValueError("kill switch registry accepted authority was stale")
+        result = entry["result"]
+        if (result is None, entry["record_version"]) not in ((True, 1), (False, 2)):
+            raise ValueError("kill switch registry record version mismatch")
+        if result is not None:
+            if result["result_fingerprint"] != _sha(_kill_result_fingerprint_projection(result)):
+                raise ValueError("kill switch registry result fingerprint mismatch")
+            self._validate_kill_result_binding(result, command)
+        if entry["aggregate_checksum"] != _kill_aggregate_checksum(entry):
+            raise ValueError("kill switch registry aggregate checksum mismatch")
+
+    def _validate_kill_switch_registry_restore(self, context: dict[str, Any]) -> None:
+        """Recovery-only full scan; business lookups never enumerate registry entries."""
+        entries = context["kill_switch_registry"]["entries"]
+        for command_identity, entry in entries.items():
+            self._validate_kill_aggregate_entry(command_identity, entry)
+
+    def _validate_kill_command_registry_decision(
+        self, command: dict[str, Any], context: dict[str, Any]
+    ) -> dict[str, Any]:
+        registry = context["kill_switch_registry"]
+        entries = registry["entries"]
+        command_identity = _kill_command_identity(command)
+        entry = entries.get(command_identity)
+        if entry is None:
+            if len(entries) >= registry["capacity"]:
+                raise ValueError(
+                    "kill switch registry capacity exhausted: QQ-STORAGE-7001 "
+                    "IDEMPOTENCY_CONFLICT until verified checkpoint compaction"
+                )
+            return {
+                "status": "ACCEPTED",
+                "identity": command_identity,
+                "cas": {
+                    "command_identity": command_identity,
+                    "expected": "ABSENT",
+                    "new_record_version": 1,
+                },
+            }
+        self._validate_kill_aggregate_entry(command_identity, entry)
+        if entry["command"] != command:
+            raise ValueError("kill switch command aggregate conflict")
+        return {
+            "status": "DUPLICATE",
+            "identity": command_identity,
+            "prior_decision": "ACCEPTED",
+        }
+
+    def _validate_kill_result_registry_decision(
+        self, result: dict[str, Any], context: dict[str, Any]
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        command_identity = _kill_command_identity(result)
+        entries = context["kill_switch_registry"]["entries"]
+        aggregate = entries.get(command_identity)
+        if aggregate is None:
+            raise ValueError("kill result has no accepted command aggregate authority")
+        self._validate_kill_aggregate_entry(command_identity, aggregate)
+        registered_result = aggregate["result"]
+        if registered_result is not None:
+            if registered_result != result:
+                raise ValueError("kill result aggregate conflict")
+            return (
+                {
+                    "status": "DUPLICATE",
+                    "identity": command_identity,
+                    "prior_decision": "ACCEPTED",
+                },
+                aggregate,
+            )
+        return (
+            {
+                "status": "ACCEPTED",
+                "identity": command_identity,
+                "cas": {
+                    "command_identity": command_identity,
+                    "expected_record_version": 1,
+                    "new_record_version": 2,
+                    "expected_result": None,
+                    "result_fingerprint": result["result_fingerprint"],
+                },
+            },
+            aggregate,
+        )
 
     def _validate_control_dto(self, message: dict[str, Any], context: dict[str, Any]) -> None:
         dto_type = message["dto_type"]
@@ -599,8 +562,6 @@ class ControlSemanticValidator:
             self._validate_config_candidate(message, context)
         elif dto_type == "KILL_SWITCH_COMMAND":
             self._validate_kill_command(message, context)
-        elif dto_type == "KILL_SWITCH_RESULT":
-            self._validate_kill_result(message, context)
         else:
             raise ValueError("unsupported control DTO type")
 
@@ -853,26 +814,43 @@ class ControlSemanticValidator:
         if command["desired_state"] == "OFF":
             self._validate_accepted_recovery_barrier(command, context)
 
-    def _validate_kill_result(self, result: dict[str, Any], context: dict[str, Any]) -> None:
+    def _validate_kill_result(
+        self,
+        result: dict[str, Any],
+        context: dict[str, Any],
+        aggregate: dict[str, Any],
+    ) -> None:
         authority = context["accepted_state"]["kill_switch"]
-        command = authority["command"]
-        command_authorization = command["authorization_evidence"]
-        lease = context["accepted_state"]["lease"]
+        command = aggregate["command"]
+        command_authorization = aggregate["authorization_authority"]
+        lease = aggregate["lease_authority"]
         if (
-            result["authorization_id"] != authority["authorization_id"]
-            or command_authorization["authorization_version"] != authority["authorization_version"]
-            or command_authorization["authorization_checksum"]
-            != authority["authorization_checksum"]
+            result["authorization_id"] != command_authorization["authorization_id"]
+            or command["authorization_evidence"]["authorization_version"]
+            != command_authorization["authorization_version"]
+            or command["authorization_evidence"]["authorization_checksum"]
+            != command_authorization["authorization_checksum"]
         ):
-            raise ValueError("kill result current authorization authority mismatch")
+            raise ValueError("kill result immutable authorization authority mismatch")
         if (
             result["leader_lease_id"] != lease["lease_id"]
             or result["fencing_token"] != lease["fencing_token"]
-            or _utc_instant(lease["expires_at"]) <= _utc_instant(context["evaluation_at"])
         ):
-            raise ValueError("kill result current lease authority mismatch")
+            raise ValueError("kill result immutable lease authority mismatch")
+        observed_at = _utc_instant(result["effect_evidence"]["observed_at"])
+        if observed_at > _utc_instant(lease["expires_at"]) or observed_at > _utc_instant(
+            command["deadline_at"]
+        ):
+            raise ValueError("kill result effect occurred after accepted lease or deadline")
+        current_command = authority["command"]
+        current_command_identity = _kill_command_identity(current_command)
+        if (
+            current_command_identity != aggregate["command_identity"]
+            or current_command["command_fingerprint"] != aggregate["command"]["command_fingerprint"]
+        ):
+            raise ValueError("stale first kill result requires reconciliation")
         self._validate_kill_outcome(result, authority)
-        self._validate_kill_effect_evidence(result, authority, context)
+        self._validate_kill_effect_evidence(result, aggregate["expected_effect_ack_ids"], context)
         if result["outcome"] == "APPLIED" and result["applied_at"] is None:
             raise ValueError("applied result requires applied_at")
         if result["outcome"] != "APPLIED" and result["applied_at"] is not None:
@@ -883,10 +861,8 @@ class ControlSemanticValidator:
             raise ValueError("kill result applied_at is in the future")
 
     def _validate_kill_result_binding(
-        self, result: dict[str, Any], context: dict[str, Any]
+        self, result: dict[str, Any], command: dict[str, Any]
     ) -> None:
-        authority = context["accepted_state"]["kill_switch"]
-        command = authority["command"]
         if command["command_fingerprint"] != _sha(_kill_command_fingerprint_projection(command)):
             raise ValueError("accepted kill command fingerprint mismatch")
         for field in (
@@ -938,10 +914,12 @@ class ControlSemanticValidator:
     def _validate_kill_effect_evidence(
         self,
         result: dict[str, Any],
-        authority: dict[str, Any],
+        authority: dict[str, Any] | list[str],
         context: dict[str, Any],
     ) -> None:
-        expected_ack_ids = set(authority["effect_ack_ids"])
+        expected_ack_ids = set(
+            authority if isinstance(authority, list) else authority["effect_ack_ids"]
+        )
         acknowledged = set(result["effect_evidence"]["ack_ids"])
         if _utc_instant(result["effect_evidence"]["observed_at"]) > _utc_instant(
             context["evaluation_at"]
@@ -1459,6 +1437,7 @@ def _validation_context(
 ) -> dict[str, Any]:
     context = {
         "evaluation_at": "2026-08-11T01:00:01Z",
+        "validation_boundary": "command_ingress",
         "accepted_policy": {"version": "policy-v1", "checksum": "a" * 64},
         "known_messages": {
             parent: {
@@ -1470,6 +1449,12 @@ def _validation_context(
             }
         },
         "identity_history": {},
+        "kill_switch_registry": {
+            "schema_version": 1,
+            "capacity": KILL_SWITCH_REGISTRY_CAPACITY,
+            "checkpoint_version": 0,
+            "entries": {},
+        },
         "accepted_state": {
             "config": {
                 "config_domain": "risk.rules",
@@ -2251,6 +2236,7 @@ def test_kill_switch_authority_embeds_only_kill_switch_command() -> None:
     collect_refs(schema)
     assert set(external_control_refs) == {
         "urn:quantiqmt:contract:control-plane:v1#/$defs/killSwitchCommand",
+        "urn:quantiqmt:contract:control-plane:v1#/$defs/killSwitchResult",
         "urn:quantiqmt:contract:control-plane:v1#/$defs/recoveryBarrier",
     }
 
@@ -2302,14 +2288,13 @@ def test_control_dispatch_includes_commands_and_all_side_effect_boundaries() -> 
         document["rules"]["event_specific_dispatch"]["exhaustive"]
     )
     kill_switch = document["rules"]["kill_switch"]
-    assert kill_switch["result_identity"]["namespace"] == "KILL_SWITCH_RESULT"
-    assert kill_switch["result_identity"]["identity_field"] == "result_id"
-    assert kill_switch["result_identity"]["fingerprint_field"] == "result_fingerprint"
-    assert kill_switch["command_identity"]["namespace"] == "KILL_SWITCH_COMMAND"
-    assert kill_switch["command_result_identity"]["namespace"] == "KILL_SWITCH_COMMAND_RESULT"
-    assert kill_switch["command_result_identity"]["atomic_registration"].endswith(
-        "same_transaction"
-    )
+    assert kill_switch["command_identity"]["discriminator"] == "KILL_SWITCH_COMMAND"
+    registry = kill_switch["aggregate_registry"]
+    assert registry["storage"] == "independent_from_generic_identity_history"
+    assert registry["lookup"] == "O_1_exact_entries_get_command_identity"
+    assert registry["prefix_scan"] == "forbidden"
+    assert registry["capacity"] == 4096
+    assert "CAS_result_null" in registry["first_result"]
 
 
 def test_config_candidate_checksum_covers_payload_boundary_and_hard_limit_policy() -> None:
@@ -2442,10 +2427,13 @@ def test_duplicate_fast_path_recomputes_canonical_dto_fingerprint(dto_type: str)
         dto["idempotency_key"] if dto_type == "CONFIG_CANDIDATE" else _kill_command_identity(dto)
     )
     context = _validation_context(dto["correlation_id"])
-    context["identity_history"][identity_key] = {
-        "fingerprint": dto[fingerprint_field],
-        "decision": "ACCEPTED",
-    }
+    if dto_type == "CONFIG_CANDIDATE":
+        context["identity_history"][identity_key] = {
+            "fingerprint": dto[fingerprint_field],
+            "decision": "ACCEPTED",
+        }
+    else:
+        _record_kill_command(context, dto)
     context["accepted_policy"]["checksum"] = "0" * 64
     assert (
         ControlSemanticValidator().validate_control_message(dto, context)["status"] == "DUPLICATE"
@@ -2737,64 +2725,55 @@ def _prepared_kill_result(
         command=command,
         effect_ack_ids=["ack-kill-000001", "ack-kill-000002"],
     )
+    _record_kill_command(context, command)
     return result, context
 
 
-def _expected_command_result_identity(result: dict[str, Any]) -> str:
-    projection = {
-        "command_id": result["command_id"],
-        "idempotency_key": result["idempotency_key"],
-        "scope": result["scope"],
+def _record_kill_command(context: dict[str, Any], command: dict[str, Any]) -> None:
+    command_identity = _kill_command_identity(command)
+    authority = context["accepted_state"]["kill_switch"]
+    lease = context["accepted_state"]["lease"]
+    entry = {
+        "command_identity": command_identity,
+        "command_decision": "ACCEPTED",
+        "command": deepcopy(command),
+        "accepted_at": context["evaluation_at"],
+        "lease_authority": {
+            "lease_id": lease["lease_id"],
+            "leader_id": lease["leader_id"],
+            "epoch": lease["epoch"],
+            "authority_version": lease["authority_version"],
+            "fencing_token": lease["fencing_token"],
+            "expires_at": lease["expires_at"],
+        },
+        "authorization_authority": {
+            "authorization_id": authority["authorization_id"],
+            "authorization_version": authority["authorization_version"],
+            "authorization_checksum": authority["authorization_checksum"],
+        },
+        "expected_effect_ack_ids": deepcopy(authority["effect_ack_ids"]),
+        "result": None,
+        "record_version": 1,
+        "aggregate_checksum": "0" * 64,
     }
-    expected = f"KILL_SWITCH_COMMAND_RESULT:{_sha(projection)}"
-    assert _kill_command_result_identity(result) == expected
-    return expected
+    entry["aggregate_checksum"] = _kill_aggregate_checksum(entry)
+    context["kill_switch_registry"]["entries"][command_identity] = entry
 
 
 def _record_kill_result(context: dict[str, Any], result: dict[str, Any]) -> None:
     command = context["accepted_state"]["kill_switch"]["command"]
-    command_identity = _kill_command_identity(command)
-    result_identity = _kill_result_identity(result)
-    command_result_identity = _expected_command_result_identity(result)
-    context["identity_history"][command_identity] = {
-        "record_type": "KILL_SWITCH_COMMAND",
-        "fingerprint": command["command_fingerprint"],
-        "decision": "ACCEPTED",
-        "command_identity": command_identity,
-        "command_id": command["command_id"],
-        "command_idempotency_key": command["idempotency_key"],
-        "command_scope": command["scope"],
-        "command_fingerprint": command["command_fingerprint"],
-    }
-    common = {
-        "fingerprint": result["result_fingerprint"],
-        "decision": "ACCEPTED",
-        "command_identity": command_identity,
-        "command_id": result["command_id"],
-        "command_idempotency_key": result["idempotency_key"],
-        "command_scope": result["scope"],
-        "command_fingerprint": result["command_fingerprint"],
-        "result_identity": result_identity,
-        "result_id": result["result_id"],
-        "result_fingerprint": result["result_fingerprint"],
-        "command_result_identity": command_result_identity,
-    }
-    context["identity_history"][result_identity] = {
-        **deepcopy(common),
-        "record_type": "KILL_SWITCH_RESULT",
-    }
-    context["identity_history"][command_result_identity] = {
-        **deepcopy(common),
-        "record_type": "KILL_SWITCH_COMMAND_RESULT",
-    }
+    command_identity = _kill_command_identity(result)
+    if command_identity not in context["kill_switch_registry"]["entries"]:
+        _record_kill_command(context, command)
+    entry = context["kill_switch_registry"]["entries"][command_identity]
+    entry["result"] = deepcopy(result)
+    entry["record_version"] = 2
+    entry["aggregate_checksum"] = _kill_aggregate_checksum(entry)
 
 
 def test_kill_result_uses_independent_identity_and_canonical_fingerprint() -> None:
     result, context = _prepared_kill_result()
-    context["identity_history"][f"KILL_SWITCH_COMMAND:{result['command_id']}"] = {
-        "fingerprint": result["command_fingerprint"],
-        "decision": "ACCEPTED",
-    }
+    _record_kill_command(context, context["accepted_state"]["kill_switch"]["command"])
     checker = ControlSemanticValidator()
     assert checker.validate_control_message(result, context)["status"] == "ACCEPTED"
 
@@ -2808,9 +2787,10 @@ def test_kill_result_uses_independent_identity_and_canonical_fingerprint() -> No
     assert checker.validate_control_message(result, forged_command)["status"] == "DUPLICATE"
 
     forged_history = deepcopy(duplicate)
-    forged_history["identity_history"][
-        _kill_command_identity(forged_history["accepted_state"]["kill_switch"]["command"])
-    ]["command_fingerprint"] = "f" * 64
+    command_identity = _kill_command_identity(result)
+    forged_history["kill_switch_registry"]["entries"][command_identity]["command"][
+        "command_fingerprint"
+    ] = "f" * 64
     with pytest.raises(ValueError, match=r"command history|registry"):
         checker.validate_control_message(result, forged_history)
 
@@ -2853,19 +2833,16 @@ def test_one_command_identity_cannot_accept_a_second_kill_result() -> None:
     checker = ControlSemanticValidator()
     assert checker.validate_control_message(rejected, context)["status"] == "DUPLICATE"
 
-    for missing_key in (
-        f"KILL_SWITCH_RESULT:{rejected['result_id']}",
-        _expected_command_result_identity(rejected),
-    ):
-        incomplete_restore = deepcopy(context)
-        incomplete_restore["identity_history"].pop(missing_key)
-        with pytest.raises(ValueError, match=r"atomically|orphan|restore"):
-            checker.validate_control_message(rejected, incomplete_restore)
+    incomplete_restore = deepcopy(context)
+    identity = _kill_command_identity(rejected)
+    incomplete_restore["kill_switch_registry"]["entries"].pop(identity)
+    with pytest.raises(ValueError, match=r"aggregate|authority"):
+        checker.validate_control_message(rejected, incomplete_restore)
     divergent_restore = deepcopy(context)
-    divergent_restore["identity_history"][f"KILL_SWITCH_RESULT:{rejected['result_id']}"][
-        "decision"
-    ] = "UNKNOWN"
-    with pytest.raises(ValueError, match=r"atomically|restore|registry|backlink"):
+    divergent_restore["kill_switch_registry"]["entries"][identity]["result"][
+        "result_fingerprint"
+    ] = "f" * 64
+    with pytest.raises(ValueError, match=r"fingerprint|registry"):
         checker.validate_control_message(rejected, divergent_restore)
 
     same_result_new_id = deepcopy(rejected)
@@ -2901,11 +2878,11 @@ def test_kill_command_result_namespaces_resist_external_prefix_collision() -> No
         command_fingerprint=command["command_fingerprint"],
     )
     result["result_fingerprint"] = _sha(_kill_result_fingerprint_projection(result))
-    context["identity_history"][f"KILL_SWITCH_COMMAND:{command['command_id']}"] = {
-        "fingerprint": command["command_fingerprint"],
+    _record_kill_result(context, result)
+    context["identity_history"]["KILL_SWITCH_RESULT:ordinary-public-message"] = {
+        "fingerprint": "1" * 64,
         "decision": "ACCEPTED",
     }
-    _record_kill_result(context, result)
     context["accepted_state"]["kill_switch"]["current_version"] = 99
 
     checker = ControlSemanticValidator()
@@ -2927,10 +2904,6 @@ def test_kill_command_result_namespaces_resist_external_prefix_collision() -> No
     same_raw_result["result_fingerprint"] = _sha(
         _kill_result_fingerprint_projection(same_raw_result)
     )
-    same_raw_context["identity_history"][_kill_command_identity(same_raw_command)] = {
-        "fingerprint": same_raw_command["command_fingerprint"],
-        "decision": "ACCEPTED",
-    }
     _record_kill_result(same_raw_context, same_raw_result)
     same_raw_context["accepted_state"]["kill_switch"]["current_version"] = 99
     assert checker.validate_control_message(same_raw_command, same_raw_context)["status"] == (
@@ -2977,6 +2950,7 @@ def test_fractional_future_effect_and_expired_deadline_are_rejected() -> None:
     command = context["accepted_state"]["kill_switch"]["command"]
     command["deadline_at"] = "2026-08-11T01:00:01Z"
     command["command_fingerprint"] = _sha(_kill_command_fingerprint_projection(command))
+    context["kill_switch_registry"]["entries"].clear()
     context["evaluation_at"] = "2026-08-11T01:00:01.1Z"
     with pytest.raises(ValueError, match="deadline"):
         ControlSemanticValidator().validate_control_message(command, context)
@@ -3127,58 +3101,41 @@ def _advance_current_kill_command(context: dict[str, Any]) -> None:
 def test_result_registry_global_audit_rejects_orphans_before_new_result() -> None:
     old_result, complete = _prepared_kill_result("REJECTED")
     _record_kill_result(complete, old_result)
-    command_result_key = _expected_command_result_identity(old_result)
     checker = ControlSemanticValidator()
+    identity = _kill_command_identity(old_result)
+    malformed = deepcopy(complete)
+    malformed["validation_boundary"] = "recovery_restore"
+    malformed["kill_switch_registry"]["entries"][identity]["command"] = None
+    with pytest.raises((ValueError, ValidationError), match=r"registry|object|command"):
+        checker.validate_control_message(old_result, malformed)
 
-    result_only = deepcopy(complete)
-    result_only["identity_history"].pop(command_result_key)
-    for outcome in ("REJECTED", "UNKNOWN"):
-        new_result = deepcopy(old_result)
-        new_result["result_id"] = f"kill-result-new-{outcome.lower()}-0002"
-        if outcome == "UNKNOWN":
-            new_result.update(
-                outcome="UNKNOWN",
-                effective_state="UNKNOWN",
-                current_version=new_result["previous_version"],
-                reconciliation_required=True,
-            )
-        new_result["result_fingerprint"] = _sha(_kill_result_fingerprint_projection(new_result))
-        with pytest.raises(ValueError, match=r"registry|orphan|restore|atomic"):
-            checker.validate_control_message(new_result, result_only)
-
-    command_result_only = deepcopy(complete)
-    command_result_only["identity_history"].pop(_kill_result_identity(old_result))
-    with pytest.raises(ValueError, match=r"registry|orphan|restore|atomic"):
-        checker.validate_control_message(old_result, command_result_only)
-
-    missing_command_history = deepcopy(complete)
-    missing_command_history["identity_history"].pop(
-        f"KILL_SWITCH_COMMAND:{old_result['command_id']}"
-    )
-    with pytest.raises(ValueError, match=r"command history|registry|restore"):
-        checker.validate_control_message(old_result, missing_command_history)
+    missing_command = deepcopy(complete)
+    missing_command["validation_boundary"] = "recovery_restore"
+    del missing_command["kill_switch_registry"]["entries"][identity]["command"]
+    with pytest.raises(ValidationError):
+        checker.validate_control_message(old_result, missing_command)
 
 
-def test_result_registry_global_audit_rejects_wrong_backlinks_and_multiple_results() -> None:
+def test_single_registry_restore_rejects_identity_and_result_divergence() -> None:
     result, context = _prepared_kill_result("REJECTED")
     _record_kill_result(context, result)
     checker = ControlSemanticValidator()
     assert checker.validate_control_message(result, context)["status"] == "DUPLICATE"
 
-    wrong_backlink = deepcopy(context)
-    wrong_backlink["identity_history"][_expected_command_result_identity(result)][
-        "result_identity"
-    ] = "KILL_SWITCH_RESULT:wrong-backlink-result"
-    with pytest.raises(ValueError, match=r"registry|backlink|pointer|restore"):
-        checker.validate_control_message(result, wrong_backlink)
+    identity = _kill_command_identity(result)
+    wrong_command = deepcopy(context)
+    wrong_command["validation_boundary"] = "recovery_restore"
+    wrong_command["kill_switch_registry"]["entries"][identity]["command_identity"] = "f" * 64
+    with pytest.raises(ValueError, match=r"registry.*identity"):
+        checker.validate_control_message(result, wrong_command)
 
-    multiple = deepcopy(context)
-    second = deepcopy(result)
-    second["result_id"] = "kill-result-rejected-0002"
-    second["result_fingerprint"] = _sha(_kill_result_fingerprint_projection(second))
-    _record_kill_result(multiple, second)
-    with pytest.raises(ValueError, match=r"registry|multiple|unique|cardinality|restore"):
-        checker.validate_control_message(second, multiple)
+    divergent = deepcopy(context)
+    divergent["validation_boundary"] = "recovery_restore"
+    divergent["kill_switch_registry"]["entries"][identity]["result"]["command_fingerprint"] = (
+        "f" * 64
+    )
+    with pytest.raises(ValueError, match=r"fingerprint|identity|registry"):
+        checker.validate_control_message(result, divergent)
 
 
 def test_trusted_late_result_duplicate_uses_immutable_command_history() -> None:
@@ -3203,8 +3160,9 @@ def test_trusted_late_result_duplicate_uses_immutable_command_history() -> None:
         checker.validate_control_message(tampered, context)
 
     first_late_result, first_context = _prepared_kill_result("APPLIED")
+    _record_kill_command(first_context, first_context["accepted_state"]["kill_switch"]["command"])
     _advance_current_kill_command(first_context)
-    with pytest.raises(ValueError, match=r"command identity|authority"):
+    with pytest.raises(ValueError, match=r"stale.*reconciliation"):
         checker.validate_control_message(first_late_result, first_context)
 
 
@@ -3250,7 +3208,6 @@ def test_control_timestamp_wire_boundary_requires_canonical_utc_z() -> None:
 
 def test_all_control_timestamp_schemas_share_the_canonical_utc_z_pattern() -> None:
     schemas = (
-        "common/message-envelope.v1.schema.json",
         *EVENT_SCHEMAS.values(),
         "control/control-plane.v1.schema.json",
         "control/validation-context.v1.schema.json",
@@ -3267,6 +3224,184 @@ def test_all_control_timestamp_schemas_share_the_canonical_utc_z_pattern() -> No
 
     for relative in schemas:
         nodes = timestamp_nodes(_load(SCHEMAS / relative))
-        if relative != "control/combined-control-message.v1.schema.json":
+        if relative == "control/combined-control-message.v1.schema.json":
+            refinement = _load(SCHEMAS / relative)["$defs"]["common"]["allOf"][1]["properties"]
+            assert refinement["occurred_at"]["pattern"] == RFC3339_UTC_Z.pattern
+            assert refinement["received_at"]["pattern"] == RFC3339_UTC_Z.pattern
+        else:
             assert nodes, relative
-        assert all(node.get("pattern") == RFC3339_UTC_Z.pattern for node in nodes), relative
+            assert all(node.get("pattern") == RFC3339_UTC_Z.pattern for node in nodes), relative
+
+
+def test_kill_switch_command_identity_is_structured_and_not_an_external_id_prefix() -> None:
+    result, context = _prepared_kill_result()
+    command = context["accepted_state"]["kill_switch"]["command"]
+    expected = _sha(
+        {
+            "identity_type": "KILL_SWITCH_COMMAND",
+            "command_id": command["command_id"],
+            "idempotency_key": command["idempotency_key"],
+            "scope": command["scope"],
+        }
+    )
+    assert _kill_command_identity(command) == expected
+    assert re.fullmatch(r"[0-9a-f]{64}", _kill_command_identity(command))
+    assert _kill_command_identity(command) == _kill_command_identity(result)
+
+
+def test_validation_context_requires_one_bounded_kill_switch_aggregate_registry() -> None:
+    payload = deepcopy(_load(FIXTURES / "control-events.json")["system.mode_changed.v1"])
+    context = _validation_context(payload["correlation_id"])
+    schema = _validator("control/validation-context.v1.schema.json")
+    assert "kill_switch_registry" in context
+    assert schema.is_valid(context)
+    registry_schema = _load(SCHEMAS / "control/validation-context.v1.schema.json")["$defs"][
+        "killSwitchRegistry"
+    ]
+    assert registry_schema["additionalProperties"] is False
+    assert registry_schema["properties"]["entries"]["maxProperties"] == 4096
+    assert not {
+        "record_type",
+        "command_result_identity",
+        "result_identity",
+    } & set(
+        _load(SCHEMAS / "control/validation-context.v1.schema.json")["$defs"]["identity"][
+            "properties"
+        ]
+    )
+
+
+def test_shared_envelope_keeps_offset_compatibility_but_control_combined_refines_to_z() -> None:
+    payload = deepcopy(_load(FIXTURES / "control-events.json")["system.mode_changed.v1"])
+    message = _combined_fixture("system.mode_changed.v1", payload)
+    message["occurred_at"] = "2026-08-11T09:00:01+08:00"
+    message["received_at"] = "2026-08-11T09:00:02.1234567+08:00"
+    envelope = _validator("common/message-envelope.v1.schema.json")
+    combined = _validator("control/combined-control-message.v1.schema.json")
+    envelope_properties = set(envelope.schema["properties"])
+    envelope_only = {key: value for key, value in message.items() if key in envelope_properties}
+    assert envelope.is_valid(envelope_only)
+    assert not combined.is_valid(message)
+
+
+def test_single_aggregate_registry_replaces_prefix_scan_and_three_record_model() -> None:
+    source = Path(__file__).read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    methods = {
+        node.name: ast.get_source_segment(source, node) or ""
+        for node in ast.walk(tree)
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+    }
+    assert "_audit_kill_result_registry" not in methods
+    assert "_kill_result_identity_decision" not in methods
+    assert "_kill_command_result_identity" not in methods
+    result_path = methods["_validate_kill_result_registry_decision"]
+    assert ".startswith(" not in result_path
+    assert "identity_history" not in result_path
+    assert "entries.get(command_identity)" in result_path
+
+
+def test_registry_restore_rejects_nonaccepted_and_tampered_command_entries() -> None:
+    result, context = _prepared_kill_result("REJECTED")
+    command = context["accepted_state"]["kill_switch"]["command"]
+    _record_kill_command(context, command)
+    identity = _kill_command_identity(command)
+    checker = ControlSemanticValidator()
+
+    rejected = deepcopy(context)
+    rejected["kill_switch_registry"]["entries"][identity]["command_decision"] = "REJECTED"
+    with pytest.raises((ValueError, ValidationError), match=r"ACCEPTED|decision|registry"):
+        checker.validate_control_message(result, rejected)
+
+    tampered = deepcopy(context)
+    tampered["kill_switch_registry"]["entries"][identity]["command"]["actor"] = "forged"
+    with pytest.raises(ValueError, match=r"fingerprint|checksum|registry"):
+        checker.validate_control_message(result, tampered)
+
+
+def test_single_aggregate_result_cas_duplicate_and_conflict_semantics() -> None:
+    result, context = _prepared_kill_result("REJECTED")
+    command = context["accepted_state"]["kill_switch"]["command"]
+    _record_kill_command(context, command)
+    checker = ControlSemanticValidator()
+
+    accepted = checker.validate_control_message(result, context)
+    assert accepted["status"] == "ACCEPTED"
+    assert accepted["cas"] == {
+        "command_identity": _kill_command_identity(command),
+        "expected_record_version": 1,
+        "new_record_version": 2,
+        "expected_result": None,
+        "result_fingerprint": result["result_fingerprint"],
+    }
+
+    _record_kill_result(context, result)
+    assert checker.validate_control_message(result, context)["status"] == "DUPLICATE"
+    for mutation in ("result_id", "outcome", "effect"):
+        changed = deepcopy(result)
+        if mutation == "result_id":
+            changed["result_id"] = "kill-result-rejected-0002"
+        elif mutation == "outcome":
+            changed.update(
+                outcome="UNKNOWN",
+                effective_state="UNKNOWN",
+                reconciliation_required=True,
+            )
+        else:
+            changed["effect_evidence"]["observed_at"] = "2026-08-11T00:59:59Z"
+        changed["result_fingerprint"] = _sha(_kill_result_fingerprint_projection(changed))
+        with pytest.raises(ValueError, match=r"conflict|aggregate"):
+            checker.validate_control_message(changed, context)
+
+
+def test_kill_registry_capacity_boundary_is_bounded_and_fail_closed() -> None:
+    payload = deepcopy(_load(FIXTURES / "control-events.json")["system.mode_changed.v1"])
+    context = _validation_context(payload["correlation_id"])
+    command = context["accepted_state"]["kill_switch"]["command"]
+    checker = ControlSemanticValidator()
+    entries = context["kill_switch_registry"]["entries"]
+
+    for index in range(KILL_SWITCH_REGISTRY_CAPACITY - 1):
+        entries[f"{index:064x}"] = {}
+    assert checker._validate_kill_command_registry_decision(command, context)["status"] == (
+        "ACCEPTED"
+    )
+    entries[f"{KILL_SWITCH_REGISTRY_CAPACITY - 1:064x}"] = {}
+    with pytest.raises(ValueError, match=r"capacity.*QQ-STORAGE-7001|capacity.*conflict"):
+        checker._validate_kill_command_registry_decision(command, context)
+
+
+def test_generic_prefix_like_history_cannot_authorize_or_pollute_kill_registry() -> None:
+    result, context = _prepared_kill_result("REJECTED")
+    context["kill_switch_registry"]["entries"].clear()
+    context["identity_history"][f"KILL_SWITCH_RESULT:{result['result_id']}"] = {
+        "fingerprint": result["result_fingerprint"],
+        "decision": "ACCEPTED",
+    }
+    assert _validator("control/validation-context.v1.schema.json").is_valid(context)
+    with pytest.raises(ValueError, match=r"no accepted command aggregate"):
+        ControlSemanticValidator().validate_control_message(result, context)
+
+
+def test_command_registry_accepts_only_semantically_accepted_immutable_snapshots() -> None:
+    payload = deepcopy(_load(FIXTURES / "control-events.json")["system.mode_changed.v1"])
+    context = _validation_context(payload["correlation_id"])
+    command = context["accepted_state"]["kill_switch"]["command"]
+    checker = ControlSemanticValidator()
+    accepted = checker.validate_control_message(command, context)
+    assert accepted["status"] == "ACCEPTED"
+    assert accepted["cas"]["expected"] == "ABSENT"
+
+    _record_kill_command(context, command)
+    context["accepted_policy"]["checksum"] = "0" * 64
+    assert checker.validate_control_message(command, context)["status"] == "DUPLICATE"
+
+    identity = _kill_command_identity(command)
+    nonaccepted = deepcopy(context)
+    nonaccepted["kill_switch_registry"]["entries"][identity]["command_decision"] = "REJECTED"
+    assert not _validator("control/validation-context.v1.schema.json").is_valid(nonaccepted)
+
+    tampered = deepcopy(context)
+    tampered["kill_switch_registry"]["entries"][identity]["command"]["actor"] = "forged"
+    with pytest.raises(ValueError, match=r"fingerprint|checksum|aggregate"):
+        checker.validate_control_message(command, tampered)
