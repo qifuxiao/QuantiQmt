@@ -4,7 +4,7 @@
   "title": "ConfigVersionActivatedPayloadV1",
   "type": "object",
   "additionalProperties": false,
-  "required": ["event_id", "config_domain", "candidate_version", "candidate_checksum", "previous_version", "activation_mode", "safe_boundary", "required_components", "component_acks", "outcome", "active_version", "active_checksum", "rollback_version", "secret_references", "policy_version", "policy_checksum", "occurred_at", "correlation_id", "source"],
+  "required": ["event_id", "config_domain", "candidate_version", "candidate_checksum", "previous_version", "activation_mode", "safe_boundary", "required_components", "component_acks", "outcome", "active_version", "active_checksum", "rollback_version", "secret_references", "policy_version", "policy_checksum", "occurred_at", "correlation_id", "causation_id", "source"],
   "properties": {
     "event_id": {"type": "string", "format": "uuid"},
     "config_domain": {"type": "string", "pattern": "^[a-z][a-z0-9_.-]{1,63}$"},
@@ -24,11 +24,12 @@
     "policy_checksum": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
     "occurred_at": {"type": "string", "format": "date-time", "pattern": "Z$"},
     "correlation_id": {"type": "string", "minLength": 16, "maxLength": 128},
+    "causation_id": {"type": "string", "minLength": 16, "maxLength": 128},
     "source": {"type": "string", "const": "ConfigService"}
   },
   "allOf": [
-    {"if": {"properties": {"outcome": {"enum": ["PARTIAL", "UNKNOWN"]}}}, "then": {"properties": {"rollback_version": {"type": "string"}}}},
-    {"if": {"properties": {"activation_mode": {"const": "RESTART_REQUIRED"}}}, "then": {"properties": {"safe_boundary": {"const": "RESTART_ONLY"}}}}
+    {"if": {"properties": {"outcome": {"enum": ["PARTIAL", "UNKNOWN"]}}, "required": ["outcome"]}, "then": {"properties": {"rollback_version": {"type": "string", "minLength": 1}}}},
+    {"if": {"properties": {"activation_mode": {"const": "RESTART_REQUIRED"}}, "required": ["activation_mode"]}, "then": {"properties": {"safe_boundary": {"const": "RESTART_ONLY"}}}}
   ],
   "$defs": {
     "componentAck": {

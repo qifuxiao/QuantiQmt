@@ -79,7 +79,29 @@ def _validator(relative: str) -> Draft202012Validator:
 
 
 SAFE_INTEGER_MAX = 9_007_199_254_740_991
-CONFIG_AUTHORITY_CHECKSUM = "1c4485d437bf9a7f090d58d7042ef0a0ee20996253b30d28c836301a8efa04cf"
+CONFIG_AUTHORITY_CHECKSUM = "ae33087c10c8f1f225b233bc93a28652ad46997a333ac3db29eb3557c7aaf106"
+
+MODE_TRANSITIONS = {
+    ("STARTING", "NORMAL", "RECOVERY_PASSED"),
+    ("STARTING", "SAFE", "PARTIAL_AVAILABILITY"),
+    ("NORMAL", "DEGRADED", "NON_CRITICAL_DEGRADATION"),
+    ("NORMAL", "SAFE", "SAFETY_UNCERTAIN"),
+    ("DEGRADED", "SAFE", "SAFETY_UNCERTAIN"),
+    ("SAFE", "HALTED", "SEVERE_INCONSISTENCY"),
+    ("DEGRADED", "NORMAL", "HEALTHY_WINDOW_PASSED"),
+    ("SAFE", "DEGRADED", "REPAIR_APPROVED"),
+    ("HALTED", "SAFE", "DUAL_APPROVED_RECOVERY"),
+}
+HEALTH_TRANSITIONS = {
+    ("HEALTHY", "DEGRADED"): {"DEPENDENCY_STALE", "PROBE_FAILED", "CAPACITY_EXHAUSTED", "AUDIT_UNAVAILABLE"},
+    ("HEALTHY", "UNAVAILABLE"): {"PROBE_FAILED", "DISCONNECTED", "AUDIT_UNAVAILABLE"},
+    ("DEGRADED", "HEALTHY"): {"PROBE_PASSED", "RECOVERY_VERIFIED"},
+    ("DEGRADED", "UNAVAILABLE"): {"PROBE_FAILED", "DISCONNECTED", "CAPACITY_EXHAUSTED", "AUDIT_UNAVAILABLE"},
+    ("DEGRADED", "RECOVERING"): {"RECOVERY_STARTED"},
+    ("UNAVAILABLE", "RECOVERING"): {"RECOVERY_STARTED"},
+    ("RECOVERING", "HEALTHY"): {"PROBE_PASSED", "RECOVERY_VERIFIED"},
+    ("RECOVERING", "UNAVAILABLE"): {"PROBE_FAILED", "DISCONNECTED", "AUDIT_UNAVAILABLE"},
+}
 
 
 def _jcs(value: Any) -> str:
@@ -154,6 +176,29 @@ def _sha(value: Any) -> str:
     return hashlib.sha256(_canonical(value)).hexdigest()
 
 
+def _candidate_checksum_projection(candidate: dict[str, Any], config: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "config_domain": candidate.get("config_domain", config["config_domain"]),
+        "candidate_version": candidate.get("candidate_version", config["config_version"]),
+        "payload": candidate.get("payload", config["candidate_payload"]),
+        "secret_references": sorted(candidate.get("secret_references", config["secret_references"])),
+        "required_components": sorted(
+            candidate.get("required_components", config["required_components"])
+        ),
+        "activation_mode": candidate.get("activation_mode", config["activation_mode"]),
+        "safe_boundary": candidate.get("safe_boundary", config["safe_boundary"]),
+        "system_hard_limit_policy_version": candidate.get(
+            "system_hard_limit_policy_version", config["system_hard_limit_policy_version"]
+        ),
+        "system_hard_limit_policy_checksum": candidate.get(
+            "system_hard_limit_policy_checksum", config["system_hard_limit_policy_checksum"]
+        ),
+        "component_authority": config["components"],
+        "policy_version": config["policy_version"],
+        "policy_checksum": config["policy_checksum"],
+    }
+
+
 class ControlSemanticValidator:
     """Normative reference order: envelope, payload, binding, cross-object rules."""
 
@@ -193,12 +238,33 @@ class ControlSemanticValidator:
         for barrier_id, barrier_authority in context.get("accepted_recovery_barriers", {}).items():
             if barrier_authority["barrier_id"] != barrier_id:
                 raise ValueError("recovery barrier authority key mismatch")
+
+        if "dto_type" in message:
+            _validator("control/control-plane.v1.schema.json").validate(message)
+            self._scan_forbidden_keys(message)
+            identity_key = message.get("idempotency_key", message.get("command_id"))
+            fingerprint = message.get("candidate_checksum", message.get("command_fingerprint"))
+            decision = self._identity_decision(identity_key, fingerprint, context)
+            if decision["status"] == "DUPLICATE":
+                return decision
+            self._validate_control_dto(message, context)
+            return decision
+
         _validator("control/combined-control-message.v1.schema.json").validate(message)
+        message_type = message["message_type"]
+        payload = message["payload"]
+        if message["payload_fingerprint"] != _sha(payload):
+            raise ValueError("payload fingerprint mismatch")
+        self._scan_forbidden_keys(message)
+        decision = self._identity_decision(
+            message["message_id"], message["payload_fingerprint"], context,
+            fallback_key=message["idempotency_key"],
+        )
+        if decision["status"] == "DUPLICATE":
+            return decision
         recovery_barrier = context["accepted_state"].get("recovery_barrier")
         if recovery_barrier is not None:
             self._validate_recovery_barrier(recovery_barrier, context)
-        message_type = message["message_type"]
-        payload = message["payload"]
         accepted_policy = context["accepted_policy"]
         policy_evidence = payload.get("evidence", payload)
         if (
@@ -232,9 +298,8 @@ class ControlSemanticValidator:
             raise ValueError("combined identity binding mismatch")
         if message["correlation_id"] != payload["correlation_id"]:
             raise ValueError("correlation mismatch")
-        if message["payload_fingerprint"] != _sha(payload):
-            raise ValueError("payload fingerprint mismatch")
-        self._scan_forbidden_keys(message)
+        if payload["causation_id"] != message["causation_id"]:
+            raise ValueError("payload causation mismatch")
         parent = message["causation_id"]
         if parent == message["message_id"]:
             raise ValueError("self causation")
@@ -247,23 +312,37 @@ class ControlSemanticValidator:
             raise ValueError("future causation parent")
         if parent_message["occurred_at"] > message["occurred_at"]:
             raise ValueError("causation time regression")
-        identity = context["identity_history"].get(message["message_id"]) or context[
-            "identity_history"
-        ].get(message["idempotency_key"])
-        if identity is not None:
-            if identity["fingerprint"] != message["payload_fingerprint"]:
-                raise ValueError("identity fingerprint conflict")
-            if identity["decision"] in {"CONFLICT", "REJECTED", "FAILED", "UNKNOWN"}:
-                raise ValueError("prior conservative decision cannot be accepted")
-            decision = {
-                "status": "DUPLICATE",
-                "identity": message["message_id"],
-                "prior_decision": identity["decision"],
-            }
-        else:
-            decision = {"status": "ACCEPTED", "identity": message["message_id"]}
         self._validate_event_specific(message, context)
         return decision
+
+    def _identity_decision(
+        self,
+        identity_key: str,
+        fingerprint: str,
+        context: dict[str, Any],
+        *,
+        fallback_key: str | None = None,
+    ) -> dict[str, Any]:
+        history = context["identity_history"]
+        identity = history.get(identity_key) or (history.get(fallback_key) if fallback_key else None)
+        if identity is None:
+            return {"status": "ACCEPTED", "identity": identity_key}
+        if identity["fingerprint"] != fingerprint:
+            raise ValueError("identity fingerprint conflict")
+        return {
+            "status": "DUPLICATE",
+            "identity": identity_key,
+            "prior_decision": identity["decision"],
+        }
+
+    def _validate_control_dto(self, message: dict[str, Any], context: dict[str, Any]) -> None:
+        dto_type = message["dto_type"]
+        if dto_type == "CONFIG_CANDIDATE":
+            self._validate_config_candidate(message, context)
+        elif dto_type == "KILL_SWITCH_COMMAND":
+            self._validate_kill_command(message, context)
+        else:
+            raise ValueError("unsupported control DTO type")
 
     def _validate_event_specific(self, message: dict[str, Any], context: dict[str, Any]) -> None:
         payload = message["payload"]
@@ -281,15 +360,9 @@ class ControlSemanticValidator:
 
     def _validate_config_event(self, payload: dict[str, Any], context: dict[str, Any]) -> None:
         config = context["accepted_state"]["config"]
-        authority_projection = {
-            "config_version": config["config_version"],
-            "required_components": sorted(config["required_components"]),
-            "components": config["components"],
-            "policy_version": config["policy_version"],
-            "policy_checksum": config["policy_checksum"],
-        }
         if (
-            _sha(authority_projection) != config["config_checksum"]
+            _sha(_candidate_checksum_projection({}, config)) != config["config_checksum"]
+            or payload["config_domain"] != config["config_domain"]
             or payload["candidate_version"] != config["config_version"]
             or payload["candidate_checksum"] != config["config_checksum"]
             or payload["policy_version"] != config["policy_version"]
@@ -348,6 +421,27 @@ class ControlSemanticValidator:
         ):
             raise ValueError("rejected config cannot contain applied acknowledgement")
 
+    def _validate_config_candidate(self, candidate: dict[str, Any], context: dict[str, Any]) -> None:
+        config = context["accepted_state"]["config"]
+        if (
+            candidate["config_domain"] != config["config_domain"]
+            or candidate["candidate_version"] != config["config_version"]
+            or candidate["candidate_checksum"]
+            != _sha(_candidate_checksum_projection(candidate, config))
+            or candidate["candidate_checksum"] != config["config_checksum"]
+            or set(candidate["required_components"]) != set(config["required_components"])
+            or candidate["activation_mode"] != config["activation_mode"]
+            or candidate["safe_boundary"] != config["safe_boundary"]
+            or candidate["secret_references"] != config["secret_references"]
+            or candidate["system_hard_limit_policy_version"]
+            != config["system_hard_limit_policy_version"]
+            or candidate["system_hard_limit_policy_checksum"]
+            != config["system_hard_limit_policy_checksum"]
+        ):
+            raise ValueError("config candidate checksum or authority mismatch")
+        if candidate["deadline_at"] <= context["evaluation_at"]:
+            raise ValueError("config candidate deadline expired")
+
     def _validate_kill_event(self, payload: dict[str, Any], context: dict[str, Any]) -> None:
         authority = context["accepted_state"]["kill_switch"]
         lease = context["accepted_state"]["lease"]
@@ -380,12 +474,17 @@ class ControlSemanticValidator:
             and payload["current_version"] != payload["previous_version"] + 1
         ):
             raise ValueError("kill switch version jump")
+        if payload["outcome"] == "APPLIED" and (
+            payload["effective_state"] != payload["desired_state"]
+            or payload["reconciliation_required"]
+        ):
+            raise ValueError("applied kill switch effect mismatch")
         if (
             payload["outcome"] == "REJECTED"
             and payload["current_version"] != payload["previous_version"]
         ):
             raise ValueError("rejected kill switch changed state")
-        if payload["outcome"] == "UNKNOWN" and (
+        if payload["outcome"] in {"TIMEOUT", "UNKNOWN"} and (
             payload["reconciliation_required"] is not True
             or payload["effective_state"] != "UNKNOWN"
         ):
@@ -411,11 +510,6 @@ class ControlSemanticValidator:
             or auth.get("valid_until", "9999") <= context["evaluation_at"]
         ):
             raise ValueError("kill switch authorization invalid")
-        if (
-            payload["outcome"] in {"TIMEOUT", "UNKNOWN"}
-            and payload.get("effective_state") != "UNKNOWN"
-        ):
-            raise ValueError("unknown kill switch outcome must be UNKNOWN")
         if payload["desired_state"] == "OFF" and (
             payload["recovery_evidence_reference"] is None or payload["restores_normal"]
         ):
@@ -456,12 +550,60 @@ class ControlSemanticValidator:
         ):
             raise ValueError("kill policy binding mismatch")
 
+    def _validate_kill_command(self, command: dict[str, Any], context: dict[str, Any]) -> None:
+        authority = context["accepted_state"]["kill_switch"]
+        lease = context["accepted_state"]["lease"]
+        expected = authority["command"]
+        for field in (
+            "command_id", "idempotency_key", "command_fingerprint", "scope", "desired_state",
+            "reason_code", "expected_version", "recovery_evidence_reference",
+            "recovery_barrier_generation", "recovery_barrier_version", "recovery_barrier_checksum",
+            "recovery_evidence_digest", "recovery_aggregate_evidence_digest",
+        ):
+            if command[field] != expected[field]:
+                raise ValueError("kill command authority mismatch")
+        if command["expected_version"] != authority["current_version"]:
+            raise ValueError("kill command expected version mismatch")
+        auth = command["authorization_evidence"]
+        if (
+            auth["authorization_id"] != authority["authorization_id"]
+            or auth["authorization_version"] != authority["authorization_version"]
+            or auth["authorization_checksum"] != authority["authorization_checksum"]
+            or auth["revoked"]
+            or auth["valid_until"] <= context["evaluation_at"]
+        ):
+            raise ValueError("kill command authorization mismatch")
+        if (
+            command["leader_lease_id"] != lease["lease_id"]
+            or command["fencing_token"] != lease["fencing_token"]
+        ):
+            raise ValueError("kill command fencing mismatch")
+        if command["deadline_at"] <= context["evaluation_at"]:
+            raise ValueError("kill command deadline expired")
+        if command["desired_state"] == "OFF":
+            recovery_id = command["recovery_evidence_reference"]
+            recovery = context.get("accepted_recovery_barriers", {}).get(recovery_id)
+            if recovery is None or recovery["state"] != "OPEN":
+                raise ValueError("kill command requires accepted barrier")
+
     def _validate_mode_event(self, payload: dict[str, Any], context: dict[str, Any]) -> None:
         if not payload.get("causation_id"):
             raise ValueError("control events are never root")
         state = context["accepted_state"]["system_mode"]
+        if (
+            payload["from_mode"], payload["to_mode"], payload["reason_code"]
+        ) not in MODE_TRANSITIONS:
+            raise ValueError("illegal system mode transition")
         if payload["from_mode"] != state["mode"] or payload["generation"] != state["generation"]:
             raise ValueError("system mode authority mismatch")
+        barrier = context["accepted_state"].get("recovery_barrier") or context.get(
+            "accepted_recovery_barriers", {}
+        ).get(payload["evidence"]["recovery_barrier_id"])
+        if payload["reason_code"] == "RECOVERY_PASSED":
+            if barrier is None or barrier.get("state") != "OPEN" or barrier.get("opened_at") is None:
+                raise ValueError("RecoveryPassed requires an open recovery barrier")
+            if payload["evidence"]["recovery_barrier_id"] != barrier["barrier_id"]:
+                raise ValueError("recovery barrier identity mismatch")
         if (
             payload["evidence"]["policy_version"] != state["policy_version"]
             or payload["evidence"]["policy_checksum"] != state["policy_checksum"]
@@ -474,8 +616,12 @@ class ControlSemanticValidator:
             component is None
             or payload["component_version"] != component["version"]
             or payload["generation"] != component["generation"]
+            or payload["previous_health"] != component["health"]
         ):
             raise ValueError("component generation/version mismatch")
+        reasons = HEALTH_TRANSITIONS.get((payload["previous_health"], payload["health"]))
+        if not reasons or payload["reason_code"] not in reasons:
+            raise ValueError("illegal component health transition or reason")
         if (
             payload["evidence"]["policy_version"] != context["accepted_policy"]["version"]
             or payload["evidence"]["policy_checksum"] != context["accepted_policy"]["checksum"]
@@ -486,6 +632,10 @@ class ControlSemanticValidator:
         _validator("control/control-plane.v1.schema.json").validate(barrier)
         authority = context["accepted_state"]
         evidence = barrier["evidence"]
+        if barrier["state"] == "OPEN" and barrier["opened_at"] is None:
+            raise ValueError("open recovery barrier requires opened_at")
+        if barrier["state"] in {"CLOSED", "INVALIDATED"} and barrier["opened_at"] is not None:
+            raise ValueError("closed or invalidated recovery barrier opened_at mismatch")
         observed_at = evidence["observed_at"]
         market_fresh_until = evidence["market_fresh_until"]
         if observed_at > context["evaluation_at"]:
@@ -716,8 +866,11 @@ def _validation_context(
         "identity_history": {},
         "accepted_state": {
             "config": {
+                "config_domain": "risk.rules",
                 "config_version": "v2",
                 "config_checksum": CONFIG_AUTHORITY_CHECKSUM,
+                "candidate_payload": {"rules": "immutable"},
+                "secret_references": ["secret://risk/api"],
                 "required_components": ["OMS", "RiskEngine"],
                 "components": {
                     "OMS": {
@@ -735,6 +888,10 @@ def _validation_context(
                         "safe_boundary": "NEXT_ORDER_BOUNDARY",
                     },
                 },
+                "activation_mode": "HOT_RELOAD",
+                "safe_boundary": "NEXT_ORDER_BOUNDARY",
+                "system_hard_limit_policy_version": "hard-v1",
+                "system_hard_limit_policy_checksum": "b" * 64,
                 "policy_version": "policy-v1",
                 "policy_checksum": "a" * 64,
             },
@@ -816,6 +973,26 @@ def _validation_context(
                 "policy_checksum": "a" * 64,
             },
         },
+        "accepted_recovery_barriers": {
+            "barrier-1": {
+                "barrier_id": "barrier-1",
+                "generation": 1,
+                "barrier_version": "barrier-v1",
+                "barrier_checksum": "2" * 64,
+                "evidence_digest": "3" * 64,
+                "state": "OPEN",
+                "kill_switch_version": 1,
+                "opened_at": "2026-08-11T00:59:00Z",
+                "observed_at": "2026-08-11T01:00:00Z",
+                "fresh_until": "2026-08-11T02:00:00Z",
+                "policy_version": "policy-v1",
+                "policy_checksum": "a" * 64,
+                "aggregate_evidence_digest": "4" * 64,
+                "authorization_id": "auth-1",
+                "authorization_version": "v1",
+                "authorization_checksum": "d" * 64,
+            }
+        },
     }
 
 
@@ -872,6 +1049,8 @@ def test_recovery_barrier_all_states_use_unified_entrypoint_and_freshness() -> N
     barrier = deepcopy(
         next(item for item in document["dtos"] if item["dto_type"] == "RECOVERY_BARRIER")
     )
+    barrier["state"] = "OPEN"
+    barrier["opened_at"] = "2026-08-11T00:59:00Z"
     authority = context["accepted_state"]
     evidence = barrier["evidence"]
     evidence.update(
@@ -1207,8 +1386,7 @@ def test_control_lineage_context_is_mandatory_and_collision_safe() -> None:
         "fingerprint": message["payload_fingerprint"],
         "decision": "REJECTED",
     }
-    with pytest.raises(ValueError, match="conservative"):
-        checker.validate_control_message(message, rejected)
+    assert checker.validate_control_message(message, rejected)["status"] == "DUPLICATE"
 
 
 @pytest.mark.parametrize(
@@ -1364,3 +1542,170 @@ def test_control_workflow_and_state_machine_freeze_fail_closed_guards() -> None:
     )["machine"]
     assert machine["control_guards"]["stale_lease_or_fencing_token"] == "reject_without_side_effect"
     assert "dependency reconnect alone never restores NORMAL" in machine["invariants"]
+
+
+def test_recovery_passed_requires_an_open_verified_barrier() -> None:
+    payload = _load(FIXTURES / "control-events.json")["system.mode_changed.v1"]
+    message = _combined_fixture("system.mode_changed.v1", payload)
+    checker = ControlSemanticValidator()
+    context = _validation_context(payload["correlation_id"])
+    context.pop("accepted_recovery_barriers")
+
+    with pytest.raises(ValueError, match="recovery barrier"):
+        checker.validate_control_message(message, context)
+
+    closed = deepcopy(context)
+    closed["accepted_state"]["recovery_barrier"] = {
+        "dto_type": "RECOVERY_BARRIER",
+        "schema_version": 1,
+        "correlation_id": payload["correlation_id"],
+        "created_at": "2026-08-11T01:00:00Z",
+        "barrier_id": "barrier-1",
+        "state": "CLOSED",
+        "generation": 1,
+        "opened_at": None,
+        "evidence": {},
+        "required_evidence": [],
+        "invalidation_reason": None,
+    }
+    with pytest.raises((ValueError, ValidationError), match="recovery barrier|evidence"):
+        checker.validate_control_message(message, closed)
+
+
+def test_open_recovery_barrier_requires_opened_at() -> None:
+    document = _load(FIXTURES / "control-plane.v1/valid.json")
+    barrier = deepcopy(next(item for item in document["dtos"] if item["dto_type"] == "RECOVERY_BARRIER"))
+    barrier["state"] = "OPEN"
+    barrier["opened_at"] = None
+    assert not _validator("control/control-plane.v1.schema.json").is_valid(barrier)
+    context = _validation_context("corr-mode-000001")
+    context["accepted_recovery_barriers"]["barrier-1"]["opened_at"] = None
+    with pytest.raises(ValidationError):
+        _validator("control/validation-context.v1.schema.json").validate(context)
+
+
+def test_same_identity_same_fingerprint_is_stable_duplicate_before_authority_checks() -> None:
+    payload = _load(FIXTURES / "control-events.json")["system.mode_changed.v1"]
+    message = _combined_fixture("system.mode_changed.v1", payload)
+    context = _validation_context(payload["correlation_id"])
+    context["identity_history"][message["message_id"]] = {
+        "fingerprint": message["payload_fingerprint"],
+        "decision": "ACCEPTED",
+    }
+    context["accepted_policy"]["checksum"] = "0" * 64
+    assert ControlSemanticValidator().validate_control_message(message, context)["status"] == "DUPLICATE"
+
+
+def test_control_dispatch_includes_commands_and_all_side_effect_boundaries() -> None:
+    contract = yaml.safe_load(
+        (ROOT / "spec/contracts/control/control-semantic-validation.v1.yaml").read_text(encoding="utf-8")
+    )["contract"]
+    assert set(contract["boundaries"]) == {
+        "schema_parse",
+        "command_ingress",
+        "envelope_publish",
+        "outbox_persist",
+        "event_publish",
+        "consumer_apply",
+        "command_dispatch",
+        "control_transition",
+        "state_transition",
+        "recovery_restore",
+        "external_side_effect",
+    }
+    assert {"CONFIG_CANDIDATE", "KILL_SWITCH_COMMAND"}.issubset(
+        contract["rules"]["event_specific_dispatch"]["exhaustive"]
+    )
+
+
+def test_config_candidate_checksum_covers_payload_boundary_and_hard_limit_policy() -> None:
+    candidate = deepcopy(
+        next(
+            item
+            for item in _load(FIXTURES / "control-plane.v1/valid.json")["dtos"]
+            if item["dto_type"] == "CONFIG_CANDIDATE"
+        )
+    )
+    checker = ControlSemanticValidator()
+    context = _validation_context(candidate["correlation_id"])
+    checker.validate_control_message(candidate, context)
+    for mutate in (
+        lambda item: item["payload"].update({"rules": "tampered"}),
+        lambda item: item.update({"safe_boundary": "RESTART_ONLY"}),
+        lambda item: item.update({"system_hard_limit_policy_checksum": "0" * 64}),
+    ):
+        invalid = deepcopy(candidate)
+        mutate(invalid)
+        with pytest.raises((ValueError, ValidationError), match="checksum|authority|hard limit"):
+            checker.validate_control_message(invalid, context)
+
+
+def test_unified_dispatch_validates_kill_switch_command_dto() -> None:
+    command = deepcopy(
+        next(
+            item
+            for item in _load(FIXTURES / "control-plane.v1/valid.json")["dtos"]
+            if item["dto_type"] == "KILL_SWITCH_COMMAND"
+        )
+    )
+    context = _validation_context(command["correlation_id"])
+    context["accepted_state"]["kill_switch"]["current_version"] = command["expected_version"]
+    context["accepted_state"]["kill_switch"]["command"] = {
+        key: command[key]
+        for key in (
+            "command_id", "idempotency_key", "command_fingerprint", "scope", "desired_state",
+            "reason_code", "expected_version", "recovery_evidence_reference",
+            "recovery_barrier_generation", "recovery_barrier_version", "recovery_barrier_checksum",
+            "recovery_evidence_digest", "recovery_aggregate_evidence_digest",
+        )
+    }
+    ControlSemanticValidator().validate_control_message(command, context)
+
+
+def test_kill_switch_outcome_binds_effect_and_reconciliation_identity() -> None:
+    payload = deepcopy(_load(FIXTURES / "control-events.json")["system.kill_switch_changed.v1"])
+    schema = _validator(EVENT_SCHEMAS["system.kill_switch_changed.v1"])
+    applied_wrong_effect = deepcopy(payload)
+    applied_wrong_effect["effective_state"] = "OFF"
+    assert not schema.is_valid(applied_wrong_effect)
+    for outcome in ("TIMEOUT", "UNKNOWN"):
+        invalid = deepcopy(payload)
+        invalid.update(outcome=outcome, effective_state="UNKNOWN", reconciliation_required=False)
+        assert not schema.is_valid(invalid)
+
+    context = _validation_context(payload["correlation_id"])
+    invalid = deepcopy(payload)
+    invalid["idempotency_key"] = "different-kill-identity"
+    with pytest.raises(ValueError, match="command binding|identity"):
+        ControlSemanticValidator().validate_control_message(
+            _combined_fixture("system.kill_switch_changed.v1", invalid), context
+        )
+
+
+def test_component_health_requires_authority_transition_and_reason_binding() -> None:
+    payload = _load(FIXTURES / "control-events.json")["system.component_health_changed.v1"]
+    checker = ControlSemanticValidator()
+    context = _validation_context(payload["correlation_id"])
+    checker.validate_control_message(_combined_fixture("system.component_health_changed.v1", payload), context)
+    for mutate in (
+        lambda item: item.update({"previous_health": "RECOVERING"}),
+        lambda item: item.update({"health": "HEALTHY"}),
+        lambda item: item.update({"reason_code": "PROBE_PASSED"}),
+    ):
+        invalid = deepcopy(payload)
+        mutate(invalid)
+        with pytest.raises((ValueError, ValidationError), match="health|transition|reason"):
+            checker.validate_control_message(
+                _combined_fixture("system.component_health_changed.v1", invalid), context
+            )
+
+
+@pytest.mark.parametrize("message_type", list(EVENT_SCHEMAS))
+def test_payload_causation_id_is_bound_to_envelope(message_type: str) -> None:
+    payload = deepcopy(_load(FIXTURES / "control-events.json")[message_type])
+    message = _combined_fixture(message_type, payload)
+    payload["causation_id"] = "other-parent-0001"
+    message["payload"] = payload
+    message["payload_fingerprint"] = _sha(payload)
+    with pytest.raises((ValueError, ValidationError), match="causation"):
+        ControlSemanticValidator().validate_control_message(message, _validation_context(payload["correlation_id"]))

@@ -3,9 +3,10 @@ workflow:
   contract: CONTRACT-CONTROL-PLANE-V1
   semantic_validator: CONTRACT-CONTROL-SEMANTIC-VALIDATION-V1
   boundaries: [command_ingress, outbox_persist, event_publish, consumer_apply, control_transition, recovery_restore, external_side_effect]
-  validation_order: [structural_envelope, payload_schema, combined_binding, cross_object_semantics]
+  validation_order: [validation_context_schema, structural_envelope, payload_schema, combined_binding, lineage_identity_policy, event_or_command_semantics, final_decision]
   validation_failure: reject_without_repair_reorder_persist_publish_or_execute
   schema_only_probe: never_authorizes_any_boundary
+  unified_validator_inputs: [public_control_event, CONFIG_CANDIDATE, KILL_SWITCH_COMMAND]
   observability:
     steps: [normalize_context, redact_sensitive_values, validate_correlation_chain, emit_metric_log_trace_audit]
     failure: reject_record_and_emit_bounded_validation_metric

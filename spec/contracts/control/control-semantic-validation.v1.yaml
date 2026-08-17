@@ -10,10 +10,10 @@ contract:
   schema_only_validation:
     purpose: structural_probe_only
     semantic_decision: never
-    forbidden_boundaries: [outbox_persist, publish, consumer_apply, state_transition, recovery_restore, external_side_effect]
+    forbidden_boundaries: [command_ingress, outbox_persist, event_publish, consumer_apply, command_dispatch, control_transition, state_transition, recovery_restore, external_side_effect]
   decision: [ACCEPTED, DUPLICATE, REJECTED, CONFLICT]
   fail_closed: true
-  boundaries: [schema_parse, envelope_publish, outbox_persist, command_dispatch, state_transition, recovery_restore]
+  boundaries: [schema_parse, command_ingress, envelope_publish, outbox_persist, event_publish, consumer_apply, command_dispatch, control_transition, state_transition, recovery_restore, external_side_effect]
   order: [validation_context_schema, structural_envelope, payload_schema, combined_binding, lineage_identity_policy, event_specific_semantics, final_decision]
   result: {valid: continue, invalid: reject_without_mutation}
   combined_message_schema: CONTRACT-CONTROL-COMBINED-MESSAGE-V1
@@ -30,7 +30,7 @@ rules:
   envelope_binding:
     validate_together: [message_envelope, payload]
     required_mapping: [message_type, schema_version, publisher_source, partition_key, aggregate_id, aggregate_version, idempotency_key]
-    collision: same_identity_same_fingerprint_duplicate; same_identity_different_fingerprint_reject
+    collision: same_identity_same_fingerprint_duplicate_before_current_authority_checks; same_identity_different_fingerprint_conflict_reject_and_retain_evidence
     event_matrix:
       system.mode_changed.v1: {source: TradingCore, publisher: TradingCore, aggregate_type: SYSTEM_MODE, partition_key: system}
       system.component_health_changed.v1: {source: HealthService, publisher: HealthService, aggregate_type: SYSTEM_COMPONENT, partition_key: component}
@@ -45,6 +45,8 @@ rules:
     forbidden_keys: [password, secret, credential, token, access_token, private_key, raw_account_id, raw_account_identifier]
   event_specific_dispatch:
     exhaustive:
+      CONFIG_CANDIDATE: config_candidate
+      KILL_SWITCH_COMMAND: kill_switch_command
       config.version_activated.v1: config_cross_object
       system.kill_switch_changed.v1: kill_switch
       system.mode_changed.v1: system_mode_transition
@@ -57,8 +59,9 @@ rules:
     relation: exact_match_to_validation_context.accepted_policy
     missing_or_mismatch: reject_without_mutation
   config_cross_object:
-    candidate_checksum: sha256_rfc8785_jcs_candidate_content_utf8_no_bom_lower_hex
+    candidate_checksum: sha256_rfc8785_jcs_candidate_security_projection_utf8_no_bom_lower_hex
     checksum_excludes: [candidate_checksum]
+    checksum_projection: [config_domain, candidate_version, payload, sorted_secret_references, sorted_required_components, activation_mode, safe_boundary, system_hard_limit_policy_version, system_hard_limit_policy_checksum]
     canonicalization:
       algorithm: RFC8785_JCS
       utf8: no_bom
@@ -69,9 +72,9 @@ rules:
     version_checksum_content_identity_immutable: true
     authority_context:
       source: validation_context.accepted_state.config
-      required: [config_version, config_checksum, required_components, components, policy_version, policy_checksum]
+      required: [config_domain, config_version, config_checksum, candidate_payload, secret_references, required_components, components, activation_mode, safe_boundary, system_hard_limit_policy_version, system_hard_limit_policy_checksum, policy_version, policy_checksum]
       additional_properties: forbidden
-      checksum_projection: [config_version, sorted_required_components, components_by_component_id, policy_version, policy_checksum]
+      checksum_projection: [config_domain, config_version, candidate_payload, sorted_secret_references, sorted_required_components, components_by_component_id, activation_mode, safe_boundary, system_hard_limit_policy_version, system_hard_limit_policy_checksum, policy_version, policy_checksum]
       checksum_algorithm: SHA256_RFC8785_JCS_UTF8_NO_BOM_LOWER_HEX
     required_components_exact: true
     exact_sets: [payload.required_components, payload.component_acks.keys, authority.required_components, authority.components.keys]
@@ -87,7 +90,8 @@ rules:
     critical_lag: {authoritative_measurement: source_received_watermark_delta, threshold_version_required: true, sustained_window_required: true, recovery_window_required: true}
     alert_not_state_authority: true
   config_activation:
-    candidate_checksum: SHA256_RFC8785_JCS_candidate_content_excluding_checksum
+    candidate_checksum: SHA256_RFC8785_JCS_candidate_security_projection_excluding_checksum
+    checksum_covers: [actual_candidate_payload, activation_mode, safe_boundary, system_hard_limit_policy_version, system_hard_limit_policy_checksum]
     immutable_version: true
     secrets_are_references: true
     hard_limit_policy_must_match: true
@@ -102,7 +106,7 @@ rules:
     authorization_required: true
     stale_version_or_fence: reject
     unknown_outcome: reconcile_without_reissue
-    applied_version: current_version_must_equal_expected_version_plus_one
+    applied_version: current_version_must_equal_expected_version_plus_one_and_effective_state_equal_desired_state
     stale_expected_version: reject
     idempotency_replay: same_key_same_payload_same_result; same_key_different_payload_conflict
     command_result_binding: [command_id, idempotency_key, command_fingerprint, scope, desired_state, reason_code, expected_version, previous_version, current_version, authorization_id, authorization_version, authorization_checksum, leader_lease_id, leader_id, lease_epoch, fencing_token, recovery_evidence_reference, recovery_barrier_generation, recovery_barrier_version, recovery_barrier_checksum, recovery_evidence_digest, recovery_aggregate_evidence_digest]
@@ -113,6 +117,7 @@ rules:
       exact_bindings: [barrier_id, generation, barrier_version, barrier_checksum, evidence_digest, aggregate_evidence_digest, state, kill_switch_version, policy_version, policy_checksum, authorization_id, authorization_version, authorization_checksum]
       required_state: OPEN
       freshness: observed_at_lte_evaluation_at_and_fresh_until_gt_evaluation_at
+    timeout_or_unknown: effective_state_UNKNOWN_and_reconciliation_required_and_same_command_identity_reconciliation
     possible_commit_timeout: UNKNOWN_with_reconciliation_required
     disable_does_not_restore_normal: true
   lease_fencing:
@@ -131,6 +136,7 @@ rules:
     single_freshness_authority: evidence.market_fresh_until_exactly_equals_validation_context.accepted_state.market.fresh_until
     generic_evidence_fresh_until: forbidden
     all_states_common_validation: true
+    open_requires_opened_at: true
     state_matrix:
       CLOSED: {opened_at: null, invalidation_reason: null}
       OPEN: {opened_at: required, invalidation_reason: null, evidence: exact_required_set}
@@ -149,5 +155,6 @@ rules:
     evidence_is_not_label: true
   system_mode:
     legal_transitions_source: SM-SYSTEM-MODE
+    recovery_passed_guard: recovery_barrier_open_and_verified
     strictest_scope_wins: true
     illegal_transition: reject_without_event_or_state_change

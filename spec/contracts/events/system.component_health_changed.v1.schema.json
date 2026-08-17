@@ -4,7 +4,7 @@
   "title": "SystemComponentHealthChangedPayloadV1",
   "type": "object",
   "additionalProperties": false,
-  "required": ["event_id", "component", "component_version", "generation", "previous_health", "health", "reason_code", "observed_at", "correlation_id", "source", "evidence"],
+  "required": ["event_id", "component", "component_version", "generation", "previous_health", "health", "reason_code", "observed_at", "correlation_id", "causation_id", "source", "evidence"],
   "properties": {
     "event_id": {"type": "string", "format": "uuid"},
     "component": {"type": "string", "pattern": "^[A-Z][A-Z0-9_]{1,63}$"},
@@ -15,7 +15,18 @@
     "reason_code": {"enum": ["PROBE_PASSED", "PROBE_FAILED", "DEPENDENCY_STALE", "DISCONNECTED", "RECOVERY_STARTED", "RECOVERY_VERIFIED", "CAPACITY_EXHAUSTED", "AUDIT_UNAVAILABLE"]},
     "observed_at": {"type": "string", "format": "date-time", "pattern": "Z$"},
     "correlation_id": {"type": "string", "minLength": 16, "maxLength": 128},
+    "causation_id": {"type": "string", "minLength": 16, "maxLength": 128},
     "source": {"type": "string", "const": "HealthService"},
     "evidence": {"type": "object", "additionalProperties": false, "required": ["probe_id", "policy_version", "policy_checksum"], "properties": {"probe_id": {"type": "string", "minLength": 1}, "policy_version": {"type": "string", "minLength": 1}, "policy_checksum": {"type": "string", "pattern": "^[0-9a-f]{64}$"}}}
-  }
+  },
+  "oneOf": [
+    {"properties": {"previous_health": {"const": "HEALTHY"}, "health": {"const": "DEGRADED"}, "reason_code": {"enum": ["DEPENDENCY_STALE", "PROBE_FAILED", "CAPACITY_EXHAUSTED", "AUDIT_UNAVAILABLE"]}}},
+    {"properties": {"previous_health": {"const": "HEALTHY"}, "health": {"const": "UNAVAILABLE"}, "reason_code": {"enum": ["PROBE_FAILED", "DISCONNECTED", "AUDIT_UNAVAILABLE"]}}},
+    {"properties": {"previous_health": {"const": "DEGRADED"}, "health": {"const": "HEALTHY"}, "reason_code": {"enum": ["PROBE_PASSED", "RECOVERY_VERIFIED"]}}},
+    {"properties": {"previous_health": {"const": "DEGRADED"}, "health": {"const": "UNAVAILABLE"}, "reason_code": {"enum": ["PROBE_FAILED", "DISCONNECTED", "CAPACITY_EXHAUSTED", "AUDIT_UNAVAILABLE"]}}},
+    {"properties": {"previous_health": {"const": "DEGRADED"}, "health": {"const": "RECOVERING"}, "reason_code": {"const": "RECOVERY_STARTED"}}},
+    {"properties": {"previous_health": {"const": "UNAVAILABLE"}, "health": {"const": "RECOVERING"}, "reason_code": {"const": "RECOVERY_STARTED"}}},
+    {"properties": {"previous_health": {"const": "RECOVERING"}, "health": {"const": "HEALTHY"}, "reason_code": {"enum": ["PROBE_PASSED", "RECOVERY_VERIFIED"]}}},
+    {"properties": {"previous_health": {"const": "RECOVERING"}, "health": {"const": "UNAVAILABLE"}, "reason_code": {"enum": ["PROBE_FAILED", "DISCONNECTED", "AUDIT_UNAVAILABLE"]}}}
+  ]
 }

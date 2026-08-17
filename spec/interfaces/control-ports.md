@@ -15,20 +15,24 @@ allow-listed bounded labels in `NFR-OBSERVABILITY`; order, trade, instrument,
 account, strategy, message and correlation identifiers are prohibited labels.
 
 Only `validate_control_message(message, validation_context)` is a usable
-ControlSemanticValidator entrypoint; it returns one canonical decision:
+ControlSemanticValidator entrypoint for combined public events and the
+`CONFIG_CANDIDATE` / `KILL_SWITCH_COMMAND` command DTOs; it returns one canonical decision:
 `ACCEPTED`, `DUPLICATE`, `REJECTED` or `CONFLICT`. It MUST validate envelope and payload together before
 publish or outbox persistence. Its normative order is structural envelope,
 payload schema, combined event binding, then cross-object semantics. The same
-validator MUST run before Outbox persist, publish, consumer apply, control
-transition, restore/replay and every external side effect. Failure rejects
-without repair, reordering, persistence, publication or execution. Same identity plus the same canonical payload
-fingerprint is a duplicate; same identity with a different fingerprint is a
-fail-closed collision and MUST retain evidence.
+validator MUST run at command ingress and before Outbox persist, event publish,
+consumer apply, control transition, restore/replay and every external side
+effect. Failure rejects
+without repair, reordering, persistence, publication or execution. Same identity
+plus the same canonical payload or command fingerprint is a duplicate before
+current authority, barrier or lineage state is consulted; same identity with a
+different fingerprint is a fail-closed collision and MUST retain evidence.
 
 Event-specific config, kill-switch, mode, health and recovery-barrier checks are
 private branches of that dispatcher only. Candidate/result-only, command/result-
-only, DTO-only or barrier-only helpers are not validator APIs and MUST NOT be
-used as runtime implementation entrypoints.
+only or barrier-only helpers are not validator APIs and MUST NOT be used as
+runtime implementation entrypoints; candidate and command checks are private
+branches selected by the unified dispatcher.
 Direct Draft 2020-12 validation is a structural probe only. It never returns a
 semantic acceptance decision and MUST NOT authorize persistence, publication,
 consumer apply, state transition, recovery restore or an external side effect.
@@ -64,8 +68,11 @@ command identity is reconciled and never reissued with a new identity.
 `KillSwitchCommand` and `ConfigCandidate` are validated by schema and then by
 the same semantic validator at dispatch, persistence and recovery restore.
 The accepted config authority is immutable and versioned: its checksum is
-SHA-256 over RFC 8785 JCS bytes for config version, sorted required components,
-the complete component authority map, and policy version/checksum. Payload
+SHA-256 over RFC 8785 JCS bytes for the complete candidate security projection:
+config domain/version, actual candidate payload, sorted secret references and
+required components, activation mode and safe boundary, system hard-limit
+policy version/checksum, plus the complete component authority map and policy
+identity. Payload
 required components, ACK keys, authority required components and authority
 component keys MUST be the same set. Each ACK MUST exactly bind component ID,
 generation, capability version, activation mode and safe boundary; missing or
@@ -103,7 +110,8 @@ component versions, checksums and watermarks. While closed, new OrderIntent and
 Risk approval are rejected. Reconnect alone never opens the barrier or restores
 NORMAL. Evidence invalidation moves the barrier to conservative INVALIDATED
 state and requires a new verified opening transition.
-`market_fresh_until` is the sole Market freshness authority in barrier
+`opened_at` is mandatory and non-null only for an OPEN barrier; CLOSED and
+INVALIDATED barriers MUST carry null `opened_at`. `market_fresh_until` is the sole Market freshness authority in barrier
 evidence. It MUST exactly match the accepted Market authority and be strictly
 later than injected `evaluation_at`; a generic `fresh_until` field is forbidden.
 Evidence `observed_at` MUST NOT be later than `evaluation_at`.
