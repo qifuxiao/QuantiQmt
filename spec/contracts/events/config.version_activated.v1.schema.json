@@ -4,50 +4,195 @@
   "title": "ConfigVersionActivatedPayloadV1",
   "type": "object",
   "additionalProperties": false,
-  "required": ["event_id", "config_domain", "candidate_version", "candidate_checksum", "previous_version", "activation_mode", "safe_boundary", "required_components", "component_acks", "outcome", "active_version", "active_checksum", "rollback_version", "secret_references", "policy_version", "policy_checksum", "occurred_at", "correlation_id", "causation_id", "source"],
+  "required": [
+    "config_domain",
+    "candidate_version",
+    "candidate_checksum",
+    "previous_version",
+    "active_version",
+    "active_checksum",
+    "activation_mode",
+    "safe_boundary",
+    "required_components",
+    "component_acks",
+    "secret_references",
+    "policy_version",
+    "policy_checksum",
+    "activated_at",
+    "activation_sequence"
+  ],
   "properties": {
-    "event_id": {"type": "string", "format": "uuid"},
-    "config_domain": {"type": "string", "pattern": "^[a-z][a-z0-9_.-]{1,63}$"},
-    "candidate_version": {"type": "string", "minLength": 1, "maxLength": 64},
-    "candidate_checksum": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
-    "previous_version": {"type": ["string", "null"], "minLength": 1, "maxLength": 64},
-    "activation_mode": {"enum": ["HOT_RELOAD", "RESTART_REQUIRED"]},
-    "safe_boundary": {"enum": ["NEXT_ORDER_BOUNDARY", "NEXT_BAR_BOUNDARY", "RESTART_ONLY"]},
-    "required_components": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
-    "component_acks": {"type": "object", "minProperties": 1, "additionalProperties": {"$ref": "#/$defs/componentAck"}},
-    "outcome": {"enum": ["APPLIED", "REJECTED", "PARTIAL", "ROLLED_BACK", "UNKNOWN"]},
-    "active_version": {"type": ["string", "null"], "minLength": 1, "maxLength": 64},
-    "active_checksum": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"},
-    "rollback_version": {"type": ["string", "null"], "minLength": 1, "maxLength": 64},
-    "secret_references": {"type": "array", "items": {"type": "string", "pattern": "^secret://[^\\s]+$"}, "uniqueItems": true},
-    "policy_version": {"type": "string", "minLength": 1, "maxLength": 64},
-    "policy_checksum": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
-    "occurred_at": {"type": "string", "format": "date-time", "pattern": "^\\d{4}-\\d{2}-\\d{2}T(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d{1,6})?Z$"},
-    "correlation_id": {"type": "string", "minLength": 16, "maxLength": 128},
-    "causation_id": {"type": "string", "minLength": 16, "maxLength": 64},
-    "source": {"type": "string", "const": "ConfigService"}
+    "config_domain": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_.-]{1,63}$"
+    },
+    "candidate_version": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64
+    },
+    "candidate_checksum": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "previous_version": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "minLength": 1,
+      "maxLength": 64
+    },
+    "active_version": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64
+    },
+    "active_checksum": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "activation_mode": {
+      "enum": [
+        "HOT_RELOAD",
+        "RESTART_REQUIRED"
+      ]
+    },
+    "safe_boundary": {
+      "enum": [
+        "NEXT_ORDER_BOUNDARY",
+        "NEXT_BAR_BOUNDARY",
+        "RESTART_ONLY"
+      ]
+    },
+    "required_components": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "component_acks": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "component_id",
+          "candidate_version",
+          "candidate_checksum",
+          "generation",
+          "capability_version",
+          "result",
+          "activation_mode",
+          "safe_boundary",
+          "observed_at",
+          "ack_sequence"
+        ],
+        "properties": {
+          "component_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "candidate_version": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "candidate_checksum": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "generation": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "capability_version": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "result": {
+            "const": "APPLIED"
+          },
+          "activation_mode": {
+            "enum": [
+              "HOT_RELOAD",
+              "RESTART_REQUIRED"
+            ]
+          },
+          "safe_boundary": {
+            "enum": [
+              "NEXT_ORDER_BOUNDARY",
+              "NEXT_BAR_BOUNDARY",
+              "RESTART_ONLY"
+            ]
+          },
+          "observed_at": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}T(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d{1,6})?Z$"
+          },
+          "ack_sequence": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          }
+        }
+      }
+    },
+    "secret_references": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^secret://[^\\s]+$"
+      }
+    },
+    "policy_version": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64
+    },
+    "policy_checksum": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "activated_at": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d{1,6})?Z$"
+    },
+    "activation_sequence": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991
+    }
   },
   "allOf": [
-    {"if": {"properties": {"outcome": {"enum": ["PARTIAL", "UNKNOWN"]}}, "required": ["outcome"]}, "then": {"properties": {"rollback_version": {"type": "string", "minLength": 1}}}},
-    {"if": {"properties": {"activation_mode": {"const": "RESTART_REQUIRED"}}, "required": ["activation_mode"]}, "then": {"properties": {"safe_boundary": {"const": "RESTART_ONLY"}}}}
-  ],
-  "$defs": {
-    "componentAck": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["component_id", "candidate_version", "candidate_checksum", "generation", "capability_version", "prepare_result", "activation_mode", "safe_boundary", "observed_at", "ack_sequence"],
-      "properties": {
-        "component_id": {"type": "string", "minLength": 1, "maxLength": 128},
-        "candidate_version": {"type": "string", "minLength": 1, "maxLength": 64},
-        "candidate_checksum": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
-        "generation": {"type": "integer", "minimum": 1, "maximum": 9007199254740991},
-        "capability_version": {"type": "string", "minLength": 1, "maxLength": 64},
-        "prepare_result": {"enum": ["PREPARED", "APPLIED", "REJECTED", "TIMED_OUT"]},
-        "activation_mode": {"enum": ["HOT_RELOAD", "RESTART_REQUIRED"]},
-        "safe_boundary": {"enum": ["NEXT_ORDER_BOUNDARY", "NEXT_BAR_BOUNDARY", "RESTART_ONLY"]},
-        "observed_at": {"type": "string", "format": "date-time", "pattern": "^\\d{4}-\\d{2}-\\d{2}T(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d{1,6})?Z$"},
-        "ack_sequence": {"type": "integer", "minimum": 1, "maximum": 9007199254740991}
+    {
+      "if": {
+        "properties": {
+          "activation_mode": {
+            "const": "RESTART_REQUIRED"
+          }
+        },
+        "required": [
+          "activation_mode"
+        ]
+      },
+      "then": {
+        "properties": {
+          "safe_boundary": {
+            "const": "RESTART_ONLY"
+          }
+        }
       }
     }
-  }
+  ]
 }

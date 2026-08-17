@@ -3,7 +3,7 @@ id: TASK-025
 title: Implement Control Plane, observability, and recovery gates
 status: blocked
 depends_on: [TASK-004, TASK-022]
-spec_refs: [INV-TRADING, INV-CONSISTENCY, WF-RECOVERY, WF-CONFIG-ACTIVATION, NFR-OBSERVABILITY, NFR-RELIABILITY, CONTRACT-CONTROL-PLANE-V1, CONTRACT-CONTROL-SEMANTIC-VALIDATION-V1, CONTRACT-CONTROL-COMBINED-MESSAGE-V1, CONTRACT-CONTROL-VALIDATION-CONTEXT-V1, PORTS-CONTROL, WF-CONTROL-PLANE, SM-SYSTEM-MODE]
+spec_refs: [INV-TRADING, INV-CONSISTENCY, CONTRACT-MESSAGE-ENVELOPE-V1, CONTRACT-ERROR-CATALOG, PORTS-CORE, STORAGE-SOT, WF-RECOVERY, WF-CONFIG-ACTIVATION, NFR-PERFORMANCE, NFR-OBSERVABILITY, NFR-RELIABILITY, CONTRACT-CONTROL-PLANE-V1, CONTRACT-CONTROL-SEMANTIC-VALIDATION-V1, CONTRACT-CONTROL-COMBINED-MESSAGE-V1, PORTS-CONTROL, WF-CONTROL-PLANE, SM-SYSTEM-MODE]
 allowed_paths: [src/quantiqmt/control/**, src/quantiqmt/observability/**, tests/unit/control/**, tests/unit/observability/**, tests/integration/recovery/**]
 forbidden_paths: [src/quantiqmt/live/qmt/**, src/quantiqmt/strategy/**]
 verification:
@@ -13,20 +13,22 @@ verification:
 implementation_contract:
   owner: ControlPlane/Observability runtime team after TASK-022 trusted completion
   deliverables:
-    - load only the reviewed immutable manifest-indexed control schema bundle; source checkout access is forbidden
-    - implement exactly one `validate_control_message(message, validation_context)` entrypoint at command, outbox, publish, transition and recovery-restore boundaries; return canonical ACCEPTED/DUPLICATE/REJECTED/CONFLICT decisions and remove bypass validators
-    - event-specific config, kill-switch, mode, health and recovery-barrier checks are private dispatcher branches only; candidate/result-only or command/result-only validators are forbidden runtime APIs
-    - direct schema-only probes never authorize persist/publish/apply/transition/restore/side effects; runtime exposes only the canonical semantic entrypoint
-    - load immutable typed config-component and accepted-recovery-barrier authorities, verify their RFC 8785 checksums/digests and exact version/generation/capability/freshness bindings fail-closed
-    - invoke one equivalent validator on the canonical MessageEnvelope path for all four control events; source checkout schema loading is forbidden
-    - require the validation-context DTO (evaluation time, lineage, identity history and accepted authorities) at every persist/publish/apply/transition/restore/side-effect boundary; omitted context is fail-closed
+    - package and load the reviewed immutable manifest-indexed control schema bundle
+    - implement equivalent typed validation for Control Event, Kill Switch Command, Kill Switch Result and Config Activation boundaries without changing their frozen input facts, order or decisions
+    - direct schema-only probes never authorize persist/publish/apply/transition/recovery/side effects
+    - validate all four public Events as canonical MessageEnvelopeV1 plus the Control refinement and typed payload
+    - use PostgreSQL control_journal as System Mode/Kill Switch authority and component memory only as cache; duplicate decisions use the single persisted prior command/result fact
+    - implement expected-version CAS, stable same-identity replay, QQ-STORAGE-7001 content conflict, and same-identity reconciliation after uncertain commit
+    - load immutable typed config-component, hard-limit and recovery-barrier authorities and verify exact checksum/version/generation/capability/freshness bindings fail-closed
     - implement redacted correlation-chain logs/traces, bounded metrics and P0/P1/P2 alert runbooks
     - implement atomic config ActiveVersion + config.version_activated.v1 + Outbox with rollback/UNKNOWN reconciliation
-    - implement kill-switch CommandBus, lease/fencing and recovery-barrier gates without mutating OMS state
+    - implement scoped Kill Switch CommandBus, lease/fencing and recovery-barrier gates within the NFR latency budget without mutating OMS state
+    - restore latest valid System Mode and Kill Switch per scope from control_journal before opening the recovery barrier
+    - raise a separate storage spec-change task before defining any missing Control Journal repository/table contract
   failure_paths: [stale_fencing_reject, partial_activation_rollback, unknown_command_reconcile, incomplete_barrier_closed, high_cardinality_record_reject, envelope_payload_mismatch, lineage_mismatch, sensitive_field_reject]
   verification:
-    - wheel_or_installed_runtime_loads_immutable_bundle_without_source_checkout
-    - combined_control_message_validator_runs_before_persist_publish_apply_transition_restore_side_effect
+    - installed_runtime_loads_immutable_manifest_indexed_bundle
+    - typed_semantic_validation_runs_before_persist_publish_apply_transition_recovery_side_effect
     - tamper_missing_bundle_and_digest_parity_failure_are_fail_closed
   acceptance:
     - all four control events have envelope+payload binding fixtures and semantic negative matrix

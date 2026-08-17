@@ -1,10 +1,10 @@
 {
   "cases": [
     {"name":"observability_secret_policy","dto_type":"OBSERVABILITY_CONTEXT","field":"redaction_policy","value":"ALLOW_SECRETS"},
-    {"name":"alert_high_cardinality_evidence","dto_type":"ALERT_DEFINITION","field":"evidence_fields","value":["order_id"]},
+    {"name":"alert_high_cardinality_label","dto_type":"ALERT_DEFINITION","field":"label_keys","value":["order_id"]},
     {"name":"config_plaintext_secret","dto_type":"CONFIG_CANDIDATE","field":"secret_references","value":["plain-secret"]},
-    {"name":"kill_switch_without_authorization","dto_type":"KILL_SWITCH_COMMAND","field":"authorization_evidence","value":{}},
-    {"name":"lease_expired_status_active","dto_type":"LEADER_LEASE","field":"expires_at","value":"2026-08-10T01:00:00Z"},
+    {"name":"kill_switch_scope_missing","dto_type":"KILL_SWITCH_COMMAND","field":"scope_id","value":"not-null-for-global"},
+    {"name":"kill_result_restores_normal","dto_type":"KILL_SWITCH_RESULT","field":"restores_normal","value":true},
     {"name":"barrier_missing_evidence","dto_type":"RECOVERY_BARRIER","field":"required_evidence","value":[]}
   ]
 }

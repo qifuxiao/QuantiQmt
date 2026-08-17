@@ -101,8 +101,6 @@ catalogs:
       path: contracts/control/control-semantic-validation.v1.yaml
     - id: CONTRACT-CONTROL-COMBINED-MESSAGE-V1
       path: contracts/control/combined-control-message.v1.schema.json
-    - id: CONTRACT-CONTROL-VALIDATION-CONTEXT-V1
-      path: contracts/control/validation-context.v1.schema.json
     - id: CONTRACT-ERROR-CATALOG
       path: contracts/errors/catalog.yaml
   interfaces:
@@ -195,16 +193,16 @@ catalogs:
 
 change:
   id: SPEC-0.11.0-OBSERVABILITY-CONTROL-CONTRACTS
-  compatibility: additive_control_events_and_internal_dtos_before_first_release; existing_public_messages_unchanged; release_prohibited_until_independent_review_and_runtime_owner_delivery
+  compatibility: first_freeze_correction_for_pre_release_control_V1_events_and_internal_DTOs; canonical_MessageEnvelopeV1_unchanged; release_prohibited_until_independent_review_and_runtime_owner_delivery
   previous_version: 0.10.0
-  public_message_schema_changes: "activates previously planned system.mode_changed.v1, system.component_health_changed.v1, system.kill_switch_changed.v1 and config.version_activated.v1 with fail-closed schemas; no previously active public schema changes"
-  storage_schema_changes: "defines logical ActiveVersion, control audit and recovery barrier evidence; no database object or migration is created"
+  public_message_schema_changes: "first-freeze correction for four previously planned and unreleased Control V1 events: occurred facts only, addressable scope and canonical MessageEnvelopeV1 fields; no previously active public schema changes"
+  storage_schema_changes: "references existing STORAGE-SOT PostgreSQL control_journal authority and recovery order only; no database object or migration is created; any physical storage contract requires an independent spec-change task"
   error_catalog_change: none
   runtime_code_change: "none in TASK-022; TASK-025 remains blocked and owns future ControlPlane/Observability runtime implementation only after TASK-022 trusted completion"
   review_change: none
-  contract_change: "adds ControlPlane DTOs, four system/config events, envelope and redaction bindings, config activation/rollback, kill switch, lease/fencing and recovery barrier contracts; existing active schemas remain unchanged"
-  semantic_validation_change: "adds CONTRACT-CONTROL-SEMANTIC-VALIDATION-V1 with one canonical validate_control_message entrypoint before publish, outbox persistence, command dispatch, state transition and recovery restore; schema-only probes never authorize side effects; enforces correlation, redaction, immutable typed config component authority, strict accepted recovery-barrier authority, single market freshness evidence, exact system-mode transitions, fencing and complete recovery evidence"
-  internal_contracts_added: [CONTRACT-CONTROL-PLANE-V1, CONTRACT-CONTROL-SEMANTIC-VALIDATION-V1, PORTS-CONTROL, WF-CONTROL-PLANE]
+  contract_change: "freezes ControlPlane DTOs, four occurred-fact system/config events, canonical envelope refinement, config activation/rollback, scoped kill switch, lease/fencing and recovery barrier behavior; shared MessageEnvelopeV1 remains unchanged"
+  semantic_validation_change: "defines typed per-operation facts, validation order and fail-closed decisions without freezing runtime APIs or storage layout; duplicate authority is one prior persisted Control Journal/Inbox fact; preserves exact numeric/time, hard-limit, ACK, recovery, redaction and label invariants"
+  internal_contracts_added: [CONTRACT-CONTROL-PLANE-V1, CONTRACT-CONTROL-SEMANTIC-VALIDATION-V1, CONTRACT-CONTROL-COMBINED-MESSAGE-V1, PORTS-CONTROL, WF-CONTROL-PLANE]
   public_contracts_added: [system.mode_changed.v1, system.component_health_changed.v1, system.kill_switch_changed.v1, config.version_activated.v1]
   task_queue_change: "TASK-022 remains active/draft/in-progress pending independent Review; TASK-025 remains blocked and constrained to the frozen contracts; no other task changes state"
   affected_tasks: [TASK-022, TASK-025]

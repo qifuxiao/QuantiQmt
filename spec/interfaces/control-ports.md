@@ -1,194 +1,143 @@
-# PORTS-CONTROL: Observability and Control Plane L4
+# PORTS-CONTROL — Control Plane L4 Ports
 
-This contract is the normative boundary for control operations. It does not own
-OMS order state, Risk decisions, broker effects, or database authority.
+Status: Draft. Owner: ControlPlane. This contract freezes behavior and authority
+boundaries; it does not freeze runtime classes, a database schema, repository
+layout, or an in-memory history model.
 
-## Observability
+## Authority layering
 
-Every message, log, trace span and audit record MUST carry the same
-`correlation_id`; a child operation MUST carry its immediate `causation_id`.
-The required context is `message_id`, `correlation_id`, `causation_id`,
-`source`, `service`, `instance`, `environment`, `occurred_at`, `received_at`
-and `error_code`. Secrets, credentials, tokens and raw account identifiers MUST
-be redacted before a record crosses this port. Metrics MUST use only the
-allow-listed bounded labels in `NFR-OBSERVABILITY`; order, trade, instrument,
-account, strategy, message and correlation identifiers are prohibited labels.
+- Commands enter through `CommandBus` as required by `PORTS-CORE`; EventBus is
+  not a request/reply transport.
+- `STORAGE-SOT` is authoritative for System Mode and Kill Switch:
+  PostgreSQL `control_journal` is durable authority and component memory is a
+  cache only.
+- Public Events are immutable facts emitted after their authoritative state
+  transition has committed. Internal command results and audit facts describe
+  rejected or uncertain attempts.
+- Recovery follows `WF-RECOVERY`: restore the latest valid System Mode and Kill
+  Switch for every scope from `control_journal` before opening a recovery
+  barrier.
+- A concrete Control Journal repository/table contract is intentionally outside
+  TASK-022. It requires a separate storage spec-change task before runtime work
+  needs a physical design.
 
-Only `validate_control_message(message, validation_context)` is a usable
-ControlSemanticValidator entrypoint for combined public events and the
-`CONFIG_CANDIDATE`, `KILL_SWITCH_COMMAND` and `KILL_SWITCH_RESULT` DTOs; it returns one canonical decision:
-`ACCEPTED`, `DUPLICATE`, `REJECTED` or `CONFLICT`. It MUST validate envelope and payload together before
-publish or outbox persistence. Its normative order is structural envelope,
-payload schema, combined event binding, then cross-object semantics. The same
-validator MUST run at command ingress and before Outbox persist, event publish,
-consumer apply, control transition, restore/replay and every external side
-effect. Failure rejects
-without repair, reordering, persistence, publication or execution. Structural
-schema validation, canonical payload/checksum/fingerprint recomputation and all
-immutable envelope/payload source, aggregate, idempotency, correlation and
-causation bindings run before duplicate classification. Only then is a trusted
-same-identity plus same-fingerprint replay a duplicate before mutable current
-authority, barrier or lineage state is consulted; same identity with a
-different fingerprint is a fail-closed collision and MUST retain evidence.
+## Common scope
 
-Event-specific config, kill-switch, mode, health and recovery-barrier checks are
-private branches of that dispatcher only. Candidate/result-only, command/result-
-only or barrier-only helpers are not validator APIs and MUST NOT be used as
-runtime implementation entrypoints; candidate and command checks are private
-branches selected by the unified dispatcher.
-Direct Draft 2020-12 validation is a structural probe only. It never returns a
-semantic acceptance decision and MUST NOT authorize persistence, publication,
-consumer apply, state transition, recovery restore or an external side effect.
+`ControlScope = {scope_type, scope_id}` where `scope_type` is one of `GLOBAL`,
+`ACCOUNT`, `STRATEGY`, or `INSTRUMENT`. `GLOBAL` requires `scope_id = null`;
+every other type requires a non-empty ID. Its deterministic `scope_key` is
+`GLOBAL` for global scope and `{scope_type}:{scope_id}` otherwise.
 
-When the accepted authority context carries a recovery barrier, its CLOSED,
-OPEN or INVALIDATED evidence is validated by the same entrypoint before the
-event-specific decision; no barrier-only shortcut may bypass freshness,
-authority or lineage checks.
+Kill Switch Command, Result, persisted authority and changed Event MUST carry
+the same scope. For scoped public Events, MessageEnvelope `aggregate_id` and
+`partition_key` both equal `scope_key`.
 
-`validation_context` is mandatory and is the `CONTRACT-CONTROL-VALIDATION-CONTEXT-V1`
-DTO: it contains injected `evaluation_at`, the validation boundary, accepted
-policy identity, known message lineage, generic identity/fingerprint history,
-the independent bounded Kill Switch aggregate registry, and accepted config/market/audit/
-lease/component/reconciliation/critical-lag authorities. Omitting or supplying
-an empty context is a validation error; a missing parent is never treated as a
-root event.
+## Validation operations
 
-The four combined public control events are never root events: `causation_id`
-is required and MUST reference a known direct parent command/observation in
-the injected validation context with an earlier sequence and identical
-correlation. Root inputs, when needed, are authorized command/observation
-context records and are not published as these events. Self references,
-unknown/future parents and cross-correlation links are rejected. Recursive
-redaction scans reject credentials, secrets, raw tokens and raw account
-identifiers; structured audit evidence is never a metric label.
+The implementation may organize code freely, but every side-effecting boundary
+must perform the equivalent typed operation and order specified by
+`CONTRACT-CONTROL-SEMANTIC-VALIDATION-V1`:
 
-## CommandBus and control actions
+- `ValidateControlEvent(envelope, payload, optional prior state, injected time)`
+- `ValidateKillSwitchCommand(command, current scoped state, authorization,
+  lease, optional recovery barrier, optional prior persisted command/result,
+  injected time)`
+- `ValidateKillSwitchResult(result, persisted command fact, optional prior
+  result fact, current scoped state, expected ACK authority, injected time)`
+- `ValidateConfigActivation(candidate/result, accepted policy/components/hard
+  limits, optional prior result fact, injected time)`
 
-Control commands use `CommandBus`, never EventBus request/response simulation.
-Every command has an absolute UTC deadline, an idempotency key, expected
-version and fencing evidence. A timeout after dispatch is `UNKNOWN`; the same
-command identity is reconciled and never reissued with a new identity.
-Every public or internal control timestamp crossing this contract uses canonical
-UTC `Z` wire form with zero to six fractional digits. An ingress adapter MAY
-parse an explicit RFC 3339 offset and normalize the same instant to UTC `Z`
-before validation, but raw offsets, naive values, leap seconds, unknown `-00:00`
-offsets and excess precision fail closed at the contract boundary. Safety
-comparisons parse these values as aware instants and never compare strings.
+Schema validation alone never authorizes dispatch, journal commit, outbox
+persistence, publication, consumer apply, state transition, recovery-barrier
+opening, or an external side effect.
 
-`KillSwitchCommand` and `ConfigCandidate` are validated by schema and then by
-the same semantic validator at dispatch, persistence and recovery restore.
-The accepted config authority is immutable and versioned: its checksum is
-SHA-256 over RFC 8785 JCS bytes for the complete candidate security projection:
-config domain/version, actual candidate payload, sorted secret references and
-required components, activation mode and safe boundary, system hard-limit
-policy identity and content (including valuation currency and every accepted
-system hard limit), candidate dynamic limits, plus the complete component
-authority map and control policy identity. Only secret-reference and required-
-component arrays are sorted as sets; other arrays preserve wire order, object
-keys use RFC 8785 ordering, and Unicode is not normalized. Candidate currency
-MUST equal policy currency, policy content MUST hash to the accepted checksum,
-and no dynamic upper bound may exceed its accepted system hard limit. Payload
-and every nested checksum projection value permit only finite, mathematically
-integral I-JSON safe numbers or strings. The wire parser MUST preserve each JSON
-number token's exact decimal value (for example Python `parse_float=Decimal`)
-before structural and semantic validation; passing through binary float is
-forbidden, and directly constructed binary-float API values fail closed without
-proven exact-token provenance. Exact JSON `1`, `1.0` and `1e0` normalize to the
-same integer before JCS; hidden fractional, underflow/overflow, non-finite and
-out-of-safe-range numbers are rejected recursively. Schema `number` plus
-`multipleOf: 1` is only a structural gate and cannot replace this exact semantic
-gate. Prices, money, fees and other decimal
-quantities remain canonical decimal strings and never binary floating point.
-required components, ACK keys, authority required components and authority
-component keys MUST be the same set. Each ACK MUST exactly bind component ID,
-generation, capability version, activation mode and safe boundary; missing or
-unknown authority components fail closed.
-The public config activation event MUST exactly bind its secret references,
-required components, activation mode, safe boundary, policy identity and
-candidate checksum to that accepted candidate; changing any security field
-without a new checksum is rejected.
-Kill-switch command/result pairs MUST bind command identity and canonical
-fingerprint, expected/previous/current versions, authorization identity and
-checksum, leader lease/fencing evidence, absolute deadline and reconciliation
-evidence. `UNKNOWN` is returned for possible commit and requires an
-authoritative query; a new idempotency identity is forbidden. Disabling the
-switch requires a verified recovery-evidence reference and MUST NOT restore
-NORMAL automatically.
-Kill Switch idempotency uses one dedicated, bounded `kill_switch_registry`, not
-generic `identity_history`. Its exact map key is lowercase SHA-256 over RFC 8785
-JCS for `{identity_type:"KILL_SWITCH_COMMAND",command_id,idempotency_key,scope}`;
-external IDs and strings that resemble internal prefixes are never registry
-keys or discriminators. Each append-once entry contains one complete immutable,
-semantically `ACCEPTED` command snapshot, accepted authorization/lease/effect
-authority, and either `result:null` at record version 1 or one complete immutable
-result at record version 2. Rejected commands remain audit facts and can never
-authorize a result. The first result performs an O(1) exact lookup and CAS from
-`result:null` to the exact result. An exact result replay is `DUPLICATE` before
-mutable current authority; changed result ID, outcome, effect or other content is
-`CONFLICT`. A first result after the current aggregate advances is stale and
-fails closed for same-identity reconciliation; it is not a duplicate.
+## Public fact events
 
-The registry hard cap is 4096 entries: the smallest power of two above the NFR
-workload's 2000 active instruments plus 100 strategy instances, leaving bounded
-account/global and transition headroom. At capacity, new command registration
-fails closed as existing `QQ-STORAGE-7001 IDEMPOTENCY_CONFLICT` until a verified
-durable audit checkpoint covers terminal entries and compaction completes.
-Recovery parses the single registry and verifies every command identity,
-command/result fingerprint, record version and aggregate checksum before any
-entry is loaded; partial restore is forbidden. Business result validation never
-scans the registry or interprets generic-history prefixes.
-That reference resolves only through the strict
-`accepted_recovery_barriers` authority registry. Its map key and barrier ID,
-generation, barrier version/checksum, evidence and aggregate digests, OPEN
-state, kill-switch version, policy, authorization and injected-time freshness
-MUST all match the command and event; arbitrary objects and stale evidence are
-rejected.
-Kill-switch outcomes are exhaustive and identical for the public event and
-internal result DTO: APPLIED advances exactly one version and reaches desired
-state; REJECTED keeps accepted state/version; PARTIAL stays fail-closed ON with
-unchanged version and reconciliation required; TIMEOUT/UNKNOWN use UNKNOWN,
-unchanged version and reconciliation under the same command identity and
-fingerprint. Every outcome forbids implicit NORMAL restoration.
-Effect ACKs are authority-bound for both forms: APPLIED requires the complete
-expected set, REJECTED requires none, PARTIAL requires a non-empty strict
-subset, and TIMEOUT/UNKNOWN may retain only an incomplete known subset while
-reconciliation is required. Unknown, forged, future-observed or falsely
-complete ACK evidence is rejected.
-Kill switch ON blocks new OrderIntent and new Risk approval but preserves
-cancel, recovery and explicitly approved reduce-risk capacity. It cannot change
-OMS business state or bypass Risk/Execution.
+All four Events use canonical `MessageEnvelopeV1` without extra top-level wire
+fields. `publisher`, `aggregate_type`, and `payload_fingerprint` are not envelope
+fields. A payload fingerprint is computed semantically from RFC 8785 JCS bytes.
 
-## Lease and fencing
+- `system.mode_changed.v1` reports one legal, persisted System Mode transition.
+- `system.component_health_changed.v1` reports one legal, accepted component
+  health transition.
+- `system.kill_switch_changed.v1` reports only a persisted Kill Switch state
+  change. Rejected or uncertain commands do not publish it.
+- `config.version_activated.v1` reports only a successful atomic
+  `ActiveVersion + Event + Outbox` commit. Rejected, partial, unknown and rolled
+  back attempts are internal `ConfigActivationResult`/audit facts.
 
-`LeaderLease` contains lease identity, holder, monotonic epoch, fencing token,
-issued/expiry/renew-deadline timestamps and status. A token is checked before
-every external side effect. Expiry, epoch regression, renewal after expiry or
-cached success from a stale token is rejected without side effect.
+Control Event payload timestamps and combined-envelope timestamps are canonical
+UTC `Z` with zero to six fractional digits. The shared Envelope contract keeps
+its existing RFC 3339 compatibility; an adapter normalizes offsets before a
+message enters the Control refinement.
 
-## Recovery barrier
+## Kill Switch Command and Result
 
-`RecoveryBarrier` starts CLOSED. Opening requires the complete evidence set
+`KillSwitchCommand` carries command ID, scope, desired state, cancel policy,
+reason, expected version, absolute deadline, idempotency key, authorization,
+leader lease/fencing, and complete recovery-barrier references when disabling.
+
+The persisted command identity is the typed tuple
+`(KILL_SWITCH_COMMAND, scope_type, scope_id, idempotency_key)`. `command_id` is
+trace identity, not a substitute for target scope. The canonical command
+fingerprint covers every immutable security field and excludes only the
+fingerprint field itself.
+
+- Same persisted identity and same canonical command returns the original
+  persisted result (`DUPLICATE`).
+- Same identity and different canonical command is
+  `QQ-STORAGE-7001 IDEMPOTENCY_CONFLICT`.
+- `expected_version` is a CAS guard; stale versions use
+  `QQ-COMMON-1003 VERSION_CONFLICT` and emit no changed Event.
+- An uncertain journal commit is queried/reconciled using the same identity.
+  Changing the idempotency key to retry is forbidden.
+
+`KillSwitchResult` carries the same command/scope/version/authorization/
+lease/fence facts and has `APPLIED`, `REJECTED`, or `UNKNOWN` outcome:
+
+- `APPLIED`: desired state is effective, version advances exactly once,
+  reconciliation is false, and complete expected effect ACKs are present.
+- `REJECTED`: accepted state and version are unchanged, reconciliation is
+  false, and no effect ACK is claimed.
+- `UNKNOWN`: effective state is `UNKNOWN`, version is not fabricated,
+  reconciliation is true, and only known incomplete ACK evidence may remain.
+
+A single optional prior persisted result fact makes exact replay stable before
+consulting mutable current state. Different result content or result ID is a
+conflict. No cumulative history or storage layout is an input to validation.
+
+Kill Switch ON blocks new OrderIntent and new Risk approval while preserving
+cancel, recovery and explicitly approved reduce-risk capacity. OFF requires the
+same complete, fresh, OPEN recovery barrier used by System Mode recovery. It
+never restores NORMAL automatically and never mutates OMS business state.
+
+## Configuration activation
+
+The candidate checksum is SHA-256 over RFC 8785 JCS for the complete security
+projection frozen in the semantic contract. Secret-reference and required-
+component arrays are sorted as sets; other arrays preserve wire order. JSON
+number tokens are parsed exactly and only finite, mathematical I-JSON safe
+integers are accepted; prices, money, fees and decimal quantities remain
+canonical decimal strings.
+
+Candidate currency and hard-limit policy currency/content/checksum must match,
+and a dynamic limit cannot relax an accepted system hard limit. Required
+components, authority keys and ACK keys must be the same set, with every ACK
+binding version, checksum, generation, capability and activation boundary.
+
+## Lease, recovery, and observability
+
+Lease/fencing is checked immediately before every external side effect. Expiry,
+revocation, epoch regression, stale fencing, or renewal after expiry fails
+closed.
+
+A recovery barrier starts CLOSED and opens only with all six verified gates:
 `CONFIG_VERIFIED`, `MARKET_FRESH`, `AUDIT_AVAILABLE`,
-`RECONCILIATION_COMPLETE`, `LEASE_FENCED` and `OUTBOX_HEALTHY`, including
-component versions, checksums and watermarks. While closed, new OrderIntent and
-Risk approval are rejected. Reconnect alone never opens the barrier or restores
-NORMAL. Evidence invalidation moves the barrier to conservative INVALIDATED
-state and requires a new verified opening transition.
-`opened_at` is mandatory and non-null only for an OPEN barrier; CLOSED and
-INVALIDATED barriers MUST carry null `opened_at`. `market_fresh_until` is the sole Market freshness authority in barrier
-evidence. It MUST exactly match the accepted Market authority and be strictly
-later than injected `evaluation_at`; a generic `fresh_until` field is forbidden.
-Evidence `observed_at` MUST NOT be later than `evaluation_at`.
-Every semantic comparison of observed, occurred, approved, deadline, expiry,
-freshness, opening or applied time parses strict RFC 3339 (`Z` or an explicit
-known offset), normalizes to an aware UTC instant, and compares instants rather
-than strings. Invalid, naive, unknown `-00:00` offsets and unsupported precision
-fail closed.
+`RECONCILIATION_COMPLETE`, `LEASE_FENCED`, and `OUTBOX_HEALTHY`. OPEN requires a
+non-null `opened_at`; CLOSED/INVALIDATED require null. Observations cannot be in
+the future and market freshness must extend strictly beyond injected time.
+`STARTING -> NORMAL / RECOVERY_PASSED` requires this complete OPEN authority.
 
-## Alerts and runbooks
-
-Alert definitions freeze P0/P1/P2 severity, authoritative metric, threshold and
-version, sustained trigger window, recovery window, owner, runbook URI and
-correlation/evidence fields. Critical lag uses the source received-watermark
-delta, not queue depth alone. Alerts are safety signals and never become the
-authoritative trading state.
+Sensitive keys are rejected recursively. Metric labels are limited to the
+frozen low-cardinality allowlist; detailed identities and evidence belong in
+redacted logs, traces and audit facts.

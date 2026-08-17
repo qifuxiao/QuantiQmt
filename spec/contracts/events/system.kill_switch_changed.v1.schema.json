@@ -4,50 +4,225 @@
   "title": "SystemKillSwitchChangedPayloadV1",
   "type": "object",
   "additionalProperties": false,
-  "required": ["event_id", "command_id", "command_fingerprint", "scope", "desired_state", "effective_state", "reason_code", "actor", "authorization_evidence", "expected_version", "previous_version", "current_version", "leader_lease_id", "leader_id", "lease_epoch", "fencing_token", "deadline_at", "idempotency_key", "reserved_capacity", "recovery_evidence_reference", "outcome", "reconciliation_required", "restores_normal", "effect_evidence", "policy_version", "policy_checksum", "occurred_at", "correlation_id", "causation_id", "source", "recovery_barrier_generation", "recovery_barrier_version", "recovery_barrier_checksum", "recovery_evidence_digest", "recovery_aggregate_evidence_digest"],
+  "required": [
+    "scope_type",
+    "scope_id",
+    "command_id",
+    "command_fingerprint",
+    "idempotency_key",
+    "enabled",
+    "previous_enabled",
+    "cancel_active_orders",
+    "reason",
+    "reason_code",
+    "operator_id",
+    "changed_at",
+    "previous_version",
+    "current_version",
+    "authorization_id",
+    "leader_lease_id",
+    "fencing_token",
+    "effect_evidence",
+    "policy_version",
+    "policy_checksum",
+    "recovery_evidence_reference"
+  ],
   "properties": {
-    "event_id": {"type": "string", "format": "uuid"},
-    "command_id": {"type": "string", "minLength": 16, "maxLength": 256},
-    "command_fingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
-    "scope": {"enum": ["GLOBAL", "ACCOUNT", "STRATEGY", "INSTRUMENT"]},
-    "desired_state": {"enum": ["ON", "OFF"]},
-    "effective_state": {"enum": ["ON", "OFF", "UNKNOWN"]},
-    "reason_code": {"enum": ["MANUAL_EMERGENCY", "RISK_BREACH", "RECOVERY_BARRIER", "CONFIGURATION", "OPERATOR_RELEASE"]},
-    "actor": {"type": "string", "minLength": 1, "maxLength": 128},
-    "authorization_evidence": {"type": "object", "additionalProperties": false, "required": ["authorization_id", "authorization_version", "authorization_checksum", "approver_ids", "approved_at", "valid_until", "revoked"], "properties": {"authorization_id": {"type": "string", "minLength": 1}, "authorization_version": {"type": "string", "minLength": 1}, "authorization_checksum": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "approver_ids": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1}}, "approved_at": {"type": "string", "format": "date-time", "pattern": "^\\d{4}-\\d{2}-\\d{2}T(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d{1,6})?Z$"}, "valid_until": {"type": "string", "format": "date-time", "pattern": "^\\d{4}-\\d{2}-\\d{2}T(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d{1,6})?Z$"}, "revoked": {"const": false}}},
-    "expected_version": {"type": "integer", "minimum": 1, "maximum": 9007199254740991},
-    "previous_version": {"type": "integer", "minimum": 0, "maximum": 9007199254740991},
-    "current_version": {"type": "integer", "minimum": 1, "maximum": 9007199254740991},
-    "leader_lease_id": {"type": "string", "minLength": 1},
-    "leader_id": {"type": "string", "minLength": 1},
-    "lease_epoch": {"type": "integer", "minimum": 1, "maximum": 9007199254740991},
-    "fencing_token": {"type": "string", "minLength": 16},
-    "deadline_at": {"type": "string", "format": "date-time", "pattern": "^\\d{4}-\\d{2}-\\d{2}T(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d{1,6})?Z$"},
-    "idempotency_key": {"type": "string", "minLength": 16, "maxLength": 256},
-    "reserved_capacity": {"type": "object", "additionalProperties": false, "required": ["cancel", "recovery"], "properties": {"cancel": {"type": "integer", "minimum": 1, "maximum": 9007199254740991}, "recovery": {"type": "integer", "minimum": 1, "maximum": 9007199254740991}}},
-    "recovery_evidence_reference": {"type": ["string", "null"], "minLength": 1},
-    "effect_evidence": {"type": "object", "additionalProperties": false, "required": ["ack_ids", "observed_at"], "properties": {"ack_ids": {"type": "array", "minItems": 0, "uniqueItems": true, "items": {"type": "string", "minLength": 1}}, "observed_at": {"type": "string", "format": "date-time", "pattern": "^\\d{4}-\\d{2}-\\d{2}T(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d{1,6})?Z$"}}},
-    "outcome": {"enum": ["APPLIED", "REJECTED", "PARTIAL", "TIMEOUT", "UNKNOWN"]},
-    "reconciliation_required": {"type": "boolean"},
-    "restores_normal": {"const": false},
-    "policy_version": {"type": "string", "minLength": 1, "maxLength": 64},
-    "policy_checksum": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
-    "occurred_at": {"type": "string", "format": "date-time", "pattern": "^\\d{4}-\\d{2}-\\d{2}T(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d{1,6})?Z$"},
-    "correlation_id": {"type": "string", "minLength": 16, "maxLength": 128},
-    "causation_id": {"type": "string", "minLength": 16, "maxLength": 64},
-    "source": {"type": "string", "const": "ControlPlane"},
-    "recovery_barrier_generation": {"type": ["integer", "null"], "minimum": 1, "maximum": 9007199254740991},
-    "recovery_barrier_version": {"type": ["string", "null"], "minLength": 1, "maxLength": 64},
-    "recovery_barrier_checksum": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"},
-    "recovery_evidence_digest": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"},
-    "recovery_aggregate_evidence_digest": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"}
+    "scope_type": {
+      "enum": [
+        "GLOBAL",
+        "ACCOUNT",
+        "STRATEGY",
+        "INSTRUMENT"
+      ]
+    },
+    "scope_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "command_id": {
+      "type": "string",
+      "minLength": 16,
+      "maxLength": 256
+    },
+    "command_fingerprint": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "idempotency_key": {
+      "type": "string",
+      "minLength": 16,
+      "maxLength": 256
+    },
+    "enabled": {
+      "type": "boolean"
+    },
+    "previous_enabled": {
+      "type": "boolean"
+    },
+    "cancel_active_orders": {
+      "type": "boolean"
+    },
+    "reason": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 512
+    },
+    "reason_code": {
+      "enum": [
+        "MANUAL_EMERGENCY",
+        "RISK_BREACH",
+        "RECOVERY_BARRIER",
+        "CONFIGURATION",
+        "OPERATOR_RELEASE"
+      ]
+    },
+    "operator_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "approval_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "changed_at": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d{1,6})?Z$"
+    },
+    "previous_version": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "current_version": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991
+    },
+    "authorization_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "leader_lease_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "fencing_token": {
+      "type": "string",
+      "minLength": 16,
+      "maxLength": 256
+    },
+    "effect_evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "control_journal_position",
+        "persisted_at"
+      ],
+      "properties": {
+        "control_journal_position": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "persisted_at": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d{1,6})?Z$"
+        }
+      }
+    },
+    "policy_version": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64
+    },
+    "policy_checksum": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "recovery_evidence_reference": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "minLength": 1,
+      "maxLength": 128
+    }
   },
   "allOf": [
-    {"if": {"properties": {"desired_state": {"const": "ON"}}, "required": ["desired_state"]}, "then": {"properties": {"recovery_evidence_reference": {"type": "null"}, "recovery_barrier_generation": {"type": "null"}, "recovery_barrier_version": {"type": "null"}, "recovery_barrier_checksum": {"type": "null"}, "recovery_evidence_digest": {"type": "null"}, "recovery_aggregate_evidence_digest": {"type": "null"}}}},
-    {"if": {"properties": {"desired_state": {"const": "OFF"}}, "required": ["desired_state"]}, "then": {"required": ["recovery_evidence_reference", "recovery_barrier_generation", "recovery_barrier_version", "recovery_barrier_checksum", "recovery_evidence_digest"], "properties": {"recovery_evidence_reference": {"type": "string", "minLength": 1}, "recovery_barrier_generation": {"type": "integer", "minimum": 1, "maximum": 9007199254740991}, "recovery_barrier_version": {"type": "string", "minLength": 1, "maxLength": 64}, "recovery_barrier_checksum": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "recovery_evidence_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "recovery_aggregate_evidence_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}}}},
-    {"if": {"properties": {"outcome": {"const": "APPLIED"}}, "required": ["outcome", "desired_state"]}, "then": {"oneOf": [{"properties": {"desired_state": {"const": "ON"}, "effective_state": {"const": "ON"}, "reconciliation_required": {"const": false}}}, {"properties": {"desired_state": {"const": "OFF"}, "effective_state": {"const": "OFF"}, "reconciliation_required": {"const": false}}}]}},
-    {"if": {"properties": {"outcome": {"const": "REJECTED"}}, "required": ["outcome"]}, "then": {"properties": {"effective_state": {"enum": ["ON", "OFF"]}, "reconciliation_required": {"const": false}}}},
-    {"if": {"properties": {"outcome": {"const": "PARTIAL"}}, "required": ["outcome"]}, "then": {"properties": {"effective_state": {"const": "ON"}, "reconciliation_required": {"const": true}}}},
-    {"if": {"properties": {"outcome": {"enum": ["TIMEOUT", "UNKNOWN"]}}, "required": ["outcome"]}, "then": {"properties": {"effective_state": {"const": "UNKNOWN"}, "reconciliation_required": {"const": true}}}}
+    {
+      "oneOf": [
+        {
+          "properties": {
+            "scope_type": {
+              "const": "GLOBAL"
+            },
+            "scope_id": {
+              "type": "null"
+            }
+          }
+        },
+        {
+          "properties": {
+            "scope_type": {
+              "enum": [
+                "ACCOUNT",
+                "STRATEGY",
+                "INSTRUMENT"
+              ]
+            },
+            "scope_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          }
+        }
+      ]
+    },
+    {
+      "oneOf": [
+        {
+          "properties": {
+            "enabled": {
+              "const": true
+            },
+            "previous_enabled": {
+              "const": false
+            },
+            "recovery_evidence_reference": {
+              "type": "null"
+            }
+          }
+        },
+        {
+          "properties": {
+            "enabled": {
+              "const": false
+            },
+            "previous_enabled": {
+              "const": true
+            },
+            "recovery_evidence_reference": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      ]
+    }
   ]
 }
