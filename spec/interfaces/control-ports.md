@@ -81,10 +81,11 @@ component arrays are sorted as sets; other arrays preserve wire order, object
 keys use RFC 8785 ordering, and Unicode is not normalized. Candidate currency
 MUST equal policy currency, policy content MUST hash to the accepted checksum,
 and no dynamic upper bound may exceed its accepted system hard limit. Payload
-and every nested checksum projection value permit only I-JSON safe integers or
-strings; every non-integer JSON number is rejected recursively. Prices, money,
-fees and other decimal quantities remain canonical decimal strings and never
-binary floating point.
+and every nested checksum projection value permit only finite, mathematically
+integral I-JSON safe numbers or strings. JSON `1`, `1.0` and `1e0` normalize to
+the same integer before JCS; fractional, non-finite and out-of-safe-range
+numbers are rejected recursively. Prices, money, fees and other decimal
+quantities remain canonical decimal strings and never binary floating point.
 required components, ACK keys, authority required components and authority
 component keys MUST be the same set. Each ACK MUST exactly bind component ID,
 generation, capability version, activation mode and safe boundary; missing or
@@ -100,12 +101,15 @@ evidence. `UNKNOWN` is returned for possible commit and requires an
 authoritative query; a new idempotency identity is forbidden. Disabling the
 switch requires a verified recovery-evidence reference and MUST NOT restore
 NORMAL automatically.
-An internal `KILL_SWITCH_RESULT` has its own `result_id` and canonical
-`result_fingerprint`; identity history uses the `KILL_SWITCH_RESULT` namespace
-and never aliases the command identity. The fingerprint covers the complete
-result except itself, including command/idempotency bindings, outcome and
-versions, authorization, lease/fencing and effect evidence. Only an identical
-namespaced result replay is `DUPLICATE`; changed content is a collision.
+Internal command history always uses `KILL_SWITCH_COMMAND:{command_id}`; raw
+external IDs are never registry keys. A `KILL_SWITCH_RESULT` has its own
+`result_id` and canonical `result_fingerprint` under the disjoint
+`KILL_SWITCH_RESULT:{result_id}` namespace. A second command-result index is
+`KILL_SWITCH_COMMAND_RESULT:` plus SHA-256 of RFC 8785 JCS over exactly
+`{command_id,idempotency_key,scope}`. It permits exactly one result per command.
+The command-result and result-entity indexes MUST be registered atomically and
+restored together; missing, divergent, changed-result-ID or changed-fingerprint
+records fail closed. Only a replay matching both indexes is `DUPLICATE`.
 That reference resolves only through the strict
 `accepted_recovery_barriers` authority registry. Its map key and barrier ID,
 generation, barrier version/checksum, evidence and aggregate digests, OPEN
@@ -148,6 +152,11 @@ INVALIDATED barriers MUST carry null `opened_at`. `market_fresh_until` is the so
 evidence. It MUST exactly match the accepted Market authority and be strictly
 later than injected `evaluation_at`; a generic `fresh_until` field is forbidden.
 Evidence `observed_at` MUST NOT be later than `evaluation_at`.
+Every semantic comparison of observed, occurred, approved, deadline, expiry,
+freshness, opening or applied time parses strict RFC 3339 (`Z` or an explicit
+known offset), normalizes to an aware UTC instant, and compares instants rather
+than strings. Invalid, naive, unknown `-00:00` offsets and unsupported precision
+fail closed.
 
 ## Alerts and runbooks
 

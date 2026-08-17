@@ -34,8 +34,12 @@ workflow:
     on_effect: [block_new_order_intent, block_new_risk_approval, preserve_cancel, preserve_recovery, preserve_approved_reduce_risk]
     stale_expected_version: reject_without_event
     timeout_after_dispatch: UNKNOWN_and_reconcile_same_idempotency_key
+    command_identity: fixed_KILL_SWITCH_COMMAND_namespace_never_raw_external_id
     result_identity: namespaced_result_id_plus_canonical_complete_result_fingerprint_distinct_from_command_identity
-    result_duplicate: only_same_namespaced_result_identity_and_same_canonical_result_content
+    command_result_identity: KILL_SWITCH_COMMAND_RESULT_plus_SHA256_RFC8785_of_command_id_idempotency_key_scope
+    result_registration: atomic_command_result_and_result_entity_indexes_exactly_one_result_per_command
+    result_duplicate: only_both_indexes_same_canonical_result; changed_result_id_or_content_conflict
+    result_restore: missing_or_divergent_dual_index_fail_closed
     result_effect_evidence: authority_bound_APPLIED_complete_REJECTED_empty_PARTIAL_strict_subset_TIMEOUT_UNKNOWN_incomplete_known_subset
     disable_recovery_authority: strict_open_barrier_identity_version_checksum_generation_digest_policy_authorization_and_freshness
     disable_recovery_validation: same_complete_recovery_barrier_validator_as_mode_recovery
@@ -55,5 +59,6 @@ workflow:
     causation_required_for_control_events: true
     parent_before_child_same_correlation: required
     unknown_future_self_or_cross_correlation_parent: reject
+    instant_comparison: strict_RFC3339_Z_or_explicit_offset_normalized_to_UTC_never_string_order
   redaction:
     recursive_forbidden_keys: [password, secret, credential, token, access_token, private_key, raw_account_id, raw_account_identifier]

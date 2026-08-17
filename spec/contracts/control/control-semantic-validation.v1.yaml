@@ -42,6 +42,7 @@ rules:
     context_schema: CONTRACT-CONTROL-VALIDATION-CONTEXT-V1
     identity_history: same_identity_same_fingerprint_duplicate_stable_result; same_identity_different_fingerprint_conflict_reject
     fingerprint: sha256_rfc8785_jcs_payload_utf8_no_bom_lower_hex
+    instant_comparison: strict_RFC3339_with_Z_or_explicit_offset_then_normalize_to_UTC; naive_invalid_unknown_minus_zero_offset_or_more_than_6_fraction_digits_reject
     forbidden_keys: [password, secret, credential, token, access_token, private_key, raw_account_id, raw_account_identifier]
   event_specific_dispatch:
     exhaustive:
@@ -81,7 +82,9 @@ rules:
       utf8: no_bom
       unicode: preserve_scalars_without_normalization
       number_domain: I_JSON_safe_integers_or_decimal_strings
-      non_integer_json_numbers: recursively_forbidden_in_every_checksum_security_projection
+      safe_integer_semantics: finite_mathematically_integral_JSON_number_with_absolute_value_lte_9007199254740991_independent_of_runtime_numeric_type
+      integral_number_normalization: int_integral_float_and_exponent_forms_normalize_to_the_same_JSON_integer_before_JCS
+      fractional_nonfinite_or_unsafe_numbers: recursively_forbidden_in_every_checksum_security_projection
       monetary_values: canonical_decimal_strings_never_binary_float
       sha256: lowercase_hex
       payload_fingerprint_uses_same_algorithm: true
@@ -135,6 +138,10 @@ rules:
     idempotency_replay: same_key_same_payload_same_result; same_key_different_payload_conflict
     command_result_binding: [command_id, idempotency_key, command_fingerprint, scope, desired_state, reason_code, expected_version, previous_version, current_version, authorization_id, authorization_version, authorization_checksum, leader_lease_id, leader_id, lease_epoch, fencing_token, recovery_evidence_reference, recovery_barrier_generation, recovery_barrier_version, recovery_barrier_checksum, recovery_evidence_digest, recovery_aggregate_evidence_digest]
     command_fingerprint: SHA256_RFC8785_JCS_over_complete_KILL_SWITCH_COMMAND_excluding_command_fingerprint
+    command_identity:
+      namespace: KILL_SWITCH_COMMAND
+      registry_key: "KILL_SWITCH_COMMAND:{command_id}"
+      raw_external_id_never_used_as_internal_registry_key: true
     result_identity:
       namespace: KILL_SWITCH_RESULT
       identity_field: result_id
@@ -143,8 +150,17 @@ rules:
       command_identity_is_not_result_identity: true
       fingerprint: SHA256_RFC8785_JCS_over_complete_KILL_SWITCH_RESULT_excluding_result_fingerprint
       fingerprint_projection: [dto_type, schema_version, correlation_id, created_at, result_id, command_id, command_fingerprint, idempotency_key, expected_version, scope, desired_state, effective_state, outcome, previous_version, current_version, reason_code, applied_at, reconciliation_required, effect_evidence, authorization_id, leader_lease_id, fencing_token, restores_normal]
-      duplicate_order: structural_schema_then_canonical_result_fingerprint_then_result_identity_collision_then_mutable_authority
+      duplicate_order: structural_schema_then_canonical_result_fingerprint_then_immutable_command_binding_then_command_result_authority_then_result_identity_then_mutable_authority
       collision: same_namespaced_result_identity_same_canonical_result_duplicate; same_namespaced_result_identity_different_canonical_result_conflict
+    command_result_identity:
+      namespace: KILL_SWITCH_COMMAND_RESULT
+      projection: [command_id, idempotency_key, scope]
+      registry_key: "KILL_SWITCH_COMMAND_RESULT:{sha256_rfc8785_jcs(projection)}"
+      cardinality: exactly_one_result_per_command_identity
+      duplicate: command_result_and_result_entity_indexes_both_exist_with_same_result_fingerprint
+      collision: existing_command_result_with_different_result_id_or_fingerprint_or_content_reject
+      atomic_registration: command_result_index_and_result_entity_index_same_transaction
+      recovery_restore: both_indexes_required_and_must_match_or_fail_closed
     effect_evidence:
       authority: validation_context.accepted_state.kill_switch.effect_ack_ids
       ack_ids: unique_subset_of_accepted_authority

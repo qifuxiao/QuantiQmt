@@ -3,7 +3,10 @@ from __future__ import annotations
 import ast
 import hashlib
 import json
+import math
+import re
 from copy import deepcopy
+from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
 from typing import Any, ClassVar
@@ -120,21 +123,43 @@ HEALTH_TRANSITIONS = {
 
 def _jcs(value: Any) -> str:
     """RFC 8785 JCS restricted to safe integers and decimal strings."""
-    _validate_checksum_number_domain(value)
-    return _market_jcs(value)
+    return _market_jcs(_normalize_checksum_number_domain(value))
 
 
-def _validate_checksum_number_domain(value: Any) -> None:
+def _normalize_checksum_number_domain(value: Any) -> Any:
     if isinstance(value, float):
-        raise ValueError("non-integer JSON number is outside checksum number domain")
+        if not math.isfinite(value) or not value.is_integer():
+            raise ValueError("finite mathematically integral JSON number required")
+        value = int(value)
     if isinstance(value, int) and not isinstance(value, bool) and abs(value) > SAFE_INTEGER_MAX:
         raise ValueError("I-JSON safe integer required")
     if isinstance(value, list):
-        for item in value:
-            _validate_checksum_number_domain(item)
+        return [_normalize_checksum_number_domain(item) for item in value]
     if isinstance(value, dict):
-        for item in value.values():
-            _validate_checksum_number_domain(item)
+        return {key: _normalize_checksum_number_domain(item) for key, item in value.items()}
+    return value
+
+
+RFC3339_INSTANT = re.compile(
+    r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|[+-]\d{2}:\d{2})$"
+)
+
+
+def _utc_instant(value: str) -> datetime:
+    """Parse a strict RFC3339 instant and normalize it to aware UTC."""
+    if (
+        not isinstance(value, str)
+        or not RFC3339_INSTANT.fullmatch(value)
+        or value.endswith("-00:00")
+    ):
+        raise ValueError("strict RFC3339 UTC instant required")
+    try:
+        instant = datetime.fromisoformat(value[:-1] + "+00:00" if value.endswith("Z") else value)
+    except ValueError as error:
+        raise ValueError("strict RFC3339 UTC instant required") from error
+    if instant.tzinfo is None or instant.utcoffset() is None:
+        raise ValueError("strict RFC3339 UTC instant required")
+    return instant.astimezone(UTC)
 
 
 def _canonical(value: Any) -> bytes:
@@ -190,6 +215,23 @@ def _kill_result_fingerprint_projection(result: dict[str, Any]) -> dict[str, Any
     return {key: value for key, value in result.items() if key != "result_fingerprint"}
 
 
+def _kill_command_identity(command: dict[str, Any]) -> str:
+    return f"KILL_SWITCH_COMMAND:{command['command_id']}"
+
+
+def _kill_result_identity(result: dict[str, Any]) -> str:
+    return f"KILL_SWITCH_RESULT:{result['result_id']}"
+
+
+def _kill_command_result_identity(result: dict[str, Any]) -> str:
+    projection = {
+        "command_id": result["command_id"],
+        "idempotency_key": result["idempotency_key"],
+        "scope": result["scope"],
+    }
+    return f"KILL_SWITCH_COMMAND_RESULT:{_sha(projection)}"
+
+
 class ControlSemanticValidator:
     """Normative reference order: envelope, payload, binding, cross-object rules."""
 
@@ -240,15 +282,20 @@ class ControlSemanticValidator:
                 if fingerprint != _sha(_candidate_checksum_projection(message, {})):
                     raise ValueError("config candidate checksum mismatch")
             elif dto_type == "KILL_SWITCH_COMMAND":
-                identity_key = message["command_id"]
+                identity_key = _kill_command_identity(message)
                 fingerprint = message["command_fingerprint"]
                 if fingerprint != _sha(_kill_command_fingerprint_projection(message)):
                     raise ValueError("kill command fingerprint mismatch")
             elif dto_type == "KILL_SWITCH_RESULT":
-                identity_key = f"KILL_SWITCH_RESULT:{message['result_id']}"
                 fingerprint = message["result_fingerprint"]
                 if fingerprint != _sha(_kill_result_fingerprint_projection(message)):
                     raise ValueError("kill result fingerprint mismatch")
+                self._validate_kill_result_binding(message, context)
+                decision = self._kill_result_identity_decision(message, context)
+                if decision["status"] == "DUPLICATE":
+                    return decision
+                self._validate_kill_result(message, context)
+                return decision
             else:
                 raise ValueError("unsupported control DTO type")
             decision = self._identity_decision(identity_key, fingerprint, context)
@@ -330,7 +377,7 @@ class ControlSemanticValidator:
             raise ValueError("cross-correlation causation")
         if int(parent_message["sequence"]) >= int(message["aggregate_version"]):
             raise ValueError("future causation parent")
-        if parent_message["occurred_at"] > message["occurred_at"]:
+        if _utc_instant(parent_message["occurred_at"]) > _utc_instant(message["occurred_at"]):
             raise ValueError("causation time regression")
 
     def _identity_decision(
@@ -353,6 +400,38 @@ class ControlSemanticValidator:
             "status": "DUPLICATE",
             "identity": identity_key,
             "prior_decision": identity["decision"],
+        }
+
+    def _kill_result_identity_decision(
+        self, result: dict[str, Any], context: dict[str, Any]
+    ) -> dict[str, Any]:
+        history = context["identity_history"]
+        result_key = _kill_result_identity(result)
+        command_result_key = _kill_command_result_identity(result)
+        result_record = history.get(result_key)
+        command_result_record = history.get(command_result_key)
+        fingerprint = result["result_fingerprint"]
+        if command_result_record is not None:
+            if command_result_record["fingerprint"] != fingerprint:
+                raise ValueError("command-result identity fingerprint conflict")
+            if (
+                result_record is None
+                or result_record["fingerprint"] != fingerprint
+                or result_record["decision"] != command_result_record["decision"]
+            ):
+                raise ValueError("command-result indexes were not atomically restored")
+            return {
+                "status": "DUPLICATE",
+                "identity": result_key,
+                "command_result_identity": command_result_key,
+                "prior_decision": command_result_record["decision"],
+            }
+        if result_record is not None:
+            raise ValueError("orphan result identity without command-result authority")
+        return {
+            "status": "ACCEPTED",
+            "identity": result_key,
+            "command_result_identity": command_result_key,
         }
 
     def _validate_control_dto(self, message: dict[str, Any], context: dict[str, Any]) -> None:
@@ -427,6 +506,8 @@ class ControlSemanticValidator:
                 or ack["ack_sequence"] < 1
             ):
                 raise ValueError("component acknowledgement mode mismatch")
+            if _utc_instant(ack["observed_at"]) > _utc_instant(context["evaluation_at"]):
+                raise ValueError("component acknowledgement observed in future")
         if (
             payload["activation_mode"] == "HOT_RELOAD"
             and payload["safe_boundary"] == "RESTART_ONLY"
@@ -480,7 +561,7 @@ class ControlSemanticValidator:
         ):
             raise ValueError("config candidate checksum or authority mismatch")
         self._validate_hard_limits(candidate, config)
-        if candidate["deadline_at"] <= context["evaluation_at"]:
+        if _utc_instant(candidate["deadline_at"]) <= _utc_instant(context["evaluation_at"]):
             raise ValueError("config candidate deadline expired")
 
     def _validate_hard_limits(self, candidate: dict[str, Any], authority: dict[str, Any]) -> None:
@@ -529,7 +610,8 @@ class ControlSemanticValidator:
             if payload.get(event_field) != command[field]:
                 raise ValueError("kill event command binding mismatch")
         self._validate_kill_outcome(payload, authority)
-        if payload["deadline_at"] <= context["evaluation_at"]:
+        evaluation_at = _utc_instant(context["evaluation_at"])
+        if _utc_instant(payload["deadline_at"]) <= evaluation_at:
             raise ValueError("kill switch deadline expired")
         auth = payload["authorization_evidence"]
         if (
@@ -545,11 +627,12 @@ class ControlSemanticValidator:
             or payload.get("lease_epoch") != lease.get("epoch")
         ):
             raise ValueError("kill switch fencing binding mismatch")
-        if (
-            auth.get("revoked", False)
-            or auth.get("valid_until", "9999") <= context["evaluation_at"]
-        ):
+        if auth.get("revoked", False) or _utc_instant(auth["valid_until"]) <= evaluation_at:
             raise ValueError("kill switch authorization invalid")
+        if _utc_instant(auth["approved_at"]) > evaluation_at:
+            raise ValueError("kill switch authorization approved in future")
+        if _utc_instant(lease["expires_at"]) <= evaluation_at:
+            raise ValueError("kill switch leader lease expired")
         if payload["desired_state"] == "OFF" and (
             payload["recovery_evidence_reference"] is None or payload["restores_normal"]
         ):
@@ -589,12 +672,14 @@ class ControlSemanticValidator:
         if command["expected_version"] != authority["current_version"]:
             raise ValueError("kill command expected version mismatch")
         auth = command["authorization_evidence"]
+        evaluation_at = _utc_instant(context["evaluation_at"])
         if (
             auth["authorization_id"] != authority["authorization_id"]
             or auth["authorization_version"] != authority["authorization_version"]
             or auth["authorization_checksum"] != authority["authorization_checksum"]
             or auth["revoked"]
-            or auth["valid_until"] <= context["evaluation_at"]
+            or _utc_instant(auth["valid_until"]) <= evaluation_at
+            or _utc_instant(auth["approved_at"]) > evaluation_at
         ):
             raise ValueError("kill command authorization mismatch")
         if (
@@ -602,15 +687,52 @@ class ControlSemanticValidator:
             or command["fencing_token"] != lease["fencing_token"]
         ):
             raise ValueError("kill command fencing mismatch")
-        if command["deadline_at"] <= context["evaluation_at"]:
+        if _utc_instant(lease["expires_at"]) <= evaluation_at:
+            raise ValueError("kill command leader lease expired")
+        if _utc_instant(command["deadline_at"]) <= evaluation_at:
             raise ValueError("kill command deadline expired")
         if command["desired_state"] == "OFF":
             self._validate_accepted_recovery_barrier(command, context)
 
     def _validate_kill_result(self, result: dict[str, Any], context: dict[str, Any]) -> None:
+        self._validate_kill_result_binding(result, context)
         authority = context["accepted_state"]["kill_switch"]
         command = authority["command"]
+        command_authorization = command["authorization_evidence"]
+        lease = context["accepted_state"]["lease"]
+        if (
+            result["authorization_id"] != authority["authorization_id"]
+            or command_authorization["authorization_version"] != authority["authorization_version"]
+            or command_authorization["authorization_checksum"]
+            != authority["authorization_checksum"]
+        ):
+            raise ValueError("kill result current authorization authority mismatch")
+        if (
+            result["leader_lease_id"] != lease["lease_id"]
+            or result["fencing_token"] != lease["fencing_token"]
+            or _utc_instant(lease["expires_at"]) <= _utc_instant(context["evaluation_at"])
+        ):
+            raise ValueError("kill result current lease authority mismatch")
+        self._validate_kill_outcome(result, authority)
+        self._validate_kill_effect_evidence(result, authority, context)
+        if result["outcome"] == "APPLIED" and result["applied_at"] is None:
+            raise ValueError("applied result requires applied_at")
+        if result["outcome"] != "APPLIED" and result["applied_at"] is not None:
+            raise ValueError("non-applied result cannot claim applied_at")
+        if result["applied_at"] is not None and _utc_instant(result["applied_at"]) > _utc_instant(
+            context["evaluation_at"]
+        ):
+            raise ValueError("kill result applied_at is in the future")
+
+    def _validate_kill_result_binding(
+        self, result: dict[str, Any], context: dict[str, Any]
+    ) -> None:
+        authority = context["accepted_state"]["kill_switch"]
+        command = authority["command"]
+        if command["command_fingerprint"] != _sha(_kill_command_fingerprint_projection(command)):
+            raise ValueError("accepted kill command fingerprint mismatch")
         for field in (
+            "correlation_id",
             "command_id",
             "command_fingerprint",
             "idempotency_key",
@@ -622,17 +744,11 @@ class ControlSemanticValidator:
             if result[field] != command[field]:
                 raise ValueError("kill result command identity mismatch")
         if (
-            result["authorization_id"] != authority["authorization_id"]
-            or result["leader_lease_id"] != context["accepted_state"]["lease"]["lease_id"]
-            or result["fencing_token"] != context["accepted_state"]["lease"]["fencing_token"]
+            result["authorization_id"] != command["authorization_evidence"]["authorization_id"]
+            or result["leader_lease_id"] != command["leader_lease_id"]
+            or result["fencing_token"] != command["fencing_token"]
         ):
-            raise ValueError("kill result authority mismatch")
-        self._validate_kill_outcome(result, authority)
-        self._validate_kill_effect_evidence(result, authority, context)
-        if result["outcome"] == "APPLIED" and result["applied_at"] is None:
-            raise ValueError("applied result requires applied_at")
-        if result["outcome"] != "APPLIED" and result["applied_at"] is not None:
-            raise ValueError("non-applied result cannot claim applied_at")
+            raise ValueError("kill result immutable command authority mismatch")
 
     def _validate_kill_outcome(self, result: dict[str, Any], authority: dict[str, Any]) -> None:
         if result["restores_normal"] is not False:
@@ -669,7 +785,9 @@ class ControlSemanticValidator:
     ) -> None:
         expected_ack_ids = set(authority["effect_ack_ids"])
         acknowledged = set(result["effect_evidence"]["ack_ids"])
-        if result["effect_evidence"]["observed_at"] > context["evaluation_at"]:
+        if _utc_instant(result["effect_evidence"]["observed_at"]) > _utc_instant(
+            context["evaluation_at"]
+        ):
             raise ValueError("kill switch effect evidence observed in future")
         if not acknowledged <= expected_ack_ids:
             raise ValueError("kill switch effect evidence contains unknown acknowledgement")
@@ -754,8 +872,17 @@ class ControlSemanticValidator:
             "authorization_checksum": authority["authorization_checksum"],
             "kill_switch_version": authority["current_version"],
         }
-        if any(entry.get(key) != value for key, value in exact.items()):
+        instant_fields = {"opened_at", "observed_at", "fresh_until"}
+        if any(
+            entry.get(key) != value for key, value in exact.items() if key not in instant_fields
+        ):
             raise ValueError("accepted barrier metadata checksum/digest authority mismatch")
+        for key in instant_fields:
+            if entry.get(key) is None or exact[key] is None:
+                if entry.get(key) != exact[key]:
+                    raise ValueError("accepted barrier instant authority mismatch")
+            elif _utc_instant(entry[key]) != _utc_instant(exact[key]):
+                raise ValueError("accepted barrier instant authority mismatch")
         return entry, barrier
 
     def _validate_mode_event(self, payload: dict[str, Any], context: dict[str, Any]) -> None:
@@ -819,13 +946,16 @@ class ControlSemanticValidator:
             raise ValueError("open recovery barrier requires opened_at")
         if barrier["state"] in {"CLOSED", "INVALIDATED"} and barrier["opened_at"] is not None:
             raise ValueError("closed or invalidated recovery barrier opened_at mismatch")
-        observed_at = evidence["observed_at"]
-        market_fresh_until = evidence["market_fresh_until"]
-        if observed_at > context["evaluation_at"]:
+        evaluation_at = _utc_instant(context["evaluation_at"])
+        observed_at = _utc_instant(evidence["observed_at"])
+        market_fresh_until = _utc_instant(evidence["market_fresh_until"])
+        if barrier["opened_at"] is not None and _utc_instant(barrier["opened_at"]) > evaluation_at:
+            raise ValueError("recovery barrier opened in future")
+        if observed_at > evaluation_at:
             raise ValueError("barrier evidence observed in future")
-        if market_fresh_until != authority["market"]["fresh_until"]:
+        if market_fresh_until != _utc_instant(authority["market"]["fresh_until"]):
             raise ValueError("barrier market freshness authority mismatch")
-        if market_fresh_until <= context["evaluation_at"] and not (
+        if market_fresh_until <= evaluation_at and not (
             barrier["state"] == "INVALIDATED" and barrier["invalidation_reason"] == "MARKET_STALE"
         ):
             raise ValueError("barrier evidence is stale")
@@ -837,14 +967,14 @@ class ControlSemanticValidator:
                 reason == "MARKET_STALE"
                 and authority["market"]["quality"] == "NORMAL"
                 and authority["market"]["unresolved_gap_count"] == 0
-                and authority["market"].get("fresh_until", "9999") > context["evaluation_at"]
+                and _utc_instant(authority["market"]["fresh_until"]) > evaluation_at
             ):
                 raise ValueError("invalidated reason has no market failure")
             if reason == "AUDIT_UNAVAILABLE" and authority["audit"]["healthy"]:
                 raise ValueError("invalidated reason has no audit failure")
             if (
                 reason == "LEASE_EXPIRED"
-                and authority["lease"]["expires_at"] > context["evaluation_at"]
+                and _utc_instant(authority["lease"]["expires_at"]) > evaluation_at
             ):
                 raise ValueError("invalidated reason has no lease failure")
             if reason == "COMPONENT_UNHEALTHY" and all(
@@ -939,7 +1069,13 @@ class ControlSemanticValidator:
             "unresolved_gap_count": market.get("unresolved_gap_count"),
             "market_fresh_until": market.get("fresh_until"),
         }
-        if any(evidence[key] != value for key, value in exact_market.items()):
+        if any(
+            evidence[key] != value
+            for key, value in exact_market.items()
+            if key != "market_fresh_until"
+        ) or _utc_instant(evidence["market_fresh_until"]) != _utc_instant(
+            exact_market["market_fresh_until"]
+        ):
             raise ValueError("barrier market authority mismatch")
         lease = authority["lease"]
         exact_lease = {
@@ -950,7 +1086,13 @@ class ControlSemanticValidator:
             "fencing_token": lease.get("fencing_token"),
             "lease_expires_at": lease.get("expires_at"),
         }
-        if any(evidence[key] != value for key, value in exact_lease.items()):
+        if any(
+            evidence[key] != value
+            for key, value in exact_lease.items()
+            if key != "lease_expires_at"
+        ) or _utc_instant(evidence["lease_expires_at"]) != _utc_instant(
+            exact_lease["lease_expires_at"]
+        ):
             raise ValueError("barrier lease authority mismatch")
         audit = authority["audit"]
         if (
@@ -981,7 +1123,7 @@ class ControlSemanticValidator:
             raise ValueError("barrier critical lag authority mismatch")
         if (
             barrier["state"] == "OPEN"
-            and authority["lease"]["expires_at"] <= context["evaluation_at"]
+            and _utc_instant(authority["lease"]["expires_at"]) <= evaluation_at
         ):
             raise ValueError("barrier lease expired")
         if barrier["state"] == "CLOSED":
@@ -1700,11 +1842,23 @@ def test_control_checksum_numeric_domain_rejects_nested_floats() -> None:
     )
     candidate["payload"]["nested"] = {"unsafe_number": 1.25}
     assert not _validator("control/control-plane.v1.schema.json").is_valid(candidate)
-    with pytest.raises(ValueError, match=r"non-integer|number domain"):
+    with pytest.raises(ValueError, match=r"integral|number domain"):
         _canonical({"payload": {"nested": [1.25]}})
 
     assert _canonical({"minimum": -SAFE_INTEGER_MAX, "maximum": SAFE_INTEGER_MAX})
     assert _canonical({"amount": "123.45"}) == _market_jcs({"amount": "123.45"}).encode("utf-8")
+
+
+def test_control_checksum_integral_json_numbers_have_one_canonical_form() -> None:
+    canonical = _canonical({"value": 1, "nested": [1, {"amount": "123.45"}]})
+    for token in ("1", "1.0", "1e0"):
+        parsed = json.loads(token)
+        assert _canonical({"value": parsed, "nested": [parsed, {"amount": "123.45"}]}) == canonical
+
+    for token in ("1.25", "NaN", "Infinity", "-Infinity", "9007199254740992"):
+        value = json.loads(token)
+        with pytest.raises(ValueError, match=r"number|integer|finite"):
+            _canonical({"nested": [value]})
     for value in (-SAFE_INTEGER_MAX - 1, SAFE_INTEGER_MAX + 1):
         with pytest.raises(ValueError, match="safe integer"):
             _canonical({"nested": [value]})
@@ -1899,6 +2053,44 @@ def test_recovery_barrier_authority_embeds_only_recovery_barrier(dto_type: str) 
         validator.validate(invalid)
 
 
+def test_kill_switch_authority_embeds_only_kill_switch_command() -> None:
+    document = _load(FIXTURES / "control-plane.v1/valid.json")
+    context = _validation_context("corr-mode-000001")
+    validator = _validator("control/validation-context.v1.schema.json")
+    validator.validate(context)
+    schema = _load(SCHEMAS / "control/validation-context.v1.schema.json")
+    command_ref = schema["$defs"]["authority"]["properties"]["kill_switch"]["properties"][
+        "command"
+    ]["$ref"]
+    assert command_ref == "urn:quantiqmt:contract:control-plane:v1#/$defs/killSwitchCommand"
+    external_control_refs = []
+
+    def collect_refs(value: Any) -> None:
+        if isinstance(value, dict):
+            ref = value.get("$ref")
+            if isinstance(ref, str) and ref.startswith("urn:quantiqmt:contract:control-plane:v1"):
+                external_control_refs.append(ref)
+            for child in value.values():
+                collect_refs(child)
+        elif isinstance(value, list):
+            for child in value:
+                collect_refs(child)
+
+    collect_refs(schema)
+    assert set(external_control_refs) == {
+        "urn:quantiqmt:contract:control-plane:v1#/$defs/killSwitchCommand",
+        "urn:quantiqmt:contract:control-plane:v1#/$defs/recoveryBarrier",
+    }
+
+    for dto in document["dtos"]:
+        if dto["dto_type"] == "KILL_SWITCH_COMMAND":
+            continue
+        invalid = deepcopy(context)
+        invalid["accepted_state"]["kill_switch"]["command"] = deepcopy(dto)
+        with pytest.raises(ValidationError):
+            validator.validate(invalid)
+
+
 def test_same_identity_same_fingerprint_is_stable_duplicate_before_authority_checks() -> None:
     payload = _load(FIXTURES / "control-events.json")["system.mode_changed.v1"]
     message = _combined_fixture("system.mode_changed.v1", payload)
@@ -1941,6 +2133,11 @@ def test_control_dispatch_includes_commands_and_all_side_effect_boundaries() -> 
     assert kill_switch["result_identity"]["namespace"] == "KILL_SWITCH_RESULT"
     assert kill_switch["result_identity"]["identity_field"] == "result_id"
     assert kill_switch["result_identity"]["fingerprint_field"] == "result_fingerprint"
+    assert kill_switch["command_identity"]["namespace"] == "KILL_SWITCH_COMMAND"
+    assert kill_switch["command_result_identity"]["namespace"] == "KILL_SWITCH_COMMAND_RESULT"
+    assert kill_switch["command_result_identity"]["atomic_registration"].endswith(
+        "same_transaction"
+    )
 
 
 def test_config_candidate_checksum_covers_payload_boundary_and_hard_limit_policy() -> None:
@@ -2069,9 +2266,11 @@ def test_duplicate_fast_path_recomputes_canonical_dto_fingerprint(dto_type: str)
     fingerprint_field = (
         "candidate_checksum" if dto_type == "CONFIG_CANDIDATE" else "command_fingerprint"
     )
-    identity_field = "idempotency_key" if dto_type == "CONFIG_CANDIDATE" else "command_id"
+    identity_key = (
+        dto["idempotency_key"] if dto_type == "CONFIG_CANDIDATE" else _kill_command_identity(dto)
+    )
     context = _validation_context(dto["correlation_id"])
-    context["identity_history"][dto[identity_field]] = {
+    context["identity_history"][identity_key] = {
         "fingerprint": dto[fingerprint_field],
         "decision": "ACCEPTED",
     }
@@ -2369,9 +2568,26 @@ def _prepared_kill_result(
     return result, context
 
 
+def _expected_command_result_identity(result: dict[str, Any]) -> str:
+    projection = {
+        "command_id": result["command_id"],
+        "idempotency_key": result["idempotency_key"],
+        "scope": result["scope"],
+    }
+    expected = f"KILL_SWITCH_COMMAND_RESULT:{_sha(projection)}"
+    assert _kill_command_result_identity(result) == expected
+    return expected
+
+
+def _record_kill_result(context: dict[str, Any], result: dict[str, Any]) -> None:
+    record = {"fingerprint": result["result_fingerprint"], "decision": "ACCEPTED"}
+    context["identity_history"][f"KILL_SWITCH_RESULT:{result['result_id']}"] = deepcopy(record)
+    context["identity_history"][_expected_command_result_identity(result)] = deepcopy(record)
+
+
 def test_kill_result_uses_independent_identity_and_canonical_fingerprint() -> None:
     result, context = _prepared_kill_result()
-    context["identity_history"][result["command_id"]] = {
+    context["identity_history"][f"KILL_SWITCH_COMMAND:{result['command_id']}"] = {
         "fingerprint": result["command_fingerprint"],
         "decision": "ACCEPTED",
     }
@@ -2379,12 +2595,14 @@ def test_kill_result_uses_independent_identity_and_canonical_fingerprint() -> No
     assert checker.validate_control_message(result, context)["status"] == "ACCEPTED"
 
     duplicate = deepcopy(context)
-    duplicate["identity_history"][f"KILL_SWITCH_RESULT:{result['result_id']}"] = {
-        "fingerprint": result["result_fingerprint"],
-        "decision": "ACCEPTED",
-    }
+    _record_kill_result(duplicate, result)
     duplicate["accepted_state"]["kill_switch"]["current_version"] = 99
     assert checker.validate_control_message(result, duplicate)["status"] == "DUPLICATE"
+
+    forged_command = deepcopy(duplicate)
+    forged_command["accepted_state"]["kill_switch"]["command"]["actor"] = "forged-operator"
+    with pytest.raises(ValueError, match="accepted kill command fingerprint"):
+        checker.validate_control_message(result, forged_command)
 
     tamper_mutations = (
         lambda item: item.update({"idempotency_key": "idem-kill-forged-01"}),
@@ -2417,6 +2635,196 @@ def test_kill_result_uses_independent_identity_and_canonical_fingerprint() -> No
     conflict["result_fingerprint"] = _sha(_kill_result_fingerprint_projection(conflict))
     with pytest.raises(ValueError, match="conflict"):
         checker.validate_control_message(conflict, duplicate)
+
+
+def test_one_command_identity_cannot_accept_a_second_kill_result() -> None:
+    rejected, context = _prepared_kill_result("REJECTED")
+    _record_kill_result(context, rejected)
+    checker = ControlSemanticValidator()
+    assert checker.validate_control_message(rejected, context)["status"] == "DUPLICATE"
+
+    for missing_key in (
+        f"KILL_SWITCH_RESULT:{rejected['result_id']}",
+        _expected_command_result_identity(rejected),
+    ):
+        incomplete_restore = deepcopy(context)
+        incomplete_restore["identity_history"].pop(missing_key)
+        with pytest.raises(ValueError, match=r"atomically|orphan|restore"):
+            checker.validate_control_message(rejected, incomplete_restore)
+    divergent_restore = deepcopy(context)
+    divergent_restore["identity_history"][f"KILL_SWITCH_RESULT:{rejected['result_id']}"][
+        "decision"
+    ] = "UNKNOWN"
+    with pytest.raises(ValueError, match=r"atomically|restore"):
+        checker.validate_control_message(rejected, divergent_restore)
+
+    same_result_new_id = deepcopy(rejected)
+    same_result_new_id["result_id"] = "kill-result-rejected-0002"
+    same_result_new_id["result_fingerprint"] = _sha(
+        _kill_result_fingerprint_projection(same_result_new_id)
+    )
+    with pytest.raises(ValueError, match=r"command.result|conflict|identity"):
+        checker.validate_control_message(same_result_new_id, context)
+
+    contradictory = deepcopy(rejected)
+    contradictory.update(
+        result_id="kill-result-unknown-0002",
+        outcome="UNKNOWN",
+        effective_state="UNKNOWN",
+        current_version=contradictory["previous_version"],
+        reconciliation_required=True,
+    )
+    contradictory["result_fingerprint"] = _sha(_kill_result_fingerprint_projection(contradictory))
+    with pytest.raises(ValueError, match=r"command.result|conflict|identity"):
+        checker.validate_control_message(contradictory, context)
+
+
+def test_kill_command_result_namespaces_resist_external_prefix_collision() -> None:
+    result, context = _prepared_kill_result()
+    command = context["accepted_state"]["kill_switch"]["command"]
+    result_id = "shared-kill-identity-0001"
+    command["command_id"] = f"KILL_SWITCH_RESULT:{result_id}"
+    command["command_fingerprint"] = _sha(_kill_command_fingerprint_projection(command))
+    result.update(
+        result_id=result_id,
+        command_id=command["command_id"],
+        command_fingerprint=command["command_fingerprint"],
+    )
+    result["result_fingerprint"] = _sha(_kill_result_fingerprint_projection(result))
+    context["identity_history"][f"KILL_SWITCH_COMMAND:{command['command_id']}"] = {
+        "fingerprint": command["command_fingerprint"],
+        "decision": "ACCEPTED",
+    }
+    _record_kill_result(context, result)
+    context["accepted_state"]["kill_switch"]["current_version"] = 99
+
+    checker = ControlSemanticValidator()
+    assert checker.validate_control_message(command, context)["status"] == "DUPLICATE"
+    assert checker.validate_control_message(result, context)["status"] == "DUPLICATE"
+
+    same_raw_result, same_raw_context = _prepared_kill_result()
+    same_raw_command = same_raw_context["accepted_state"]["kill_switch"]["command"]
+    shared_raw_id = "shared-raw-kill-id-0001"
+    same_raw_command["command_id"] = shared_raw_id
+    same_raw_command["command_fingerprint"] = _sha(
+        _kill_command_fingerprint_projection(same_raw_command)
+    )
+    same_raw_result.update(
+        result_id=shared_raw_id,
+        command_id=shared_raw_id,
+        command_fingerprint=same_raw_command["command_fingerprint"],
+    )
+    same_raw_result["result_fingerprint"] = _sha(
+        _kill_result_fingerprint_projection(same_raw_result)
+    )
+    same_raw_context["identity_history"][_kill_command_identity(same_raw_command)] = {
+        "fingerprint": same_raw_command["command_fingerprint"],
+        "decision": "ACCEPTED",
+    }
+    _record_kill_result(same_raw_context, same_raw_result)
+    same_raw_context["accepted_state"]["kill_switch"]["current_version"] = 99
+    assert checker.validate_control_message(same_raw_command, same_raw_context)["status"] == (
+        "DUPLICATE"
+    )
+    assert checker.validate_control_message(same_raw_result, same_raw_context)["status"] == (
+        "DUPLICATE"
+    )
+
+
+def test_utc_instant_comparison_handles_fraction_offsets_and_invalid_values() -> None:
+    assert _utc_instant("2026-08-11T01:00:01Z") == _utc_instant("2026-08-11T09:00:01+08:00")
+    assert _utc_instant("2026-08-11T01:00:00.999999Z") < _utc_instant("2026-08-11T01:00:01Z")
+    for value in (
+        "2026-08-11T01:00:01",
+        "2026-08-11 01:00:01Z",
+        "2026-08-11T01:00:01-00:00",
+        "not-a-time",
+    ):
+        with pytest.raises(ValueError, match=r"RFC3339|UTC|instant"):
+            _utc_instant(value)
+
+
+def test_fractional_future_effect_and_expired_deadline_are_rejected() -> None:
+    equivalent, equivalent_context = _prepared_kill_result()
+    equivalent["effect_evidence"]["observed_at"] = "2026-08-11T09:00:01+08:00"
+    equivalent["result_fingerprint"] = _sha(_kill_result_fingerprint_projection(equivalent))
+    equivalent_context["evaluation_at"] = "2026-08-11T09:00:01+08:00"
+    ControlSemanticValidator().validate_control_message(equivalent, equivalent_context)
+
+    result, context = _prepared_kill_result()
+    context["evaluation_at"] = "2026-08-11T01:00:01Z"
+    result["effect_evidence"]["observed_at"] = "2026-08-11T01:00:01.1Z"
+    result["result_fingerprint"] = _sha(_kill_result_fingerprint_projection(result))
+    with pytest.raises(ValueError, match="future"):
+        ControlSemanticValidator().validate_control_message(result, context)
+
+    command = context["accepted_state"]["kill_switch"]["command"]
+    command["deadline_at"] = "2026-08-11T01:00:01Z"
+    command["command_fingerprint"] = _sha(_kill_command_fingerprint_projection(command))
+    context["evaluation_at"] = "2026-08-11T01:00:01.1Z"
+    with pytest.raises(ValueError, match="deadline"):
+        ControlSemanticValidator().validate_control_message(command, context)
+
+
+def test_fractional_future_config_ack_is_rejected() -> None:
+    payload = deepcopy(_load(FIXTURES / "control-events.json")["config.version_activated.v1"])
+    payload["component_acks"]["OMS"]["observed_at"] = "2026-08-11T01:00:01.1Z"
+    context = _validation_context(payload["correlation_id"])
+    context["evaluation_at"] = "2026-08-11T01:00:01Z"
+    with pytest.raises(ValueError, match=r"acknowledgement.*future|future.*acknowledgement"):
+        ControlSemanticValidator().validate_control_message(
+            _combined_fixture("config.version_activated.v1", payload), context
+        )
+
+
+def test_recovery_barrier_fractional_future_is_rejected_for_restore_and_off() -> None:
+    payload = deepcopy(_load(FIXTURES / "control-events.json")["system.mode_changed.v1"])
+    context = _validation_context(payload["correlation_id"])
+    context["evaluation_at"] = "2026-08-11T01:00:01Z"
+    barrier = deepcopy(context["accepted_recovery_barriers"]["barrier-1"]["barrier"])
+    barrier["evidence"]["observed_at"] = "2026-08-11T01:00:01.1Z"
+    entry = _recovery_barrier_authority(context, barrier)
+    context["accepted_recovery_barriers"] = {"barrier-1": entry}
+    with pytest.raises(ValueError, match="future"):
+        ControlSemanticValidator().validate_control_message(
+            _combined_fixture("system.mode_changed.v1", payload), context
+        )
+
+    command = deepcopy(context["accepted_state"]["kill_switch"]["command"])
+    command.update(
+        desired_state="OFF",
+        reason_code="OPERATOR_RELEASE",
+        recovery_evidence_reference="barrier-1",
+        recovery_barrier_generation=entry["generation"],
+        recovery_barrier_version=entry["barrier_version"],
+        recovery_barrier_checksum=entry["barrier_checksum"],
+        recovery_evidence_digest=entry["evidence_digest"],
+        recovery_aggregate_evidence_digest=entry["aggregate_evidence_digest"],
+    )
+    command["command_fingerprint"] = _sha(_kill_command_fingerprint_projection(command))
+    context["accepted_state"]["kill_switch"]["command"] = command
+    with pytest.raises(ValueError, match="future"):
+        ControlSemanticValidator().validate_control_message(command, context)
+
+
+@pytest.mark.parametrize("expired_authority", ["freshness", "lease"])
+def test_fractional_evaluation_rejects_expired_barrier_authority(
+    expired_authority: str,
+) -> None:
+    payload = deepcopy(_load(FIXTURES / "control-events.json")["system.mode_changed.v1"])
+    context = _validation_context(payload["correlation_id"])
+    context["evaluation_at"] = "2026-08-11T01:00:01.1Z"
+    if expired_authority == "freshness":
+        context["accepted_state"]["market"]["fresh_until"] = "2026-08-11T01:00:01Z"
+    else:
+        context["accepted_state"]["lease"]["expires_at"] = "2026-08-11T01:00:01Z"
+    context["accepted_recovery_barriers"] = {
+        "barrier-1": _open_recovery_barrier_authority(context, payload["correlation_id"])
+    }
+    with pytest.raises(ValueError, match=r"stale|expired"):
+        ControlSemanticValidator().validate_control_message(
+            _combined_fixture("system.mode_changed.v1", payload), context
+        )
 
 
 @pytest.mark.parametrize(
