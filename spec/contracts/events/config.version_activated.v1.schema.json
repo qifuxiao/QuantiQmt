@@ -22,7 +22,7 @@
     "secret_references": {"type": "array", "items": {"type": "string", "pattern": "^secret://[^\\s]+$"}, "uniqueItems": true},
     "policy_version": {"type": "string", "minLength": 1, "maxLength": 64},
     "policy_checksum": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
-    "occurred_at": {"type": "string", "format": "date-time", "pattern": "Z$"},
+    "occurred_at": {"type": "string", "format": "date-time", "pattern": "^\\d{4}-\\d{2}-\\d{2}T(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d{1,6})?Z$"},
     "correlation_id": {"type": "string", "minLength": 16, "maxLength": 128},
     "causation_id": {"type": "string", "minLength": 16, "maxLength": 64},
     "source": {"type": "string", "const": "ConfigService"}
@@ -45,7 +45,7 @@
         "prepare_result": {"enum": ["PREPARED", "APPLIED", "REJECTED", "TIMED_OUT"]},
         "activation_mode": {"enum": ["HOT_RELOAD", "RESTART_REQUIRED"]},
         "safe_boundary": {"enum": ["NEXT_ORDER_BOUNDARY", "NEXT_BAR_BOUNDARY", "RESTART_ONLY"]},
-        "observed_at": {"type": "string", "format": "date-time", "pattern": "Z$"},
+        "observed_at": {"type": "string", "format": "date-time", "pattern": "^\\d{4}-\\d{2}-\\d{2}T(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d{1,6})?Z$"},
         "ack_sequence": {"type": "integer", "minimum": 1, "maximum": 9007199254740991}
       }
     }

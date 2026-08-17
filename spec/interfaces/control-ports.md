@@ -67,6 +67,12 @@ Control commands use `CommandBus`, never EventBus request/response simulation.
 Every command has an absolute UTC deadline, an idempotency key, expected
 version and fencing evidence. A timeout after dispatch is `UNKNOWN`; the same
 command identity is reconciled and never reissued with a new identity.
+Every public or internal control timestamp crossing this contract uses canonical
+UTC `Z` wire form with zero to six fractional digits. An ingress adapter MAY
+parse an explicit RFC 3339 offset and normalize the same instant to UTC `Z`
+before validation, but raw offsets, naive values, leap seconds, unknown `-00:00`
+offsets and excess precision fail closed at the contract boundary. Safety
+comparisons parse these values as aware instants and never compare strings.
 
 `KillSwitchCommand` and `ConfigCandidate` are validated by schema and then by
 the same semantic validator at dispatch, persistence and recovery restore.
@@ -82,9 +88,15 @@ keys use RFC 8785 ordering, and Unicode is not normalized. Candidate currency
 MUST equal policy currency, policy content MUST hash to the accepted checksum,
 and no dynamic upper bound may exceed its accepted system hard limit. Payload
 and every nested checksum projection value permit only finite, mathematically
-integral I-JSON safe numbers or strings. JSON `1`, `1.0` and `1e0` normalize to
-the same integer before JCS; fractional, non-finite and out-of-safe-range
-numbers are rejected recursively. Prices, money, fees and other decimal
+integral I-JSON safe numbers or strings. The wire parser MUST preserve each JSON
+number token's exact decimal value (for example Python `parse_float=Decimal`)
+before structural and semantic validation; passing through binary float is
+forbidden, and directly constructed binary-float API values fail closed without
+proven exact-token provenance. Exact JSON `1`, `1.0` and `1e0` normalize to the
+same integer before JCS; hidden fractional, underflow/overflow, non-finite and
+out-of-safe-range numbers are rejected recursively. Schema `number` plus
+`multipleOf: 1` is only a structural gate and cannot replace this exact semantic
+gate. Prices, money, fees and other decimal
 quantities remain canonical decimal strings and never binary floating point.
 required components, ACK keys, authority required components and authority
 component keys MUST be the same set. Each ACK MUST exactly bind component ID,
@@ -107,9 +119,18 @@ external IDs are never registry keys. A `KILL_SWITCH_RESULT` has its own
 `KILL_SWITCH_RESULT:{result_id}` namespace. A second command-result index is
 `KILL_SWITCH_COMMAND_RESULT:` plus SHA-256 of RFC 8785 JCS over exactly
 `{command_id,idempotency_key,scope}`. It permits exactly one result per command.
-The command-result and result-entity indexes MUST be registered atomically and
-restored together; missing, divergent, changed-result-ID or changed-fingerprint
-records fail closed. Only a replay matching both indexes is `DUPLICATE`.
+The immutable command-history, command-result and result-entity records MUST be
+registered atomically. Both result records carry command identity/idempotency,
+scope and fingerprint plus result identity/fingerprint and reciprocal pointers.
+Before every result acceptance or duplicate decision, the complete namespaced
+registry is audited as a bijection: result-only or command-result-only orphans,
+missing/wrong backlinks, multiple results for one command, one result linked to
+multiple commands, or divergent decision/fingerprint evidence fail closed.
+Recovery restore has the same global audit and cannot continue from a partial
+snapshot. Only a replay matching both indexes and the original immutable command
+history is `DUPLICATE`; it is stable after current command authority advances.
+First results alone consult current command/authorization/lease/version/effect
+authority before atomically recording all three histories.
 That reference resolves only through the strict
 `accepted_recovery_barriers` authority registry. Its map key and barrier ID,
 generation, barrier version/checksum, evidence and aggregate digests, OPEN

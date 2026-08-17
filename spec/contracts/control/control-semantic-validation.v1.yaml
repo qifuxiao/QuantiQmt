@@ -42,7 +42,9 @@ rules:
     context_schema: CONTRACT-CONTROL-VALIDATION-CONTEXT-V1
     identity_history: same_identity_same_fingerprint_duplicate_stable_result; same_identity_different_fingerprint_conflict_reject
     fingerprint: sha256_rfc8785_jcs_payload_utf8_no_bom_lower_hex
-    instant_comparison: strict_RFC3339_with_Z_or_explicit_offset_then_normalize_to_UTC; naive_invalid_unknown_minus_zero_offset_or_more_than_6_fraction_digits_reject
+    wire_timestamp: canonical_UTC_Z_only_with_zero_to_6_fraction_digits; raw_offset_naive_invalid_leap_second_unknown_minus_zero_offset_or_more_than_6_fraction_digits_reject
+    ingress_normalization: explicit_offsets_may_be_parsed_exactly_and_normalized_to_UTC_Z_before_the_contract_boundary_only
+    instant_comparison: parse_canonical_UTC_Z_to_aware_instant_never_compare_timestamp_strings
     forbidden_keys: [password, secret, credential, token, access_token, private_key, raw_account_id, raw_account_identifier]
   event_specific_dispatch:
     exhaustive:
@@ -82,8 +84,12 @@ rules:
       utf8: no_bom
       unicode: preserve_scalars_without_normalization
       number_domain: I_JSON_safe_integers_or_decimal_strings
-      safe_integer_semantics: finite_mathematically_integral_JSON_number_with_absolute_value_lte_9007199254740991_independent_of_runtime_numeric_type
-      integral_number_normalization: int_integral_float_and_exponent_forms_normalize_to_the_same_JSON_integer_before_JCS
+      safe_integer_semantics: finite_mathematically_integral_exact_decimal_JSON_number_with_absolute_value_lte_9007199254740991_independent_of_wire_integer_fraction_or_exponent_notation
+      precise_wire_parse: preserve_original_JSON_number_decimal_value_before_schema_and_semantic_validation; binary_float_intermediate_forbidden
+      reference_loader: json_loads_parse_float_Decimal_and_reject_parse_constant_or_equivalent_exact_decimal_parser
+      direct_binary_float_api_input: fail_closed_without_proven_exact_JSON_token_provenance
+      schema_role: type_number_multipleOf_1_is_structural_only_and_never_replaces_exact_decimal_semantic_validation
+      integral_number_normalization: exact_1_1.0_and_1e0_tokens_normalize_to_the_same_JSON_integer_before_JCS
       fractional_nonfinite_or_unsafe_numbers: recursively_forbidden_in_every_checksum_security_projection
       monetary_values: canonical_decimal_strings_never_binary_float
       sha256: lowercase_hex
@@ -150,7 +156,7 @@ rules:
       command_identity_is_not_result_identity: true
       fingerprint: SHA256_RFC8785_JCS_over_complete_KILL_SWITCH_RESULT_excluding_result_fingerprint
       fingerprint_projection: [dto_type, schema_version, correlation_id, created_at, result_id, command_id, command_fingerprint, idempotency_key, expected_version, scope, desired_state, effective_state, outcome, previous_version, current_version, reason_code, applied_at, reconciliation_required, effect_evidence, authorization_id, leader_lease_id, fencing_token, restores_normal]
-      duplicate_order: structural_schema_then_canonical_result_fingerprint_then_immutable_command_binding_then_command_result_authority_then_result_identity_then_mutable_authority
+      duplicate_order: structural_schema_then_canonical_result_fingerprint_then_immutable_self_binding_then_global_registry_consistency_audit_then_dual_index_exact_match_then_immutable_command_history_binding_then_duplicate_before_current_authority
       collision: same_namespaced_result_identity_same_canonical_result_duplicate; same_namespaced_result_identity_different_canonical_result_conflict
     command_result_identity:
       namespace: KILL_SWITCH_COMMAND_RESULT
@@ -159,8 +165,14 @@ rules:
       cardinality: exactly_one_result_per_command_identity
       duplicate: command_result_and_result_entity_indexes_both_exist_with_same_result_fingerprint
       collision: existing_command_result_with_different_result_id_or_fingerprint_or_content_reject
-      atomic_registration: command_result_index_and_result_entity_index_same_transaction
-      recovery_restore: both_indexes_required_and_must_match_or_fail_closed
+      result_entity_record: [record_type, decision, fingerprint, command_identity, command_id, command_idempotency_key, command_scope, command_fingerprint, result_identity, result_id, result_fingerprint, command_result_identity]
+      command_result_record: same_immutable_fields_as_result_entity_with_record_type_KILL_SWITCH_COMMAND_RESULT_and_backlink_to_unique_result_identity
+      command_history_record: [record_type, decision, fingerprint, command_identity, command_id, command_idempotency_key, command_scope, command_fingerprint]
+      atomic_registration: immutable_command_history_and_command_result_index_and_result_entity_index_same_transaction
+      global_registry_audit: before_every_first_result_or_duplicate_scan_all_namespaced_result_and_command_result_records_for_orphans_missing_or_wrong_backlinks_duplicate_command_or_result_mappings_and_decision_or_fingerprint_divergence
+      recovery_restore: entire_registry_bijection_and_immutable_command_history_required_or_fail_closed_without_accepting_a_new_result
+      late_duplicate: complete_dual_index_and_original_immutable_command_history_exact_match_returns_stable_DUPLICATE_without_reading_current_accepted_command
+      first_result: current_accepted_command_authorization_lease_version_and_effect_authority_required_then_atomic_three_record_registration
     effect_evidence:
       authority: validation_context.accepted_state.kill_switch.effect_ack_ids
       ack_ids: unique_subset_of_accepted_authority

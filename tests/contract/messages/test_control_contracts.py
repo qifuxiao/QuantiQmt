@@ -3,7 +3,6 @@ from __future__ import annotations
 import ast
 import hashlib
 import json
-import math
 import re
 from copy import deepcopy
 from datetime import UTC, datetime
@@ -40,8 +39,19 @@ EVENT_BINDINGS = {
 }
 
 
+def _parse_json_exact(text: str) -> Any:
+    def reject_non_finite(token: str) -> Any:
+        raise ValueError(f"non-finite JSON number is forbidden: {token}")
+
+    return json.loads(
+        text,
+        parse_float=Decimal,
+        parse_constant=reject_non_finite,
+    )
+
+
 def _load(path: Path) -> Any:
-    return json.loads(path.read_text(encoding="utf-8"))
+    return _parse_json_exact(path.read_text(encoding="utf-8"))
 
 
 def _schema_store() -> dict[str, Any]:
@@ -127,10 +137,12 @@ def _jcs(value: Any) -> str:
 
 
 def _normalize_checksum_number_domain(value: Any) -> Any:
-    if isinstance(value, float):
-        if not math.isfinite(value) or not value.is_integer():
-            raise ValueError("finite mathematically integral JSON number required")
+    if isinstance(value, Decimal):
+        if not value.is_finite() or value != value.to_integral_value():
+            raise ValueError("finite mathematically integral exact JSON number required")
         value = int(value)
+    if isinstance(value, float):
+        raise ValueError("binary float lacks exact JSON token provenance")
     if isinstance(value, int) and not isinstance(value, bool) and abs(value) > SAFE_INTEGER_MAX:
         raise ValueError("I-JSON safe integer required")
     if isinstance(value, list):
@@ -141,12 +153,16 @@ def _normalize_checksum_number_domain(value: Any) -> Any:
 
 
 RFC3339_INSTANT = re.compile(
-    r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|[+-]\d{2}:\d{2})$"
+    r"^\d{4}-\d{2}-\d{2}T(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d"
+    r"(?:\.\d{1,6})?(?:Z|[+-]\d{2}:\d{2})$"
+)
+RFC3339_UTC_Z = re.compile(
+    r"^\d{4}-\d{2}-\d{2}T(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d"
+    r"(?:\.\d{1,6})?Z$"
 )
 
 
-def _utc_instant(value: str) -> datetime:
-    """Parse a strict RFC3339 instant and normalize it to aware UTC."""
+def _parse_rfc3339_instant(value: str) -> datetime:
     if (
         not isinstance(value, str)
         or not RFC3339_INSTANT.fullmatch(value)
@@ -160,6 +176,22 @@ def _utc_instant(value: str) -> datetime:
     if instant.tzinfo is None or instant.utcoffset() is None:
         raise ValueError("strict RFC3339 UTC instant required")
     return instant.astimezone(UTC)
+
+
+def _canonical_utc_z(value: str) -> str:
+    """Normalize an ingress RFC3339 instant before the control contract boundary."""
+    instant = _parse_rfc3339_instant(value)
+    base = instant.strftime("%Y-%m-%dT%H:%M:%S")
+    if instant.microsecond:
+        return f"{base}.{instant.microsecond:06d}".rstrip("0") + "Z"
+    return f"{base}Z"
+
+
+def _utc_instant(value: str) -> datetime:
+    """Parse the canonical UTC-Z representation used at control boundaries."""
+    if not isinstance(value, str) or not RFC3339_UTC_Z.fullmatch(value):
+        raise ValueError("canonical RFC3339 UTC Z instant required")
+    return _parse_rfc3339_instant(value)
 
 
 def _canonical(value: Any) -> bytes:
@@ -290,10 +322,12 @@ class ControlSemanticValidator:
                 fingerprint = message["result_fingerprint"]
                 if fingerprint != _sha(_kill_result_fingerprint_projection(message)):
                     raise ValueError("kill result fingerprint mismatch")
-                self._validate_kill_result_binding(message, context)
+                self._audit_kill_result_registry(context)
                 decision = self._kill_result_identity_decision(message, context)
                 if decision["status"] == "DUPLICATE":
+                    self._validate_kill_result_duplicate_binding(message, context)
                     return decision
+                self._validate_kill_result_binding(message, context)
                 self._validate_kill_result(message, context)
                 return decision
             else:
@@ -412,14 +446,27 @@ class ControlSemanticValidator:
         command_result_record = history.get(command_result_key)
         fingerprint = result["result_fingerprint"]
         if command_result_record is not None:
+            expected = {
+                "command_identity": f"KILL_SWITCH_COMMAND:{result['command_id']}",
+                "command_id": result["command_id"],
+                "command_idempotency_key": result["idempotency_key"],
+                "command_scope": result["scope"],
+                "command_fingerprint": result["command_fingerprint"],
+                "result_identity": result_key,
+                "result_id": result["result_id"],
+                "result_fingerprint": fingerprint,
+                "command_result_identity": command_result_key,
+            }
             if command_result_record["fingerprint"] != fingerprint:
                 raise ValueError("command-result identity fingerprint conflict")
             if (
                 result_record is None
                 or result_record["fingerprint"] != fingerprint
                 or result_record["decision"] != command_result_record["decision"]
+                or any(result_record[field] != value for field, value in expected.items())
+                or any(command_result_record[field] != value for field, value in expected.items())
             ):
-                raise ValueError("command-result indexes were not atomically restored")
+                raise ValueError("command-result canonical result conflict")
             return {
                 "status": "DUPLICATE",
                 "identity": result_key,
@@ -433,6 +480,118 @@ class ControlSemanticValidator:
             "identity": result_key,
             "command_result_identity": command_result_key,
         }
+
+    def _audit_kill_result_registry(self, context: dict[str, Any]) -> None:
+        history = context["identity_history"]
+        result_records = {
+            key: record for key, record in history.items() if key.startswith("KILL_SWITCH_RESULT:")
+        }
+        command_result_records = {
+            key: record
+            for key, record in history.items()
+            if key.startswith("KILL_SWITCH_COMMAND_RESULT:")
+        }
+        command_to_results: dict[str, set[str]] = {}
+        result_to_commands: dict[str, set[str]] = {}
+        shared_fields = (
+            "fingerprint",
+            "decision",
+            "command_identity",
+            "command_id",
+            "command_idempotency_key",
+            "command_scope",
+            "command_fingerprint",
+            "result_identity",
+            "result_id",
+            "result_fingerprint",
+            "command_result_identity",
+        )
+        required_record_fields = set(shared_fields) | {"record_type"}
+
+        for key, record in (*result_records.items(), *command_result_records.items()):
+            expected_type = (
+                "KILL_SWITCH_RESULT"
+                if key.startswith("KILL_SWITCH_RESULT:")
+                else "KILL_SWITCH_COMMAND_RESULT"
+            )
+            if not required_record_fields <= set(record):
+                raise ValueError("kill result registry record is incomplete")
+            if record.get("record_type") != expected_type:
+                raise ValueError("kill result registry record type mismatch")
+            expected_result_identity = f"KILL_SWITCH_RESULT:{record['result_id']}"
+            expected_command_identity = f"KILL_SWITCH_COMMAND:{record['command_id']}"
+            expected_command_result_identity = _kill_command_result_identity(
+                {
+                    "command_id": record["command_id"],
+                    "idempotency_key": record["command_idempotency_key"],
+                    "scope": record["command_scope"],
+                }
+            )
+            expected_key = (
+                expected_result_identity
+                if expected_type == "KILL_SWITCH_RESULT"
+                else expected_command_result_identity
+            )
+            if (
+                key != expected_key
+                or record["result_identity"] != expected_result_identity
+                or record["command_identity"] != expected_command_identity
+                or record["command_result_identity"] != expected_command_result_identity
+                or record["fingerprint"] != record["result_fingerprint"]
+            ):
+                raise ValueError("kill result registry pointer mismatch")
+            command_record = history.get(expected_command_identity)
+            if (
+                command_record is None
+                or command_record.get("record_type") != "KILL_SWITCH_COMMAND"
+                or command_record.get("command_identity") != expected_command_identity
+                or command_record.get("command_id") != record["command_id"]
+                or command_record.get("command_idempotency_key")
+                != record["command_idempotency_key"]
+                or command_record.get("command_scope") != record["command_scope"]
+                or command_record.get("command_fingerprint") != record["command_fingerprint"]
+                or command_record.get("fingerprint") != record["command_fingerprint"]
+            ):
+                raise ValueError("kill result immutable command history mismatch")
+            command_to_results.setdefault(expected_command_identity, set()).add(
+                expected_result_identity
+            )
+            result_to_commands.setdefault(expected_result_identity, set()).add(
+                expected_command_identity
+            )
+
+        for record in result_records.values():
+            counterpart = command_result_records.get(record["command_result_identity"])
+            if counterpart is None or any(
+                record[field] != counterpart[field] for field in shared_fields
+            ):
+                raise ValueError("orphan or divergent kill result registry backlink")
+        for command_result_identity, record in command_result_records.items():
+            counterpart = result_records.get(record["result_identity"])
+            if counterpart is None or any(
+                record[field] != counterpart[field] for field in shared_fields
+            ):
+                raise ValueError("orphan or divergent command-result registry backlink")
+            if record["command_result_identity"] != command_result_identity:
+                raise ValueError("command-result registry key mismatch")
+        if any(len(results) != 1 for results in command_to_results.values()) or any(
+            len(commands) != 1 for commands in result_to_commands.values()
+        ):
+            raise ValueError("kill result registry cardinality violation")
+
+    def _validate_kill_result_duplicate_binding(
+        self, result: dict[str, Any], context: dict[str, Any]
+    ) -> None:
+        history = context["identity_history"]
+        result_record = history[_kill_result_identity(result)]
+        command_record = history[result_record["command_identity"]]
+        if (
+            command_record["command_id"] != result["command_id"]
+            or command_record["command_idempotency_key"] != result["idempotency_key"]
+            or command_record["command_scope"] != result["scope"]
+            or command_record["command_fingerprint"] != result["command_fingerprint"]
+        ):
+            raise ValueError("duplicate result immutable command history mismatch")
 
     def _validate_control_dto(self, message: dict[str, Any], context: dict[str, Any]) -> None:
         dto_type = message["dto_type"]
@@ -695,7 +854,6 @@ class ControlSemanticValidator:
             self._validate_accepted_recovery_barrier(command, context)
 
     def _validate_kill_result(self, result: dict[str, Any], context: dict[str, Any]) -> None:
-        self._validate_kill_result_binding(result, context)
         authority = context["accepted_state"]["kill_switch"]
         command = authority["command"]
         command_authorization = command["authorization_evidence"]
@@ -1842,7 +2000,7 @@ def test_control_checksum_numeric_domain_rejects_nested_floats() -> None:
     )
     candidate["payload"]["nested"] = {"unsafe_number": 1.25}
     assert not _validator("control/control-plane.v1.schema.json").is_valid(candidate)
-    with pytest.raises(ValueError, match=r"integral|number domain"):
+    with pytest.raises(ValueError, match=r"integral|number domain|binary float"):
         _canonical({"payload": {"nested": [1.25]}})
 
     assert _canonical({"minimum": -SAFE_INTEGER_MAX, "maximum": SAFE_INTEGER_MAX})
@@ -1852,16 +2010,30 @@ def test_control_checksum_numeric_domain_rejects_nested_floats() -> None:
 def test_control_checksum_integral_json_numbers_have_one_canonical_form() -> None:
     canonical = _canonical({"value": 1, "nested": [1, {"amount": "123.45"}]})
     for token in ("1", "1.0", "1e0"):
-        parsed = json.loads(token)
+        parsed = _parse_json_exact(token)
         assert _canonical({"value": parsed, "nested": [parsed, {"amount": "123.45"}]}) == canonical
 
-    for token in ("1.25", "NaN", "Infinity", "-Infinity", "9007199254740992"):
-        value = json.loads(token)
+    for token in (
+        "1.25",
+        "1.0000000000000001",
+        "1e-400",
+        "9007199254740991.1",
+        "1e400",
+        "9007199254740992",
+    ):
+        value = _parse_json_exact(token)
         with pytest.raises(ValueError, match=r"number|integer|finite"):
             _canonical({"nested": [value]})
+    for token in ("NaN", "Infinity", "-Infinity"):
+        with pytest.raises(ValueError, match=r"non.finite|JSON number"):
+            _parse_json_exact(token)
     for value in (-SAFE_INTEGER_MAX - 1, SAFE_INTEGER_MAX + 1):
         with pytest.raises(ValueError, match="safe integer"):
             _canonical({"nested": [value]})
+    assert _canonical({"negative": _parse_json_exact("-1.0")}) == _canonical({"negative": -1})
+    for direct_float in (1.0, 1.0000000000000001, 1e-400, float("nan"), float("inf")):
+        with pytest.raises(ValueError, match=r"binary float|exact JSON"):
+            _canonical({"nested": [{"value": direct_float}]})
 
 
 def test_control_dtos_reject_arbitrary_and_high_cardinality_fields() -> None:
@@ -2580,9 +2752,41 @@ def _expected_command_result_identity(result: dict[str, Any]) -> str:
 
 
 def _record_kill_result(context: dict[str, Any], result: dict[str, Any]) -> None:
-    record = {"fingerprint": result["result_fingerprint"], "decision": "ACCEPTED"}
-    context["identity_history"][f"KILL_SWITCH_RESULT:{result['result_id']}"] = deepcopy(record)
-    context["identity_history"][_expected_command_result_identity(result)] = deepcopy(record)
+    command = context["accepted_state"]["kill_switch"]["command"]
+    command_identity = _kill_command_identity(command)
+    result_identity = _kill_result_identity(result)
+    command_result_identity = _expected_command_result_identity(result)
+    context["identity_history"][command_identity] = {
+        "record_type": "KILL_SWITCH_COMMAND",
+        "fingerprint": command["command_fingerprint"],
+        "decision": "ACCEPTED",
+        "command_identity": command_identity,
+        "command_id": command["command_id"],
+        "command_idempotency_key": command["idempotency_key"],
+        "command_scope": command["scope"],
+        "command_fingerprint": command["command_fingerprint"],
+    }
+    common = {
+        "fingerprint": result["result_fingerprint"],
+        "decision": "ACCEPTED",
+        "command_identity": command_identity,
+        "command_id": result["command_id"],
+        "command_idempotency_key": result["idempotency_key"],
+        "command_scope": result["scope"],
+        "command_fingerprint": result["command_fingerprint"],
+        "result_identity": result_identity,
+        "result_id": result["result_id"],
+        "result_fingerprint": result["result_fingerprint"],
+        "command_result_identity": command_result_identity,
+    }
+    context["identity_history"][result_identity] = {
+        **deepcopy(common),
+        "record_type": "KILL_SWITCH_RESULT",
+    }
+    context["identity_history"][command_result_identity] = {
+        **deepcopy(common),
+        "record_type": "KILL_SWITCH_COMMAND_RESULT",
+    }
 
 
 def test_kill_result_uses_independent_identity_and_canonical_fingerprint() -> None:
@@ -2601,8 +2805,14 @@ def test_kill_result_uses_independent_identity_and_canonical_fingerprint() -> No
 
     forged_command = deepcopy(duplicate)
     forged_command["accepted_state"]["kill_switch"]["command"]["actor"] = "forged-operator"
-    with pytest.raises(ValueError, match="accepted kill command fingerprint"):
-        checker.validate_control_message(result, forged_command)
+    assert checker.validate_control_message(result, forged_command)["status"] == "DUPLICATE"
+
+    forged_history = deepcopy(duplicate)
+    forged_history["identity_history"][
+        _kill_command_identity(forged_history["accepted_state"]["kill_switch"]["command"])
+    ]["command_fingerprint"] = "f" * 64
+    with pytest.raises(ValueError, match=r"command history|registry"):
+        checker.validate_control_message(result, forged_history)
 
     tamper_mutations = (
         lambda item: item.update({"idempotency_key": "idem-kill-forged-01"}),
@@ -2655,7 +2865,7 @@ def test_one_command_identity_cannot_accept_a_second_kill_result() -> None:
     divergent_restore["identity_history"][f"KILL_SWITCH_RESULT:{rejected['result_id']}"][
         "decision"
     ] = "UNKNOWN"
-    with pytest.raises(ValueError, match=r"atomically|restore"):
+    with pytest.raises(ValueError, match=r"atomically|restore|registry|backlink"):
         checker.validate_control_message(rejected, divergent_restore)
 
     same_result_new_id = deepcopy(rejected)
@@ -2732,12 +2942,18 @@ def test_kill_command_result_namespaces_resist_external_prefix_collision() -> No
 
 
 def test_utc_instant_comparison_handles_fraction_offsets_and_invalid_values() -> None:
-    assert _utc_instant("2026-08-11T01:00:01Z") == _utc_instant("2026-08-11T09:00:01+08:00")
+    assert _canonical_utc_z("2026-08-11T09:00:01+08:00") == "2026-08-11T01:00:01Z"
+    assert _utc_instant("2026-08-11T01:00:01Z") == _utc_instant(
+        _canonical_utc_z("2026-08-11T09:00:01+08:00")
+    )
     assert _utc_instant("2026-08-11T01:00:00.999999Z") < _utc_instant("2026-08-11T01:00:01Z")
     for value in (
         "2026-08-11T01:00:01",
         "2026-08-11 01:00:01Z",
         "2026-08-11T01:00:01-00:00",
+        "2026-08-11T09:00:01+08:00",
+        "2026-08-11T01:00:01.0000001Z",
+        "2026-08-11T01:00:60Z",
         "not-a-time",
     ):
         with pytest.raises(ValueError, match=r"RFC3339|UTC|instant"):
@@ -2746,9 +2962,9 @@ def test_utc_instant_comparison_handles_fraction_offsets_and_invalid_values() ->
 
 def test_fractional_future_effect_and_expired_deadline_are_rejected() -> None:
     equivalent, equivalent_context = _prepared_kill_result()
-    equivalent["effect_evidence"]["observed_at"] = "2026-08-11T09:00:01+08:00"
+    equivalent["effect_evidence"]["observed_at"] = _canonical_utc_z("2026-08-11T09:00:01+08:00")
     equivalent["result_fingerprint"] = _sha(_kill_result_fingerprint_projection(equivalent))
-    equivalent_context["evaluation_at"] = "2026-08-11T09:00:01+08:00"
+    equivalent_context["evaluation_at"] = "2026-08-11T01:00:01Z"
     ControlSemanticValidator().validate_control_message(equivalent, equivalent_context)
 
     result, context = _prepared_kill_result()
@@ -2895,3 +3111,162 @@ def test_task022_verification_evidence_does_not_claim_full_suite_passed() -> Non
     assert "acceptance_status: partial" in task
     assert "review_status: pending" in task
     assert "release_status: prohibited" in task
+
+
+def _advance_current_kill_command(context: dict[str, Any]) -> None:
+    command = deepcopy(context["accepted_state"]["kill_switch"]["command"])
+    command.update(
+        command_id="command-kill-next-0002",
+        idempotency_key="idem-kill-next-0002",
+        created_at="2026-08-11T01:00:01Z",
+    )
+    command["command_fingerprint"] = _sha(_kill_command_fingerprint_projection(command))
+    context["accepted_state"]["kill_switch"]["command"] = command
+
+
+def test_result_registry_global_audit_rejects_orphans_before_new_result() -> None:
+    old_result, complete = _prepared_kill_result("REJECTED")
+    _record_kill_result(complete, old_result)
+    command_result_key = _expected_command_result_identity(old_result)
+    checker = ControlSemanticValidator()
+
+    result_only = deepcopy(complete)
+    result_only["identity_history"].pop(command_result_key)
+    for outcome in ("REJECTED", "UNKNOWN"):
+        new_result = deepcopy(old_result)
+        new_result["result_id"] = f"kill-result-new-{outcome.lower()}-0002"
+        if outcome == "UNKNOWN":
+            new_result.update(
+                outcome="UNKNOWN",
+                effective_state="UNKNOWN",
+                current_version=new_result["previous_version"],
+                reconciliation_required=True,
+            )
+        new_result["result_fingerprint"] = _sha(_kill_result_fingerprint_projection(new_result))
+        with pytest.raises(ValueError, match=r"registry|orphan|restore|atomic"):
+            checker.validate_control_message(new_result, result_only)
+
+    command_result_only = deepcopy(complete)
+    command_result_only["identity_history"].pop(_kill_result_identity(old_result))
+    with pytest.raises(ValueError, match=r"registry|orphan|restore|atomic"):
+        checker.validate_control_message(old_result, command_result_only)
+
+    missing_command_history = deepcopy(complete)
+    missing_command_history["identity_history"].pop(
+        f"KILL_SWITCH_COMMAND:{old_result['command_id']}"
+    )
+    with pytest.raises(ValueError, match=r"command history|registry|restore"):
+        checker.validate_control_message(old_result, missing_command_history)
+
+
+def test_result_registry_global_audit_rejects_wrong_backlinks_and_multiple_results() -> None:
+    result, context = _prepared_kill_result("REJECTED")
+    _record_kill_result(context, result)
+    checker = ControlSemanticValidator()
+    assert checker.validate_control_message(result, context)["status"] == "DUPLICATE"
+
+    wrong_backlink = deepcopy(context)
+    wrong_backlink["identity_history"][_expected_command_result_identity(result)][
+        "result_identity"
+    ] = "KILL_SWITCH_RESULT:wrong-backlink-result"
+    with pytest.raises(ValueError, match=r"registry|backlink|pointer|restore"):
+        checker.validate_control_message(result, wrong_backlink)
+
+    multiple = deepcopy(context)
+    second = deepcopy(result)
+    second["result_id"] = "kill-result-rejected-0002"
+    second["result_fingerprint"] = _sha(_kill_result_fingerprint_projection(second))
+    _record_kill_result(multiple, second)
+    with pytest.raises(ValueError, match=r"registry|multiple|unique|cardinality|restore"):
+        checker.validate_control_message(second, multiple)
+
+
+def test_trusted_late_result_duplicate_uses_immutable_command_history() -> None:
+    result, context = _prepared_kill_result("APPLIED")
+    _record_kill_result(context, result)
+    _advance_current_kill_command(context)
+    checker = ControlSemanticValidator()
+
+    assert checker.validate_control_message(result, context)["status"] == "DUPLICATE"
+
+    tampered = deepcopy(result)
+    tampered.update(
+        outcome="UNKNOWN",
+        effective_state="UNKNOWN",
+        current_version=tampered["previous_version"],
+        applied_at=None,
+        reconciliation_required=True,
+        effect_evidence={"ack_ids": [], "observed_at": "2026-08-11T01:00:00Z"},
+    )
+    tampered["result_fingerprint"] = _sha(_kill_result_fingerprint_projection(tampered))
+    with pytest.raises(ValueError, match=r"fingerprint|conflict|registry"):
+        checker.validate_control_message(tampered, context)
+
+    first_late_result, first_context = _prepared_kill_result("APPLIED")
+    _advance_current_kill_command(first_context)
+    with pytest.raises(ValueError, match=r"command identity|authority"):
+        checker.validate_control_message(first_late_result, first_context)
+
+
+def test_control_timestamp_wire_boundary_requires_canonical_utc_z() -> None:
+    payload = deepcopy(_load(FIXTURES / "control-events.json")["system.mode_changed.v1"])
+    for invalid_timestamp in (
+        "2026-08-11T09:00:01+08:00",
+        "2026-08-11T01:00:01",
+        "2026-08-11T01:00:01.0000001Z",
+        "2026-08-11T01:00:60Z",
+    ):
+        invalid = deepcopy(payload)
+        invalid["occurred_at"] = invalid_timestamp
+        assert not _validator(EVENT_SCHEMAS["system.mode_changed.v1"]).is_valid(invalid)
+        assert not _validator("control/combined-control-message.v1.schema.json").is_valid(
+            _combined_fixture("system.mode_changed.v1", invalid)
+        )
+
+    normalized = deepcopy(payload)
+    normalized["occurred_at"] = _canonical_utc_z("2026-08-11T09:00:01+08:00")
+    assert normalized["occurred_at"] == "2026-08-11T01:00:01Z"
+    assert _validator(EVENT_SCHEMAS["system.mode_changed.v1"]).is_valid(normalized)
+    fractional = deepcopy(payload)
+    fractional["occurred_at"] = "2026-08-11T01:00:01.123456Z"
+    assert _validator(EVENT_SCHEMAS["system.mode_changed.v1"]).is_valid(fractional)
+
+    command = deepcopy(_validation_context(payload["correlation_id"])["accepted_state"])[
+        "kill_switch"
+    ]["command"]
+    command["deadline_at"] = "2026-08-11T09:01:00+08:00"
+    command["command_fingerprint"] = _sha(_kill_command_fingerprint_projection(command))
+    assert not _validator("control/control-plane.v1.schema.json").is_valid(command)
+    command["deadline_at"] = "2026-08-11T01:01:00.0000001Z"
+    command["command_fingerprint"] = _sha(_kill_command_fingerprint_projection(command))
+    assert not _validator("control/control-plane.v1.schema.json").is_valid(command)
+
+    context = _validation_context(payload["correlation_id"])
+    context["evaluation_at"] = "2026-08-11T09:00:01+08:00"
+    assert not _validator("control/validation-context.v1.schema.json").is_valid(context)
+    context["evaluation_at"] = "2026-08-11T01:00:01.0000001Z"
+    assert not _validator("control/validation-context.v1.schema.json").is_valid(context)
+
+
+def test_all_control_timestamp_schemas_share_the_canonical_utc_z_pattern() -> None:
+    schemas = (
+        "common/message-envelope.v1.schema.json",
+        *EVENT_SCHEMAS.values(),
+        "control/control-plane.v1.schema.json",
+        "control/validation-context.v1.schema.json",
+        "control/combined-control-message.v1.schema.json",
+    )
+
+    def timestamp_nodes(value: Any) -> list[dict[str, Any]]:
+        if isinstance(value, dict):
+            nodes = [value] if value.get("format") == "date-time" else []
+            return nodes + [node for child in value.values() for node in timestamp_nodes(child)]
+        if isinstance(value, list):
+            return [node for child in value for node in timestamp_nodes(child)]
+        return []
+
+    for relative in schemas:
+        nodes = timestamp_nodes(_load(SCHEMAS / relative))
+        if relative != "control/combined-control-message.v1.schema.json":
+            assert nodes, relative
+        assert all(node.get("pattern") == RFC3339_UTC_Z.pattern for node in nodes), relative

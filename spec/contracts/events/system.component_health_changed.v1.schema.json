@@ -13,7 +13,7 @@
     "previous_health": {"enum": ["HEALTHY", "DEGRADED", "UNAVAILABLE", "RECOVERING"]},
     "health": {"enum": ["HEALTHY", "DEGRADED", "UNAVAILABLE", "RECOVERING"]},
     "reason_code": {"enum": ["PROBE_PASSED", "PROBE_FAILED", "DEPENDENCY_STALE", "DISCONNECTED", "RECOVERY_STARTED", "RECOVERY_VERIFIED", "CAPACITY_EXHAUSTED", "AUDIT_UNAVAILABLE"]},
-    "observed_at": {"type": "string", "format": "date-time", "pattern": "Z$"},
+    "observed_at": {"type": "string", "format": "date-time", "pattern": "^\\d{4}-\\d{2}-\\d{2}T(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d{1,6})?Z$"},
     "correlation_id": {"type": "string", "minLength": 16, "maxLength": 128},
     "causation_id": {"type": "string", "minLength": 16, "maxLength": 64},
     "source": {"type": "string", "const": "HealthService"},
