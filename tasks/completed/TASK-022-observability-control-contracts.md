@@ -1,10 +1,10 @@
 ---
 id: TASK-022
 title: Complete Observability, Config, and Control L4 contracts
-status: active
+status: completed
 depends_on: [TASK-046]
 spec_refs: [INV-TRADING, INV-CONSISTENCY, INV-RISK, CONTRACT-MESSAGE-ENVELOPE-V1, CONTRACT-ERROR-CATALOG, PORTS-CORE, SM-SYSTEM-MODE, WF-RECOVERY, WF-CONFIG-ACTIVATION, STORAGE-SOT, NFR-PERFORMANCE, NFR-OBSERVABILITY, NFR-RELIABILITY]
-allowed_paths: [spec/manifest.yaml, spec/contracts/**, spec/interfaces/**, spec/workflows/**, spec/state-machines/**, spec/nfr/**, tests/contract/messages/**, tasks/active/TASK-022-observability-control-contracts.md, tasks/active/README.md, tasks/backlog/TASK-025-control-observability.md, tasks/index.yaml]
+allowed_paths: [spec/manifest.yaml, spec/contracts/**, spec/interfaces/**, spec/workflows/**, spec/state-machines/**, spec/nfr/**, tests/contract/messages/**, tasks/active/TASK-022-observability-control-contracts.md, tasks/completed/TASK-022-observability-control-contracts.md, tasks/active/README.md, tasks/backlog/TASK-025-control-observability.md, tasks/index.yaml]
 forbidden_paths: [src/**, tests/unit/**, tests/property/**, tests/integration/**, migrations/**]
 verification:
   commands:
@@ -12,11 +12,26 @@ verification:
     - poetry run pytest tests/spec tests/contract
 delivery:
   schema_version: 1
-  contract_status: draft
-  implementation_status: in_progress
-  acceptance_status: partial
-  review_status: pending
+  contract_status: accepted
+  implementation_status: merged
+  acceptance_status: passed
+  review_status: approved
   release_status: prohibited
+  completion_evidence:
+    mode: governance_closeout_after_independent_review
+    change_pr: https://github.com/qifuxiao/QuantiQmt/pull/76
+    reviewed_head_sha: 564b5ad4e3a23c8674ee2a673dadca47ef8f77eb
+    review_verdict: APPROVE
+    reviewer: qifuxiao
+    evidence_url: https://github.com/qifuxiao/QuantiQmt/pull/76#pullrequestreview-5005992993
+    merge_commit_sha: dfa77a9fe1c515b3ebb93aff09b28a40255bd8a9
+    ci_evidence: reviewed_head_final_4_of_4_success_quality_x2_persistence_postgresql_x2
+    independent_review: no_P0_P1_P2_P3_findings; 622_full_spec_contract_tests; 86_control_tests
+    human_authorization_evidence: >-
+      2026-08-24 user authorized continuation through final independent Review and formal
+      approval, then confirmed PR #76 merged for the TASK-022 active-to-completed governance
+      closeout; authorization adds only the exact completed TASK-022 path, activates no
+      downstream task, and does not authorize release.
 ---
 
 # Objective
@@ -77,6 +92,15 @@ delivery:
 - TASK-025 remains `blocked`, references the final behavior contracts, and no longer requires a giant validator context, one prescribed Python entrypoint, or source-tree/runtime call-graph shape. No runtime code, migration, monitoring product, OMS mutation or release is implemented; delivery stays `in_progress/partial/pending/prohibited`.
 - Verification evidence remains partial and is not a full-suite pass. On 2026-08-17 the bare user-level `poetry` launcher failed before collection because its executable is zero bytes. Using the dependency-complete repository `.venv` Poetry executable, the prescribed spec validator passed and the prescribed full pytest command recorded `574 passed / 6 failed`. The same full suite with workspace `--basetemp` also recorded `574 passed / 6 failed`; a sandboxed run against the default Windows `%TEMP%` recorded `570 passed / 6 failed / 4 errors` from that directory's ACL. Control authority/semantic tests passed `51`, and the broader message/control selection passed `277`. The six baseline-existing failures are two expired `2026-08-13` waiver expectations plus four fixture-cleanup cascades. These governance/environment failures are outside TASK-022 paths and are not masked or claimed as passing.
 - On 2026-08-24, after the final Config authority-timeline correction, both original bare `poetry run ...` commands still failed before execution because the user-level Poetry launcher could not start. The dependency-complete repository `.venv` Poetry executable passed `scripts/validate_specs.py`; Control/authority tests passed `86`, and message+Control regression passed `317`. The full prescribed `tests/spec tests/contract` selection with a workspace basetemp recorded `614 passed / 6 failed`; the two expired `2026-08-13` waiver assertions are the roots and four same-directory cleanup assertions are cascades. No TASK-022 test failed, but the prescribed suite is not a pass; delivery remains `in_progress/partial/pending/prohibited`.
+
+## Final review and closeout evidence
+
+- PR #76 was formally approved by `qifuxiao` on exact reviewed Head `564b5ad4e3a23c8674ee2a673dadca47ef8f77eb`: https://github.com/qifuxiao/QuantiQmt/pull/76#pullrequestreview-5005992993.
+- The final independent Review reported no P0/P1/P2/P3 findings and verdict `APPROVE`. It independently passed the specification validator, `622` complete spec/contract tests, `86` Control tests, JSON/YAML/Draft 2020-12 Schema parsing, path/forbidden-scope audit, `git diff --check`, and fixture-residue checks. The former two date failures and four cleanup cascades are closed by the merged TASK-049 fix.
+- GitHub reports 4/4 successful checks on the reviewed Head. PR #76 merged into `main` as `dfa77a9fe1c515b3ebb93aff09b28a40255bd8a9`.
+- The original user-level Poetry launcher remains unusable because of its Windows executable-association failure; the dependency-complete project environment supplied the equivalent passing verification above. This environment issue does not change the GitHub CI result or the independently reviewed contract verdict.
+- This closeout accepts and records the L4 specification delivery only. It implements no runtime, migration, monitoring integration, OMS mutation, or release. TASK-023, TASK-025, TASK-027, and every other downstream task remain blocked and unactivated pending separate human authorization; `release_status` remains `prohibited`.
+- The 2026-08-24 human authorization is limited to adding `tasks/completed/TASK-022-observability-control-contracts.md` and performing this active-to-completed governance transition.
 
 ## Review focus
 
