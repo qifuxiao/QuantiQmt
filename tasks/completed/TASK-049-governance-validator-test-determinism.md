@@ -1,7 +1,7 @@
 ---
 id: TASK-049
 title: Make governance waiver validation tests deterministic and cleanup-safe
-status: active
+status: completed
 depends_on: [TASK-043]
 spec_refs: [REVIEW-IMPLEMENTATION-READINESS-0.5]
 allowed_paths:
@@ -37,10 +37,19 @@ verification:
 delivery:
   schema_version: 1
   contract_status: not_applicable
-  implementation_status: in_progress
+  implementation_status: merged
   acceptance_status: passed
-  review_status: pending
+  review_status: approved
   release_status: prohibited
+  completion_evidence:
+    mode: governance_closeout_after_approved_review
+    change_pr: https://github.com/qifuxiao/QuantiQmt/pull/77
+    reviewed_head_sha: 70bfc569b06a093bfa22e53bb840a8a982465f61
+    review_verdict: APPROVE
+    reviewer: qfxyyy
+    evidence_url: https://github.com/qifuxiao/QuantiQmt/pull/77#pullrequestreview-5005677302
+    merge_commit_sha: 5c6ed3769babfd6a4b1c4eba990de50662ce0fc1
+    human_authorization_evidence: 2026-08-24 user authorized TASK-049 activation and implementation, then confirmed PR #77 merged for closeout
 ---
 
 # Objective
@@ -79,3 +88,10 @@ Make governance waiver validation and its tests independent of wall-clock drift 
 
 - 若显式日期注入削弱生产 fail-closed 行为或允许过期/terminal waiver 解锁，立即停止并保持 TASK-049 未完成。
 - 回滚仅恢复 validator 的日期传递和测试 fixture 结构；不得改变 waiver 注册表、业务任务状态或规范契约。
+
+## Closeout evidence
+
+- PR #77 was formally approved by `qfxyyy` on exact head `70bfc569b06a093bfa22e53bb840a8a982465f61` and merged into `main` as `5c6ed3769babfd6a4b1c4eba990de50662ce0fc1`.
+- GitHub reports all four checks passed. Independent Review reported no P0/P1/P2/P3 findings and verdict `APPROVE`.
+- Implementation verification passed: specification validation; 45 targeted spec tests; 691 full unit/property/spec/contract tests at 85% coverage; mypy; Ruff check/format; pre-commit; and `git diff --check`.
+- TASK-049 closes only the governance validator determinism defect. Release remains prohibited, and no business task or capability is unlocked by this closeout.
