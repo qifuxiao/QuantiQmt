@@ -1,7 +1,7 @@
 ---
 id: TASK-049
 title: Make governance waiver validation tests deterministic and cleanup-safe
-status: ready
+status: active
 depends_on: [TASK-043]
 spec_refs: [REVIEW-IMPLEMENTATION-READINESS-0.5]
 allowed_paths:
@@ -37,8 +37,8 @@ verification:
 delivery:
   schema_version: 1
   contract_status: not_applicable
-  implementation_status: not_started
-  acceptance_status: not_run
+  implementation_status: in_progress
+  acceptance_status: passed
   review_status: pending
   release_status: prohibited
 ---
@@ -63,12 +63,12 @@ Make governance waiver validation and its tests independent of wall-clock drift 
 
 ## Acceptance criteria
 
-- [ ] `bootstrap_allows_dependency` 的测试不读取测试运行当天日期；2026-08-13 后运行仍稳定，且显式到期场景始终拒绝。
-- [ ] `validate_tasks()` 在一次运行内复用同一评估日期，waiver 校验与 dependency unlock 判定不会因跨日产生分歧。
-- [ ] 所有写文件的 validator 测试使用独立临时路径或 `try/finally` 等价保护；测试失败后仓库内不存在 `tasks/.validator-fixture` 残留。
-- [ ] 2026-08-13 bootstrap waiver 保持 retired、release prohibited，且 TASK-014→TASK-031 之外的依赖仍不能获得例外。
-- [ ] PR #76 中观察到的 2 个日期相关失败和 4 个 cleanup 级联失败均由针对性回归测试覆盖。
-- [ ] 所有 verification.commands 通过，allowed/forbidden path 审计无越权。
+- [x] `bootstrap_allows_dependency` 的测试不读取测试运行当天日期；2026-08-13 后运行仍稳定，且显式到期场景始终拒绝。
+- [x] `validate_tasks()` 在一次运行内复用同一评估日期，waiver 校验与 dependency unlock 判定不会因跨日产生分歧。
+- [x] 所有写文件的 validator 测试使用独立临时路径或 `try/finally` 等价保护；测试失败后仓库内不存在 `tasks/.validator-fixture` 残留。
+- [x] 2026-08-13 bootstrap waiver 保持 retired、release prohibited，且 TASK-014→TASK-031 之外的依赖仍不能获得例外。
+- [x] PR #76 中观察到的 2 个日期相关失败和 4 个 cleanup 级联失败均由针对性回归测试覆盖。
+- [x] 所有 verification.commands 通过，allowed/forbidden path 审计无越权。
 
 ## Required evidence
 
