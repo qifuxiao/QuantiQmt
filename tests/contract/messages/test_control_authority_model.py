@@ -107,9 +107,13 @@ def test_scoped_control_contract_uses_addressable_scope_pair() -> None:
 
 
 def test_task_022_references_existing_control_authorities() -> None:
-    task = (ROOT / "tasks" / "active" / "TASK-022-observability-control-contracts.md").read_text(
-        encoding="utf-8"
-    )
+    candidates = [
+        ROOT / "tasks" / state / "TASK-022-observability-control-contracts.md"
+        for state in ("active", "completed")
+    ]
+    existing = [path for path in candidates if path.is_file()]
+    assert len(existing) == 1
+    task = existing[0].read_text(encoding="utf-8")
     for authority in (
         "CONTRACT-MESSAGE-ENVELOPE-V1",
         "CONTRACT-ERROR-CATALOG",
