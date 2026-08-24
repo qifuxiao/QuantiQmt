@@ -29,7 +29,7 @@ workflow:
       state_version_consumer: duplicate_stale_or_fail_visible_gap
       wire_schema_prior_state_lookup: forbidden
     kill_switch: publish_only_after_control_journal_state_change_commit
-    config_activation: publish_only_in_atomic_ActiveVersion_Event_Outbox_commit
+    config_activation: publish_only_in_atomic_ActiveVersion_Event_Outbox_commit_for_CANDIDATE_COMMIT_or_ROLLBACK_RESTORE
     unsuccessful_command_or_activation: internal_result_audit_and_alert_only
 
   scope:
@@ -44,21 +44,22 @@ workflow:
       - {id: persist_candidate, owner: ConfigService}
       - {id: schema_and_business_validate, owner: ConfigService, failure: reject_candidate}
       - {id: prepare_components, owner: ConfigService, failure: reject_candidate}
-      - {id: atomic_active_event_outbox_commit, owner: ConfigService, transaction: "ActiveVersion + config.version_activated.v1 + Outbox"}
+      - {id: atomic_candidate_active_event_outbox_commit, owner: ConfigService, transaction: "ActiveVersion(candidate) + config.version_activated.v1(CANDIDATE_COMMIT) + Outbox", timing: before_swap_and_effect_ACK}
       - {id: swap_at_safe_boundary, owner: Components, guard: immutable_version_and_checksum}
       - {id: collect_phase_effect_evidence, owner: ConfigService, failure: rollback_or_safe_scope}
+      - {id: atomic_rollback_restore_event_outbox_commit, owner: ConfigService, guard: complete_rollback_effects, transaction: "ActiveVersion(previous accepted) + config.version_activated.v1(ROLLBACK_RESTORE) + Outbox", failure: remain_PARTIAL_or_UNKNOWN_without_restore_event}
     candidate_checksum: complete_security_projection_RFC8785_exact_number_ingress
     hard_limit_guard: exact_currency_policy_content_hash_and_no_dynamic_relaxation
     result_identity: [CONFIG_ACTIVATION, config_domain, candidate_version, idempotency_key]
     prior_result: one_exact_committed_Port_record
     component_evidence: [prepare, candidate_effect_with_target, rollback_effect_with_target]
     outcomes:
-      APPLIED: committed_candidate_active_complete_candidate_effects_no_rollback
+      APPLIED: candidate_commit_reference_complete_candidate_effects_no_rollback_no_second_event
       REJECTED: no_new_active_or_applied_effect
-      PARTIAL: no_second_active_ENTER_SAFE_MODE_reconcile_same_identity
-      ROLLED_BACK: previous_ActiveVersion_restored_and_all_applied_components_rolled_back
-      UNKNOWN: no_new_active_claim_ENTER_SAFE_MODE_reconcile_same_identity_even_if_all_components_applied
-    unsuccessful_event_publish: forbidden
+      PARTIAL: committed_candidate_remains_active_no_restore_event_ENTER_SAFE_MODE_reconcile_same_identity
+      ROLLED_BACK: complete_rollback_effects_atomic_restore_event_then_result_binds_candidate_and_restore_references
+      UNKNOWN: candidate_commit_unknown_has_no_event_or_active_claim; post_candidate_commit_unknown_retains_candidate_event_and_active_authority; neither_claims_restore_event; ENTER_SAFE_MODE_and_reconcile_same_identity
+    public_event_component_effect_claim: forbidden
 
   kill_switch:
     command_bus: required

@@ -195,13 +195,13 @@ change:
   id: SPEC-0.11.0-OBSERVABILITY-CONTROL-CONTRACTS
   compatibility: calibrated_logical_Port_authority_and_first_freeze_correction_for_pre_release_control_V1_events; canonical_MessageEnvelopeV1_unchanged; release_prohibited_until_independent_review_and_runtime_owner_delivery
   previous_version: 0.10.0
-  public_message_schema_changes: "first-freeze correction for four previously planned and unreleased Control V1 events: component health adds independent strictly increasing state_version while generation remains instance fencing; complete envelope/lineage/identity bindings and required condition fixtures are frozen; no previously active public schema changes"
+  public_message_schema_changes: "first-freeze correction for four previously planned and unreleased Control V1 events: component health has independent state_version; config.version_activated removes future component ACK claims and distinguishes CANDIDATE_COMMIT from ROLLBACK_RESTORE ActiveVersion authority transactions; complete envelope/lineage/identity bindings are frozen; no previously active public schema changes"
   storage_schema_changes: "references existing STORAGE-SOT PostgreSQL control_journal authority and recovery order only; no database object or migration is created; any physical storage contract requires an independent spec-change task"
   error_catalog_change: none
   runtime_code_change: "none in TASK-022; TASK-025 remains blocked and owns future ControlPlane/Observability runtime implementation only after TASK-022 trusted completion"
   review_change: none
-  contract_change: "freezes untrusted wire validation and controlled logical Port pre/postconditions without recursive self-authenticating facts; ConfigActivationResult adds finite per-component prepare/candidate/rollback effects and safe-scope semantics; shared MessageEnvelopeV1 remains unchanged"
-  semantic_validation_change: "binds Event envelopes to payload facts and minimal AcceptedMessageRef lineage, verifies exact committed-record identity/content integrity before duplicate, shares one RecoveryBarrierReadPort snapshot rule for RecoveryPassed/OFF, and checks the exhaustive config phase/effect matrix"
+  contract_change: "freezes untrusted wire validation and controlled logical Port pre/postconditions without recursive self-authenticating facts; ConfigActivationResult retains finite per-component effects and now binds candidate-commit/rollback-restore Event references; config.version_activated represents ActiveVersion authority changes only; shared MessageEnvelopeV1 remains unchanged"
+  semantic_validation_change: "binds Event envelopes to payload facts and minimal AcceptedMessageRef lineage, verifies exact committed-record identity/content integrity before duplicate, shares one RecoveryBarrierReadPort snapshot rule for RecoveryPassed/OFF, and orders config candidate commit before component effects plus rollback restore after complete rollback effects"
   internal_contracts_added: [CONTRACT-CONTROL-PLANE-V1, CONTRACT-CONTROL-SEMANTIC-VALIDATION-V1, CONTRACT-CONTROL-COMBINED-MESSAGE-V1, PORTS-CONTROL, WF-CONTROL-PLANE]
   public_contracts_added: [system.mode_changed.v1, system.component_health_changed.v1, system.kill_switch_changed.v1, config.version_activated.v1]
   task_queue_change: "TASK-022 remains active/draft/in-progress pending independent Review; TASK-025 remains blocked and constrained to the frozen contracts; no other task changes state"
@@ -217,7 +217,7 @@ change:
     - activate_immutable_config_and_recovery_policies_before_control_traffic
   migration:
     runtime_data: "not applicable in TASK-022 because no Control runtime is implemented; TASK-025 must load only a reviewed immutable manifest-indexed schema bundle and fail closed on missing, tampered or mismatched content"
-    public_events: "new event names have no historical published payload, so Review corrections are folded into V1 before first release; deploy accepted readers and immutable bundle before future publishers and reject unknown versions fail-closed"
+    public_events: "new event names have no historical published payload, so the config ACK removal and activation_kind correction are folded into V1 before first release; deploy accepted readers and immutable bundle before future publishers and reject unknown versions fail-closed"
     storage: "no migration is created or authorized; future persistence requires independently authorized expand-only storage work"
     task_queue: "TASK-022 remains active; TASK-025 remains blocked on TASK-004 and TASK-022; no downstream activation"
     historical_evidence: "missing upstream ranges remain explicit GAP/UNAVAILABLE evidence and are never inferred or silently backfilled"
@@ -226,6 +226,6 @@ change:
     runtime_data: not_applicable_no_runtime_change
     public_events: "before runtime adoption revert only unimplemented routes; after adoption stop publishers before readers and preserve every emitted event, gap and quality record"
     task_queue: "keep TASK-022 active until independent Review; keep TASK-025 and downstream tasks blocked"
-    contracts: "never reuse the four public names or weaken V1 meaning; rollback stops publishers, retains compatible readers and the last reviewed immutable schema bundle, and preserves collision/checksum/gap/quality evidence"
+    contracts: "never reuse the four public names or weaken V1 meaning; rollback stops publishers before reverting the unreleased bundle, retains compatible readers, and preserves ActiveVersion/event ordering plus collision/checksum/gap/quality evidence"
     storage: "no database rollback in TASK-022; future rollback preserves control audit, ActiveVersion, barrier and fencing evidence"
     release: prohibited

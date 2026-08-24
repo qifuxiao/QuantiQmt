@@ -5,13 +5,18 @@ workflow:
     - {id: persist_candidate, owner: ConfigService}
     - {id: schema_and_business_validate, owner: ConfigService, failure: reject_candidate}
     - {id: prepare_required_components, owner: ConfigService, failure: reject_candidate}
-    - {id: persist_active_version, owner: ConfigService, transaction: "ActiveVersion + Event + Outbox"}
+    - {id: persist_candidate_active_version, owner: ConfigService, transaction: "ActiveVersion(candidate) + config.version_activated.v1(CANDIDATE_COMMIT) + Outbox", timing: before_component_swap_or_ACK}
     - {id: swap_immutable_snapshots, owner: Components, guard: safe_boundary}
-    - {id: collect_acknowledgements, owner: ConfigService, failure: rollback_or_safe_scope}
+    - {id: collect_acknowledgements, owner: ConfigService, success: persist_APPLIED_without_second_public_event, failure: enter_safe_scope_and_rollback}
+    - {id: collect_rollback_effects, owner: ConfigService, guard: candidate_effect_not_complete, failure: remain_PARTIAL_or_UNKNOWN_and_reconcile_same_identity}
+    - {id: persist_rollback_restore, owner: ConfigService, guard: complete_rollback_effects_to_one_previous_accepted_version, transaction: "ActiveVersion(previous accepted) + config.version_activated.v1(ROLLBACK_RESTORE) + Outbox", failure: remain_UNKNOWN_and_reconcile_same_identity}
+    - {id: persist_rolled_back_result, owner: ConfigService, guard: rollback_restore_transaction_committed}
   invariants:
     - one_risk_decision_uses_one_rule_set_version
     - secrets_are_references_not_plaintext
     - partial_silent_activation_is_forbidden
+    - public_activation_event_never_claims_component_effects_or_convergence
+    - activation_sequence_strictly_increases_for_candidate_commit_and_rollback_restore
   result_contract:
     identity: [CONFIG_ACTIVATION, config_domain, candidate_version, idempotency_key]
     canonical_result_fingerprint: required
@@ -25,11 +30,16 @@ workflow:
       candidate_effect: [NOT_ATTEMPTED, APPLIED, REJECTED, UNKNOWN]
       rollback_effect: [NOT_REQUIRED, APPLIED, REJECTED, UNKNOWN]
     outcomes:
-      APPLIED: committed_candidate_active_all_candidate_effects_APPLIED_rollback_NOT_REQUIRED
+      APPLIED: candidate_commit_event_reference_all_candidate_effects_APPLIED_rollback_NOT_REQUIRED_no_second_public_event
       REJECTED: no_new_active_no_candidate_APPLIED_rollback_NOT_REQUIRED
-      PARTIAL: no_second_active_fail_closed_ENTER_SAFE_MODE_reconcile_same_identity
-      ROLLED_BACK: previous_ActiveVersion_restored_and_every_applied_component_rolled_back_to_it
-      UNKNOWN: no_new_active_claim_ENTER_SAFE_MODE_query_same_identity_never_change_key_all_candidate_APPLIED_still_allowed_when_commit_unknown
+      PARTIAL: candidate_remains_active_no_restore_event_fail_closed_ENTER_SAFE_MODE_reconcile_same_identity
+      ROLLED_BACK: complete_rollback_effects_then_atomic_rollback_restore_event_then_result_binds_both_event_references
+      UNKNOWN: candidate_commit_unknown_has_no_event_or_active_claim; post_candidate_commit_unknown_retains_candidate_event_and_active_authority; both_have_no_restore_event_ENTER_SAFE_MODE_query_same_identity_never_change_key
+    public_event:
+      meaning: ActiveVersion_authority_change_not_component_convergence
+      CANDIDATE_COMMIT: after_prepare_before_swap_and_ACK
+      ROLLBACK_RESTORE: after_complete_rollback_effects_before_ROLLED_BACK_result
+      component_effect_fields: forbidden
     checksum_role: stored_content_integrity_not_source_authenticity
     source_authenticity: VersionedConfigStorePort_and_transaction_integration
   risk_rule_set:

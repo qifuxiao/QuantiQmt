@@ -846,54 +846,42 @@ def _validate_event_semantics(
         if payload["current_version"] != payload["previous_version"] + 1:
             raise ValueError("changed event must advance exactly once")
     elif name == "config.version_activated.v1":
-        if payload["active_version"] != payload["candidate_version"]:
-            raise ValueError("activated version mismatch")
-        if payload["active_checksum"] != payload["candidate_checksum"]:
-            raise ValueError("activated checksum mismatch")
-        if set(payload["required_components"]) != set(payload["component_acks"]):
-            raise ValueError("activation ACK set mismatch")
-        for component, ack in payload["component_acks"].items():
-            if ack["component_id"] != component or ack["result"] != "APPLIED":
-                raise ValueError("activation ACK is not an applied fact")
+        previous = (payload["previous_version"], payload["previous_checksum"])
+        if (previous[0] is None) != (previous[1] is None):
+            raise ValueError("previous ActiveVersion reference is incomplete")
+        trigger = (
+            payload["trigger_candidate_version"],
+            payload["trigger_candidate_checksum"],
+        )
+        active = (payload["active_version"], payload["active_checksum"])
+        if payload["activation_kind"] == "CANDIDATE_COMMIT":
+            if trigger != active or payload["rollback_cause_result_id"] is not None:
+                raise ValueError("candidate commit authority binding mismatch")
+        else:
+            if trigger != previous or not payload["rollback_cause_result_id"]:
+                raise ValueError("rollback restore authority binding mismatch")
+            if active == previous:
+                raise ValueError("rollback restore must change ActiveVersion")
 
 
 def _validate_config_event_candidate_binding(
     payload: dict[str, Any], candidate: dict[str, Any]
 ) -> None:
-    for field in (
-        "config_domain",
-        "candidate_version",
-        "candidate_checksum",
-        "activation_mode",
-        "safe_boundary",
-        "policy_version",
-        "policy_checksum",
-    ):
+    if payload["config_domain"] != candidate["config_domain"]:
+        raise ValueError("activated event candidate domain mismatch")
+    if (
+        payload["trigger_candidate_version"],
+        payload["trigger_candidate_checksum"],
+    ) != (candidate["candidate_version"], candidate["candidate_checksum"]):
+        raise ValueError("activated event trigger candidate mismatch")
+    if payload["activation_kind"] != "CANDIDATE_COMMIT":
+        return
+    for field in ("activation_mode", "safe_boundary", "policy_version", "policy_checksum"):
         if payload[field] != candidate[field]:
-            raise ValueError("activated event candidate binding mismatch")
+            raise ValueError("candidate commit metadata mismatch")
     for field in ("secret_references", "required_components"):
         if set(payload[field]) != set(candidate[field]):
-            raise ValueError("activated event candidate set mismatch")
-    if payload["active_version"] != candidate["candidate_version"]:
-        raise ValueError("activated version mismatch")
-    if payload["active_checksum"] != candidate["candidate_checksum"]:
-        raise ValueError("activated checksum mismatch")
-    if set(payload["component_acks"]) != set(candidate["component_authority"]):
-        raise ValueError("activated component authority mismatch")
-    for component, authority in candidate["component_authority"].items():
-        ack = payload["component_acks"][component]
-        expected = {
-            "component_id": component,
-            "candidate_version": candidate["candidate_version"],
-            "candidate_checksum": candidate["candidate_checksum"],
-            "generation": authority["generation"],
-            "capability_version": authority["capability_version"],
-            "result": "APPLIED",
-            "activation_mode": authority["activation_mode"],
-            "safe_boundary": authority["safe_boundary"],
-        }
-        if any(ack[field] != value for field, value in expected.items()):
-            raise ValueError("activated ACK authority mismatch")
+            raise ValueError("candidate commit set mismatch")
 
 
 @pytest.mark.parametrize("name,relative", EVENT_SCHEMAS.items())
@@ -1051,6 +1039,94 @@ def test_changed_and_activated_events_cannot_encode_unsuccessful_outcome() -> No
     _validator(CONTROL_SCHEMA).validate(result)
 
 
+def test_config_activated_event_represents_candidate_and_rollback_authority_commits() -> None:
+    validator = _validator(EVENT_SCHEMAS["config.version_activated.v1"])
+    candidate_commit = _event_payload("config.version_activated.v1")
+    validator.validate(candidate_commit)
+    assert "component_acks" not in candidate_commit
+    _validate_event_semantics(_message("config.version_activated.v1", candidate_commit))
+
+    rollback_restore = deepcopy(candidate_commit)
+    rollback_restore.update(
+        {
+            "activation_kind": "ROLLBACK_RESTORE",
+            "previous_version": candidate_commit["active_version"],
+            "previous_checksum": candidate_commit["active_checksum"],
+            "active_version": "v1",
+            "active_checksum": CHECKSUM_B,
+            "rollback_cause_result_id": "config-result-rollback-0001",
+            "activation_sequence": candidate_commit["activation_sequence"] + 1,
+        }
+    )
+    validator.validate(rollback_restore)
+    rollback_message = _message("config.version_activated.v1", rollback_restore)
+    _validator("common/message-envelope.v1.schema.json").validate(rollback_message)
+    _validator(COMBINED_SCHEMA).validate(rollback_message)
+    _validate_event_semantics(rollback_message)
+
+    for field in ("component_acks", "candidate_effect", "rollback_effect"):
+        invalid = deepcopy(candidate_commit)
+        invalid[field] = {}
+        assert list(validator.iter_errors(invalid))
+    invalid = deepcopy(candidate_commit)
+    invalid["rollback_cause_result_id"] = "config-result-rollback-0001"
+    assert list(validator.iter_errors(invalid))
+    invalid = deepcopy(rollback_restore)
+    invalid["rollback_cause_result_id"] = None
+    assert list(validator.iter_errors(invalid))
+    for mutation in ("candidate_trigger", "rollback_trigger"):
+        invalid = deepcopy(
+            candidate_commit if mutation == "candidate_trigger" else rollback_restore
+        )
+        invalid["trigger_candidate_checksum"] = CHECKSUM_B
+        with pytest.raises(ValueError, match="authority binding"):
+            _validate_event_semantics(_message("config.version_activated.v1", invalid))
+
+
+def test_config_result_binds_candidate_and_rollback_authority_event_references() -> None:
+    result = _candidate_result(outcome="ROLLED_BACK")
+    _validator(CONTROL_SCHEMA).validate(result)
+    assert (
+        result["rollback_restore_activation_sequence"]
+        > result["candidate_commit_activation_sequence"]
+    )
+
+    missing_restore = deepcopy(result)
+    missing_restore["rollback_restore_message_id"] = None
+    missing_restore["rollback_restore_activation_sequence"] = None
+    assert list(_validator(CONTROL_SCHEMA).iter_errors(missing_restore))
+
+    forged_reference = _config_activation_event_refs(result)
+    forged_reference["ROLLBACK_RESTORE"]["active_checksum"] = CHECKSUM_A
+    with pytest.raises(ValueError, match="Event reference mismatch"):
+        validate_config_result(
+            result,
+            current_active={"version": "v1", "checksum": CHECKSUM_B},
+            activation_event_refs=forged_reference,
+        )
+
+
+def test_config_activation_workflow_orders_authority_events_around_component_effects() -> None:
+    semantic = _semantic()["config_activation"]
+    binding = semantic["activated_event_binding"]
+    assert binding["CANDIDATE_COMMIT"]["order"] == (
+        "after_prepare_before_swap_and_component_effect_ACKs"
+    )
+    assert binding["common"]["component_effect_fields"] == "forbidden"
+    assert (
+        semantic["result_outcome_matrix"]["APPLIED"]["additional_public_event_after_effects"]
+        == "forbidden"
+    )
+    assert binding["ROLLBACK_RESTORE"]["prerequisite"] == (
+        "complete_internal_rollback_effect_evidence"
+    )
+    partial = _candidate_result(outcome="PARTIAL")
+    unknown = _candidate_result(outcome="UNKNOWN")
+    for result in (partial, unknown):
+        assert result["rollback_restore_message_id"] is None
+        assert result["rollback_restore_activation_sequence"] is None
+
+
 CONFIG_RESULT_FIELDS = [
     "dto_type",
     "schema_version",
@@ -1068,6 +1144,10 @@ CONFIG_RESULT_FIELDS = [
     "active_checksum",
     "rollback_version",
     "rollback_checksum",
+    "candidate_commit_message_id",
+    "candidate_commit_activation_sequence",
+    "rollback_restore_message_id",
+    "rollback_restore_activation_sequence",
     "commit_state",
     "side_effect_state",
     "reconciliation_required",
@@ -1139,11 +1219,11 @@ def _candidate_result(*, outcome: str = "APPLIED") -> dict[str, Any]:
             "NONE",
         ),
         "PARTIAL": (
+            candidate["candidate_version"],
+            candidate["candidate_checksum"],
             None,
             None,
-            None,
-            None,
-            "NOT_COMMITTED",
+            "COMMITTED",
             "PARTIAL",
             True,
             True,
@@ -1203,6 +1283,18 @@ def _candidate_result(*, outcome: str = "APPLIED") -> dict[str, Any]:
         "active_checksum": active_checksum,
         "rollback_version": rollback_version,
         "rollback_checksum": rollback_checksum,
+        "candidate_commit_message_id": (
+            "config-candidate-event-0001"
+            if outcome in {"APPLIED", "PARTIAL", "ROLLED_BACK"}
+            else None
+        ),
+        "candidate_commit_activation_sequence": (
+            10 if outcome in {"APPLIED", "PARTIAL", "ROLLED_BACK"} else None
+        ),
+        "rollback_restore_message_id": (
+            "config-rollback-event-0001" if outcome == "ROLLED_BACK" else None
+        ),
+        "rollback_restore_activation_sequence": 11 if outcome == "ROLLED_BACK" else None,
         "commit_state": commit_state,
         "side_effect_state": side_effect_state,
         "reconciliation_required": reconciliation_required,
@@ -1227,11 +1319,45 @@ def _persisted_config_result(result: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _config_activation_event_refs(result: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    refs: dict[str, dict[str, Any]] = {}
+    if result["candidate_commit_message_id"] is not None:
+        refs["CANDIDATE_COMMIT"] = {
+            "message_id": result["candidate_commit_message_id"],
+            "activation_kind": "CANDIDATE_COMMIT",
+            "config_domain": result["config_domain"],
+            "trigger_candidate_version": result["candidate_version"],
+            "trigger_candidate_checksum": result["candidate_checksum"],
+            "previous_version": result["previous_active_version"],
+            "previous_checksum": result["previous_active_checksum"],
+            "active_version": result["candidate_version"],
+            "active_checksum": result["candidate_checksum"],
+            "rollback_cause_result_id": None,
+            "activation_sequence": result["candidate_commit_activation_sequence"],
+        }
+    if result["rollback_restore_message_id"] is not None:
+        refs["ROLLBACK_RESTORE"] = {
+            "message_id": result["rollback_restore_message_id"],
+            "activation_kind": "ROLLBACK_RESTORE",
+            "config_domain": result["config_domain"],
+            "trigger_candidate_version": result["candidate_version"],
+            "trigger_candidate_checksum": result["candidate_checksum"],
+            "previous_version": result["candidate_version"],
+            "previous_checksum": result["candidate_checksum"],
+            "active_version": result["previous_active_version"],
+            "active_checksum": result["previous_active_checksum"],
+            "rollback_cause_result_id": result["result_id"],
+            "activation_sequence": result["rollback_restore_activation_sequence"],
+        }
+    return refs
+
+
 def validate_config_result(
     result: dict[str, Any],
     *,
     current_active: dict[str, str | None],
     prior_result_fact: dict[str, Any] | None = None,
+    activation_event_refs: dict[str, dict[str, Any]] | None = None,
 ) -> str:
     _validator(CONTROL_SCHEMA).validate(result)
     if result["result_fingerprint"] != _fingerprint(result, CONFIG_RESULT_FIELDS):
@@ -1317,6 +1443,11 @@ def validate_config_result(
         }:
             raise ValueError("REJECTED cannot claim applied effect")
     elif result["outcome"] == "PARTIAL":
+        if (
+            result["active_version"] != result["candidate_version"]
+            or result["active_checksum"] != result["candidate_checksum"]
+        ):
+            raise ValueError("PARTIAL must retain committed candidate authority")
         if candidate_statuses == {"APPLIED"} or candidate_statuses <= {"NOT_ATTEMPTED", "REJECTED"}:
             raise ValueError("PARTIAL requires mixed or unknown effect evidence")
     elif result["outcome"] == "ROLLED_BACK":
@@ -1335,6 +1466,20 @@ def validate_config_result(
                 raise ValueError("applied component was not rolled back")
             if candidate_status != "APPLIED" and rollback_status != "NOT_REQUIRED":
                 raise ValueError("unapplied component must not claim rollback")
+        if (
+            result["rollback_restore_activation_sequence"]
+            <= result["candidate_commit_activation_sequence"]
+        ):
+            raise ValueError("rollback restore authority must follow candidate commit")
+    elif result["outcome"] == "UNKNOWN" and result["candidate_commit_message_id"] is not None:
+        if (
+            result["active_version"] != result["candidate_version"]
+            or result["active_checksum"] != result["candidate_checksum"]
+        ):
+            raise ValueError("UNKNOWN must retain the last known candidate authority")
+    expected_refs = _config_activation_event_refs(result)
+    if activation_event_refs != expected_refs:
+        raise ValueError("config result activation Event reference mismatch")
     return "ACCEPTED"
 
 
@@ -1445,14 +1590,15 @@ def test_candidate_hard_limit_currency_content_and_relaxation_fail_closed() -> N
             validate_candidate(candidate)
 
 
-def test_config_activated_event_binds_applied_ACKs_and_security_fields() -> None:
+def test_config_candidate_commit_binds_security_fields_without_component_effects() -> None:
     candidate = _candidate()
     payload = _event_payload("config.version_activated.v1")
     payload.update(
         {
             "config_domain": candidate["config_domain"],
-            "candidate_version": candidate["candidate_version"],
-            "candidate_checksum": candidate["candidate_checksum"],
+            "activation_kind": "CANDIDATE_COMMIT",
+            "trigger_candidate_version": candidate["candidate_version"],
+            "trigger_candidate_checksum": candidate["candidate_checksum"],
             "active_version": candidate["candidate_version"],
             "active_checksum": candidate["candidate_checksum"],
             "activation_mode": candidate["activation_mode"],
@@ -1461,32 +1607,17 @@ def test_config_activated_event_binds_applied_ACKs_and_security_fields() -> None
             "secret_references": candidate["secret_references"],
             "policy_version": candidate["policy_version"],
             "policy_checksum": candidate["policy_checksum"],
-            "component_acks": {
-                component: {
-                    "component_id": component,
-                    "candidate_version": candidate["candidate_version"],
-                    "candidate_checksum": candidate["candidate_checksum"],
-                    "generation": authority["generation"],
-                    "capability_version": authority["capability_version"],
-                    "result": "APPLIED",
-                    "activation_mode": authority["activation_mode"],
-                    "safe_boundary": authority["safe_boundary"],
-                    "observed_at": CONTROL_TIME,
-                    "ack_sequence": index + 1,
-                }
-                for index, (component, authority) in enumerate(
-                    candidate["component_authority"].items()
-                )
-            },
+            "rollback_cause_result_id": None,
         }
     )
     message = _message("config.version_activated.v1", payload)
     _validate_event_semantics(message)
     _validate_config_event_candidate_binding(payload, candidate)
-    for mutation in ("missing_ack", "wrong_checksum", "wrong_secret", "wrong_boundary"):
+    assert "component_acks" not in payload
+    for mutation in ("wrong_trigger", "wrong_checksum", "wrong_secret", "wrong_boundary"):
         invalid = deepcopy(payload)
-        if mutation == "missing_ack":
-            invalid["component_acks"].pop(next(iter(invalid["component_acks"])))
+        if mutation == "wrong_trigger":
+            invalid["trigger_candidate_checksum"] = CHECKSUM_B
         elif mutation == "wrong_checksum":
             invalid["active_checksum"] = CHECKSUM_B
         elif mutation == "wrong_secret":
@@ -1728,6 +1859,10 @@ def test_semantic_contract_defines_operation_specific_inputs() -> None:
         "expected_effect_ACK_set",
         "injected_time",
     ]
+    assert _semantic()["operations"]["ValidateConfigActivation"]["inputs"][-2:] == [
+        "optional_committed_activation_event_references",
+        "injected_time",
+    ]
 
 
 def test_round8_config_activation_result_rejects_impossible_outcome_shapes() -> None:
@@ -1916,6 +2051,41 @@ def test_round8_config_activation_result_complete_outcome_matrix(outcome: str) -
         validate_config_result(
             result,
             current_active={"version": "v1", "checksum": CHECKSUM_B},
+            activation_event_refs=_config_activation_event_refs(result),
+        )
+        == "ACCEPTED"
+    )
+
+
+def test_config_unknown_supports_commit_unknown_and_post_commit_reconciliation() -> None:
+    current = {"version": "v1", "checksum": CHECKSUM_B}
+    commit_unknown = _candidate_result(outcome="UNKNOWN")
+    assert (
+        validate_config_result(
+            commit_unknown,
+            current_active=current,
+            activation_event_refs={},
+        )
+        == "ACCEPTED"
+    )
+
+    post_commit_unknown = _candidate_result(outcome="UNKNOWN")
+    post_commit_unknown.update(
+        {
+            "active_version": post_commit_unknown["candidate_version"],
+            "active_checksum": post_commit_unknown["candidate_checksum"],
+            "candidate_commit_message_id": "config-candidate-event-0001",
+            "candidate_commit_activation_sequence": 10,
+        }
+    )
+    post_commit_unknown["result_fingerprint"] = _fingerprint(
+        post_commit_unknown, CONFIG_RESULT_FIELDS
+    )
+    assert (
+        validate_config_result(
+            post_commit_unknown,
+            current_active=current,
+            activation_event_refs=_config_activation_event_refs(post_commit_unknown),
         )
         == "ACCEPTED"
     )
@@ -1969,7 +2139,11 @@ def test_config_component_effect_contradictions_fail_closed() -> None:
     for result in cases:
         result["result_fingerprint"] = _fingerprint(result, CONFIG_RESULT_FIELDS)
         with pytest.raises((ValueError, ValidationError)):
-            validate_config_result(result, current_active=current)
+            validate_config_result(
+                result,
+                current_active=current,
+                activation_event_refs=_config_activation_event_refs(result),
+            )
 
     partial = _candidate_result(outcome="PARTIAL")
     partial.update(
@@ -1981,7 +2155,11 @@ def test_config_component_effect_contradictions_fail_closed() -> None:
     )
     partial["result_fingerprint"] = _fingerprint(partial, CONFIG_RESULT_FIELDS)
     with pytest.raises((ValueError, ValidationError)):
-        validate_config_result(partial, current_active=current)
+        validate_config_result(
+            partial,
+            current_active=current,
+            activation_event_refs=_config_activation_event_refs(partial),
+        )
 
 
 def test_round8_config_result_duplicate_conflict_unknown_and_rollback_authority() -> None:
@@ -2006,13 +2184,21 @@ def test_round8_config_result_duplicate_conflict_unknown_and_rollback_authority(
     unknown["reconciliation_required"] = False
     unknown["result_fingerprint"] = _fingerprint(unknown, CONFIG_RESULT_FIELDS)
     with pytest.raises((ValueError, ValidationError)):
-        validate_config_result(unknown, current_active=current)
+        validate_config_result(
+            unknown,
+            current_active=current,
+            activation_event_refs=_config_activation_event_refs(unknown),
+        )
     rolled_back = _candidate_result(outcome="ROLLED_BACK")
     rolled_back["active_version"] = rolled_back["candidate_version"]
     rolled_back["active_checksum"] = rolled_back["candidate_checksum"]
     rolled_back["result_fingerprint"] = _fingerprint(rolled_back, CONFIG_RESULT_FIELDS)
     with pytest.raises(ValueError, match="rollback target"):
-        validate_config_result(rolled_back, current_active=current)
+        validate_config_result(
+            rolled_back,
+            current_active=current,
+            activation_event_refs=_config_activation_event_refs(rolled_back),
+        )
 
 
 def test_non_root_event_requires_exact_accepted_message_reference() -> None:

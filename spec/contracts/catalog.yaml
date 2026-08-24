@@ -37,7 +37,7 @@ messages:
   - {name: system.mode_changed.v1, kind: event, publisher: TradingCore, consumers: [TradingComponents, Audit], schema: events/system.mode_changed.v1.schema.json, status: active}
   - {name: system.component_health_changed.v1, kind: event, publisher: HealthService, consumers: [ControlPlane, Alert, Audit], schema: events/system.component_health_changed.v1.schema.json, status: active}
   - {name: system.kill_switch_changed.v1, kind: event, publisher: ControlPlane, consumers: [Risk, OMS, Execution, Audit], schema: events/system.kill_switch_changed.v1.schema.json, status: active}
-  - {name: config.version_activated.v1, kind: event, publisher: ConfigService, consumers: [AffectedComponents, Audit], schema: events/config.version_activated.v1.schema.json, status: active}
+  - {name: config.version_activated.v1, kind: event, publisher: ConfigService, consumers: [AffectedComponents, Audit], schema: events/config.version_activated.v1.schema.json, status: active, semantics: ActiveVersion_authority_change_only, activation_kinds: [CANDIDATE_COMMIT, ROLLBACK_RESTORE]}
 rules:
   active_requires_schema: true
   published_name_reuse: forbidden

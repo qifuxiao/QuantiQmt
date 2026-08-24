@@ -40,7 +40,10 @@ The names below are descriptive logical contracts, not prescribed Python APIs:
   checksum and the committed `RecoveryBarrier`; it never returns an arbitrary
   caller-selected payload.
 - `VersionedConfigStorePort.read_active(domain)` and `read_result(identity)`
-  return the committed ActiveVersion/result selected by an exact key.
+  return the committed ActiveVersion/result selected by an exact key. Candidate
+  activation and successful rollback each append one strictly ordered
+  ActiveVersion change together with its `config.version_activated.v1` Outbox
+  fact in the same logical transaction.
 - `InboxPort.read_accepted(message_id)` returns an `AcceptedMessageRef` with
   message ID, correlation ID, occurred/accepted times and aggregate ordering
   fields. It does not replay the parent payload through the child validator.
@@ -73,8 +76,8 @@ to these operations:
 - `ValidateKillSwitchResult(result, committed command record, optional prior
   committed result, current scoped state, expected effect ACKs, injected time)`.
 - `ValidateConfigActivation(candidate/result, policy, component capabilities,
-  hard limits, current ActiveVersion, optional prior committed result, injected
-  time)`.
+  hard limits, current ActiveVersion, optional prior committed result, optional
+  committed activation Event references, injected time)`.
 
 Schema validation alone never authorizes persistence, publication, consumer
 apply, transition, barrier opening or an external side effect.
@@ -96,9 +99,14 @@ ingress and is not recursively repeated.
   Consumers treat equal/lower versions as duplicate/stale and defer, replay or
   fail visibly on a gap. A single wire schema validates range, not prior state.
 - `system.kill_switch_changed.v1`: committed APPLIED state change only.
-- `config.version_activated.v1`: only the atomic
-  `ActiveVersion + Event + Outbox` success fact. REJECTED, PARTIAL, ROLLED_BACK
-  and UNKNOWN remain internal results/audit facts.
+- `config.version_activated.v1`: an atomic `ActiveVersion + Event + Outbox`
+  authority change only. `CANDIDATE_COMMIT` records the candidate becoming
+  active after prepare and before component swap/ACK. `ROLLBACK_RESTORE`
+  records a fully evidenced restoration of the previous accepted version.
+  The payload contains no component effect evidence and consumers MUST NOT
+  infer component convergence from it. Outcomes remain internal result/audit
+  facts; the rollback Event is the real restored ActiveVersion transaction,
+  not a ROLLED_BACK outcome encoded as a public Event.
 
 Control-owned timestamps are canonical UTC `Z` with at most six fractional
 digits. Shared MessageEnvelope RFC 3339 compatibility remains unchanged.
@@ -151,19 +159,36 @@ effects require PREPARED.
 ACK keys equal required components. Result identity is
 `(CONFIG_ACTIVATION, domain, candidate version, idempotency key)`:
 
-- APPLIED: candidate ActiveVersion/Event/Outbox committed; every candidate
-  effect APPLIED; rollback NOT_REQUIRED; no safe scope or reconciliation.
+- APPLIED: the candidate-commit Event reference exists; every candidate effect
+  is APPLIED; rollback is NOT_REQUIRED; no second Event is emitted after ACK;
+  no safe scope or reconciliation.
 - REJECTED: no new ActiveVersion and only known NOT_ATTEMPTED/REJECTED candidate effects; rollback
   NOT_REQUIRED; no reconciliation.
-- PARTIAL: no second ActiveVersion; mixed/partial/unknown effects; enter SAFE
-  scope and reconcile the same identity.
+- PARTIAL: candidate commit remains the ActiveVersion authority, no restore
+  transaction is claimed, effects are mixed/partial/unknown, and the operation
+  enters SAFE scope and reconciles the same identity.
 - ROLLED_BACK: current/rollback target equals the previous committed
   ActiveVersion. Every component that applied the candidate has an APPLIED
-  rollback to that target; other components use NOT_REQUIRED. Only then is the
-  side effect COMPLETE and reconciliation false.
-- UNKNOWN: commit/effect remains uncertain, no new active-authority claim,
-  enter SAFE scope and reconcile the same identity. All component candidate
-  effects may be APPLIED while the database commit remains UNKNOWN.
+  rollback to that target; other components use NOT_REQUIRED. Only after those
+  effects does a second, strictly ordered `ROLLBACK_RESTORE` ActiveVersion/Event/
+  Outbox transaction commit. The result binds both Event message IDs/sequences;
+  only then is the side effect COMPLETE and reconciliation false.
+- UNKNOWN: a relevant commit/effect remains uncertain, no unverified restored
+  ActiveVersion is claimed, no rollback-restore Event is claimed, and the
+  operation enters SAFE scope and reconciles the same identity. When candidate
+  commit itself is unknown there is no Event reference or active claim; after a
+  known candidate commit the Event reference and candidate ActiveVersion remain
+  visible while later effect/restore status is unknown. All component candidate
+  effects may be APPLIED while the candidate database commit remains UNKNOWN.
+
+Candidate commit timeline: prepare succeeds; atomically commit candidate
+ActiveVersion + `CANDIDATE_COMMIT` Event + Outbox; then swap immutable snapshots
+and collect internal effects. Successful rollback timeline: enter SAFE, collect
+complete rollback effects to one previous accepted version/checksum; atomically
+commit restored ActiveVersion + `ROLLBACK_RESTORE` Event + Outbox at the next
+activation sequence; then persist/return ROLLED_BACK. Incomplete or uncertain
+rollback publishes no restore Event and remains PARTIAL/UNKNOWN with same-key
+reconciliation.
 
 Exact prior result replay returns DUPLICATE before mutable ActiveVersion lookup;
 same identity with different canonical content is `QQ-STORAGE-7001`.

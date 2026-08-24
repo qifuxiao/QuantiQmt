@@ -2,7 +2,7 @@ contract:
   id: CONTRACT-CONTROL-SEMANTIC-VALIDATION-V1
   version: 1
   status: draft
-  authority: [PORTS-CONTROL, PORTS-CORE, STORAGE-SOT, WF-RECOVERY, SM-SYSTEM-MODE]
+  authority: [PORTS-CONTROL, PORTS-CORE, STORAGE-SOT, WF-RECOVERY, WF-CONFIG-ACTIVATION, SM-SYSTEM-MODE]
   purpose: freeze_control_boundary_inputs_preconditions_postconditions_and_decisions_not_runtime_or_storage_design
   decisions: [ACCEPTED, DUPLICATE, REJECTED, CONFLICT]
   fail_closed: true
@@ -42,8 +42,8 @@ operations:
     inputs: [result, committed_command_record, optional_prior_committed_result_record, current_scoped_state, expected_effect_ACK_set, injected_time]
     order: [dto_schema, canonical_result_fingerprint, result_command_scope_binding, exact_committed_command_identity_and_stored_integrity, exact_prior_result_identity_and_stored_integrity, duplicate_or_conflict, current_scoped_state, outcome_version_and_effect, decision]
   ValidateConfigActivation:
-    inputs: [candidate_or_result, accepted_policy, component_capabilities, hard_limit_policy, current_ActiveVersion, optional_prior_committed_result_record, injected_time]
-    order: [dto_schema, exact_number_and_time_ingress, canonical_candidate_or_result_fingerprint, accepted_policy_and_hard_limits, component_phase_effect_binding, exact_prior_result_identity_and_stored_integrity, duplicate_or_conflict, outcome_matrix, decision]
+    inputs: [candidate_or_result, accepted_policy, component_capabilities, hard_limit_policy, current_ActiveVersion, optional_prior_committed_result_record, optional_committed_activation_event_references, injected_time]
+    order: [dto_schema, exact_number_and_time_ingress, canonical_candidate_or_result_fingerprint, accepted_policy_and_hard_limits, component_phase_effect_binding, exact_prior_result_identity_and_stored_integrity, duplicate_or_conflict, outcome_and_authority_event_matrix, decision]
 
 canonicalization:
   algorithm: RFC8785_JCS
@@ -123,7 +123,7 @@ config_activation:
   result_identity: [CONFIG_ACTIVATION, config_domain, candidate_version, idempotency_key]
   canonical_result_fingerprint:
     excludes: [result_fingerprint]
-    covers: [dto_type, schema_version, result_id, idempotency_key, config_domain, candidate_version, candidate_checksum, required_components, outcome, component_acks, previous_active_version, previous_active_checksum, active_version, active_checksum, rollback_version, rollback_checksum, commit_state, side_effect_state, reconciliation_required, safe_scope_required, safe_scope_action]
+    covers: [dto_type, schema_version, result_id, idempotency_key, config_domain, candidate_version, candidate_checksum, required_components, outcome, component_acks, previous_active_version, previous_active_checksum, active_version, active_checksum, rollback_version, rollback_checksum, candidate_commit_message_id, candidate_commit_activation_sequence, rollback_restore_message_id, rollback_restore_activation_sequence, commit_state, side_effect_state, reconciliation_required, safe_scope_required, safe_scope_action]
   duplicate: exact_prior_committed_record_same_identity_and_content_before_mutable_ActiveVersion
   conflict: same_identity_different_content_QQ_STORAGE_7001
   candidate_checksum:
@@ -146,29 +146,42 @@ config_activation:
     rollback_target: previous_ActiveVersion_version_and_checksum_when_required
   result_outcome_matrix:
     APPLIED:
-      requires: [commit_COMMITTED, active_equals_candidate, every_candidate_effect_APPLIED_to_candidate, every_rollback_effect_NOT_REQUIRED, side_effect_COMPLETE, no_reconciliation, no_safe_scope]
-      public_event: config.version_activated.v1_in_same_transaction
+      requires: [candidate_commit_COMMITTED, candidate_commit_event_reference, active_equals_candidate, every_candidate_effect_APPLIED_to_candidate, every_rollback_effect_NOT_REQUIRED, side_effect_COMPLETE, no_reconciliation, no_safe_scope]
+      additional_public_event_after_effects: forbidden
     REJECTED:
-      requires: [commit_NOT_COMMITTED, no_active_claim, candidate_effects_known_NOT_ATTEMPTED_or_REJECTED, every_rollback_effect_NOT_REQUIRED, side_effect_NONE, no_reconciliation, no_safe_scope]
+      requires: [candidate_commit_NOT_COMMITTED, no_activation_event_reference, no_active_claim, candidate_effects_known_NOT_ATTEMPTED_or_REJECTED, every_rollback_effect_NOT_REQUIRED, side_effect_NONE, no_reconciliation, no_safe_scope]
     PARTIAL:
-      requires: [commit_NOT_COMMITTED, no_active_claim, mixed_partial_or_UNKNOWN_candidate_effect, side_effect_PARTIAL, reconciliation_same_identity, safe_scope_ENTER_SAFE_MODE]
+      requires: [candidate_commit_COMMITTED, candidate_commit_event_reference, active_remains_candidate, no_rollback_restore_event_reference, mixed_partial_or_UNKNOWN_candidate_effect, side_effect_PARTIAL, reconciliation_same_identity, safe_scope_ENTER_SAFE_MODE]
       second_ActiveVersion_authority: forbidden
     ROLLED_BACK:
-      requires: [commit_COMMITTED, active_and_rollback_equal_previous_ActiveVersion, no_UNKNOWN_effect, every_candidate_APPLIED_component_has_rollback_APPLIED_to_previous, every_not_APPLIED_component_rollback_NOT_REQUIRED, side_effect_COMPLETE, no_reconciliation, no_safe_scope]
-      public_activated_event: forbidden
+      requires: [candidate_commit_event_reference, rollback_restore_COMMITTED, rollback_restore_event_reference, rollback_sequence_strictly_after_candidate_sequence, active_and_rollback_equal_previous_accepted_ActiveVersion, no_UNKNOWN_effect, every_candidate_APPLIED_component_has_rollback_APPLIED_to_previous, every_not_APPLIED_component_rollback_NOT_REQUIRED, side_effect_COMPLETE, no_reconciliation, no_safe_scope]
+      result_persistence_order: after_rollback_restore_authority_event_commit
     UNKNOWN:
-      requires: [commit_UNKNOWN, no_new_active_claim, side_effect_UNKNOWN, reconciliation_same_identity, safe_scope_ENTER_SAFE_MODE]
+      requires: [relevant_authority_commit_UNKNOWN, no_rollback_restore_event_reference, no_unverified_restored_active_claim, side_effect_UNKNOWN, reconciliation_same_identity, safe_scope_ENTER_SAFE_MODE]
+      candidate_commit_unknown: [no_candidate_commit_event_reference, no_active_claim]
+      post_candidate_commit_unknown: [candidate_commit_event_reference, active_remains_candidate]
       all_candidate_effects_APPLIED_with_unknown_database_commit: valid
       changed_idempotency_key_retry: forbidden
   activated_event_binding:
-    exact_candidate_fields: [config_domain, candidate_version, candidate_checksum, activation_mode, safe_boundary, policy_version, policy_checksum]
-    exact_candidate_sets: [secret_references, required_components]
-    active_version_equals_candidate_version: true
-    active_checksum_equals_candidate_checksum: true
-    component_ACKs_equal_complete_applied_result: true
-  commit:
-    atomic: [ActiveVersion, config.version_activated.v1, Outbox]
-    unsuccessful_results: internal_CONFIG_ACTIVATION_RESULT_and_audit_only
+    represents: ActiveVersion_authority_change_only
+    does_not_represent: [component_prepare, component_swap, component_APPLIED, convergence, rollback_completion_without_restore_commit]
+    common:
+      active_fields: post_transaction_ActiveVersion
+      previous_fields: pre_transaction_ActiveVersion
+      trigger_candidate_fields: candidate_that_started_the_activation_attempt
+      configuration_metadata: post_transaction_active_snapshot
+      component_effect_fields: forbidden
+    CANDIDATE_COMMIT:
+      atomic: [ActiveVersion_candidate, config.version_activated.v1, Outbox]
+      order: after_prepare_before_swap_and_component_effect_ACKs
+      binding: [trigger_candidate_equals_active, rollback_cause_result_id_is_null]
+    ROLLBACK_RESTORE:
+      prerequisite: complete_internal_rollback_effect_evidence
+      atomic: [ActiveVersion_previous_accepted, config.version_activated.v1, Outbox]
+      binding: [trigger_candidate_equals_previous_failed_candidate, active_equals_restored_previous_accepted, rollback_cause_result_id_required, activation_sequence_strictly_increases]
+      forbidden_when: [rollback_incomplete, rollback_effect_UNKNOWN, restore_commit_UNKNOWN]
+    consumer_inference_all_components_APPLIED: forbidden
+  unsuccessful_results: internal_CONFIG_ACTIVATION_RESULT_and_audit_only_except_successful_rollback_restore_is_a_real_ActiveVersion_event
 
 control_journal:
   authority: PostgreSQL_control_journal_via_controlled_logical_Port
