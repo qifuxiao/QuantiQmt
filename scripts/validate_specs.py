@@ -429,9 +429,13 @@ def completion_evidence_is_trusted(delivery: dict[str, Any]) -> bool:
 
 
 def bootstrap_allows_dependency(
-    dependency: str, beneficiary: str, waivers: list[dict[str, Any]]
+    dependency: str,
+    beneficiary: str,
+    waivers: list[dict[str, Any]],
+    *,
+    today: date | None = None,
 ) -> bool:
-    today = date.today()
+    evaluation_date = today or date.today()
     for waiver in waivers:
         try:
             expires = date.fromisoformat(str(waiver.get("expires_on")))
@@ -449,7 +453,7 @@ def bootstrap_allows_dependency(
             and isinstance(waiver.get("reason"), str)
             and bool(waiver["reason"].strip())
             and waiver.get("owner") == "qfxyyy"
-            and expires >= today
+            and expires >= evaluation_date
             and waiver.get("remediation_task") == "TASK-031"
             and waiver.get("release_status") == "prohibited"
         ):
@@ -522,7 +526,8 @@ def validate_manifest(errors: list[str]) -> dict[str, Path]:
     return entries
 
 
-def validate_tasks(specs: dict[str, Path], errors: list[str]) -> None:
+def validate_tasks(specs: dict[str, Path], errors: list[str], *, today: date | None = None) -> None:
+    evaluation_date = today or date.today()
     tasks: dict[str, dict[str, Any]] = {}
     task_paths: dict[str, Path] = {}
     waiver_document = load_yaml(TASK_ROOT / "governance-waivers.yaml")
@@ -594,6 +599,7 @@ def validate_tasks(specs: dict[str, Path], errors: list[str]) -> None:
             waivers,
             set(tasks),
             waiver_errors,
+            today=evaluation_date,
             task_statuses={task_id: str(task.get("status")) for task_id, task in tasks.items()},
         )
         errors.extend(waiver_errors)
@@ -636,7 +642,10 @@ def validate_tasks(specs: dict[str, Path], errors: list[str]) -> None:
                 or (
                     not delivery_is_unlockable(dependency_task)
                     and not bootstrap_allows_dependency(
-                        dependency, task_id, trusted_bootstrap_waivers
+                        dependency,
+                        task_id,
+                        trusted_bootstrap_waivers,
+                        today=evaluation_date,
                     )
                 )
             ):

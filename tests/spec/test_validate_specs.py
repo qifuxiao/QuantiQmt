@@ -19,7 +19,14 @@ from scripts.validate_specs import (
 
 import quantiqmt
 
-TASK047_FIXTURE_ROOT = ROOT / "tests" / ".task047-index-fixture"
+
+@pytest.fixture
+def isolated_task_root(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
+    task_root = tmp_path / "tasks"
+    task_root.mkdir()
+    monkeypatch.setattr(validator, "ROOT", tmp_path)
+    monkeypatch.setattr(validator, "TASK_ROOT", task_root)
+    return task_root
 
 
 def indexed_task_path(task_id: str, *, root: Path = ROOT) -> Path:
@@ -40,9 +47,9 @@ def indexed_task_path(task_id: str, *, root: Path = ROOT) -> Path:
 
 
 def write_task047_index_fixture(
-    entries: list[dict[str, str]], *, task_id: str | None = None
+    root: Path, entries: list[dict[str, str]], *, task_id: str | None = None
 ) -> Path | None:
-    task_root = TASK047_FIXTURE_ROOT / "tasks"
+    task_root = root / "tasks"
     task_root.mkdir(parents=True)
     task_path = None
     if task_id is not None:
@@ -53,19 +60,6 @@ def write_task047_index_fixture(
         yaml.safe_dump({"tasks": entries}, sort_keys=False), encoding="utf-8"
     )
     return task_path
-
-
-def remove_task047_index_fixture() -> None:
-    task_root = TASK047_FIXTURE_ROOT / "tasks"
-    task_path = task_root / "active" / "TASK-017.md"
-    task_path.unlink(missing_ok=True)
-    if task_path.parent.is_dir():
-        task_path.parent.rmdir()
-    (task_root / "index.yaml").unlink(missing_ok=True)
-    if task_root.is_dir():
-        task_root.rmdir()
-    if TASK047_FIXTURE_ROOT.is_dir():
-        TASK047_FIXTURE_ROOT.rmdir()
 
 
 def test_package_is_importable() -> None:
@@ -146,17 +140,54 @@ def test_only_bootstrap_waiver_allows_task031_dependency() -> None:
         "release_status": "prohibited",
         "lifecycle_status": "active",
     }
-    assert bootstrap_allows_dependency("TASK-014", "TASK-031", [waiver])
-    assert not bootstrap_allows_dependency("TASK-014", "TASK-005", [waiver])
-    assert not bootstrap_allows_dependency("TASK-016", "TASK-031", [waiver])
+    before_expiry = validator.date.fromisoformat("2026-08-06")
+    assert bootstrap_allows_dependency("TASK-014", "TASK-031", [waiver], today=before_expiry)
+    assert not bootstrap_allows_dependency("TASK-014", "TASK-005", [waiver], today=before_expiry)
+    assert not bootstrap_allows_dependency("TASK-016", "TASK-031", [waiver], today=before_expiry)
     assert not bootstrap_allows_dependency(
-        "TASK-014", "TASK-031", [{**waiver, "lifecycle_status": "retired"}]
+        "TASK-014",
+        "TASK-031",
+        [{**waiver, "lifecycle_status": "retired"}],
+        today=before_expiry,
     )
     assert not bootstrap_allows_dependency(
-        "TASK-014", "TASK-031", [{**waiver, "lifecycle_status": "expired"}]
+        "TASK-014",
+        "TASK-031",
+        [{**waiver, "lifecycle_status": "expired"}],
+        today=before_expiry,
     )
     expired = {**waiver, "expires_on": "2020-01-01"}
-    assert not bootstrap_allows_dependency("TASK-014", "TASK-031", [expired])
+    assert not bootstrap_allows_dependency("TASK-014", "TASK-031", [expired], today=before_expiry)
+
+
+@pytest.mark.parametrize(
+    "today,allowed",
+    [("2026-08-13", True), ("2026-08-14", False)],
+)
+def test_bootstrap_dependency_expiry_boundary(today: str, allowed: bool) -> None:
+    waiver = {
+        "task_id": "TASK-014",
+        "beneficiary_task": "TASK-031",
+        "kind": "bootstrap_exception",
+        "one_time": True,
+        "deny_business_unlock": True,
+        "rule": "bootstrap",
+        "reason": "recovery",
+        "owner": "qfxyyy",
+        "expires_on": "2026-08-13",
+        "remediation_task": "TASK-031",
+        "release_status": "prohibited",
+        "lifecycle_status": "active",
+    }
+    assert (
+        bootstrap_allows_dependency(
+            "TASK-014",
+            "TASK-031",
+            [waiver],
+            today=validator.date.fromisoformat(today),
+        )
+        is allowed
+    )
 
 
 def test_reported_unverified_or_missing_delivery_cannot_unlock() -> None:
@@ -192,28 +223,24 @@ def test_l4_queue_uses_task046_successor_without_rewriting_task029_gate() -> Non
     assert "TASK-046" not in task029["depends_on"]
 
 
-def test_indexed_task_path_supports_active_successor() -> None:
+def test_indexed_task_path_supports_active_successor(tmp_path: Path) -> None:
     entry = {"id": "TASK-017", "path": "active/TASK-017.md", "status": "active"}
-    try:
-        active_task = write_task047_index_fixture([entry], task_id="TASK-017")
-        assert indexed_task_path("TASK-017", root=TASK047_FIXTURE_ROOT) == active_task
-    finally:
-        remove_task047_index_fixture()
+    fixture_root = tmp_path / "task047-index-fixture"
+    active_task = write_task047_index_fixture(fixture_root, [entry], task_id="TASK-017")
+    assert indexed_task_path("TASK-017", root=fixture_root) == active_task
 
 
 @pytest.mark.parametrize("case", ["missing", "duplicate", "missing_file", "wrong_id"])
-def test_indexed_task_path_fails_closed(case: str) -> None:
+def test_indexed_task_path_fails_closed(case: str, tmp_path: Path) -> None:
     entry = {"id": "TASK-017", "path": "active/TASK-017.md", "status": "active"}
     entries = [] if case == "missing" else [entry]
     if case == "duplicate":
         entries.append(entry.copy())
     fixture_task_id = "TASK-018" if case == "wrong_id" else None
-    try:
-        write_task047_index_fixture(entries, task_id=fixture_task_id)
-        with pytest.raises(AssertionError):
-            indexed_task_path("TASK-017", root=TASK047_FIXTURE_ROOT)
-    finally:
-        remove_task047_index_fixture()
+    fixture_root = tmp_path / "task047-index-fixture"
+    write_task047_index_fixture(fixture_root, entries, task_id=fixture_task_id)
+    with pytest.raises(AssertionError):
+        indexed_task_path("TASK-017", root=fixture_root)
 
 
 def test_l4_successor_policy_rejects_historical_and_risk_substitution_edges() -> None:
@@ -242,10 +269,9 @@ def test_l4_successor_policy_rejects_historical_and_risk_substitution_edges() ->
     ],
 )
 def test_task046_successor_gate_requires_trusted_completed_delivery(
-    monkeypatch, successor_state, activation_allowed
+    monkeypatch, isolated_task_root, successor_state, activation_allowed
 ) -> None:
-    fixture_root = ROOT / "tasks" / ".validator-fixture"
-    fixture_root.mkdir(exist_ok=True)
+    fixture_root = isolated_task_root
     successor = fixture_root / "TASK-046.md"
     dependent = fixture_root / "TASK-017.md"
     trusted_evidence = (
@@ -407,9 +433,10 @@ def test_task046_successor_gate_requires_trusted_completed_delivery(
         ),
     ],
 )
-def test_validate_tasks_dependency_gate(monkeypatch, delivery, allowed, bootstrap, ids) -> None:
-    fixture_root = ROOT / "tasks" / ".validator-fixture"
-    fixture_root.mkdir(exist_ok=True)
+def test_validate_tasks_dependency_gate(
+    monkeypatch, isolated_task_root, delivery, allowed, bootstrap, ids
+) -> None:
+    fixture_root = isolated_task_root
     dependency_id, active_id = ids
     dependency = fixture_root / f"{dependency_id}.md"
     active = fixture_root / f"{active_id}.md"
@@ -496,7 +523,7 @@ def test_validate_tasks_dependency_gate(monkeypatch, delivery, allowed, bootstra
 
     monkeypatch.setattr(validator, "load_yaml", fake_load_yaml)
     errors: list[str] = []
-    validate_tasks({}, errors)
+    validate_tasks({}, errors, today=validator.date.fromisoformat("2026-08-06"))
     assert (not any("trusted completed delivery" in error for error in errors)) is allowed
     dependency.unlink(missing_ok=True)
     active.unlink(missing_ok=True)
@@ -521,10 +548,9 @@ def test_validate_tasks_dependency_gate(monkeypatch, delivery, allowed, bootstra
     ],
 )
 def test_validate_tasks_rejects_non_governance_completed_delivery(
-    monkeypatch, delivery_block
+    monkeypatch, isolated_task_root, delivery_block
 ) -> None:
-    fixture_root = ROOT / "tasks" / ".validator-fixture"
-    fixture_root.mkdir(exist_ok=True)
+    fixture_root = isolated_task_root
     completed = fixture_root / "TASK-100.md"
     active = fixture_root / "TASK-101.md"
     try:
@@ -669,9 +695,8 @@ def test_completed_bootstrap_remediation_requires_retirement() -> None:
     assert any("completed remediation requires retired" in error for error in errors)
 
 
-def test_ready_dependency_cannot_unlock_active_task(monkeypatch) -> None:
-    fixture_root = ROOT / "tasks" / ".validator-fixture"
-    fixture_root.mkdir(exist_ok=True)
+def test_ready_dependency_cannot_unlock_active_task(monkeypatch, isolated_task_root) -> None:
+    fixture_root = isolated_task_root
     ready = fixture_root / "TASK-100.md"
     active = fixture_root / "TASK-101.md"
     try:
@@ -718,10 +743,9 @@ def test_ready_dependency_cannot_unlock_active_task(monkeypatch) -> None:
 
 @pytest.mark.parametrize("variant", ["expired", "duplicate", "wrong_beneficiary", "retired"])
 def test_invalid_or_terminal_bootstrap_cannot_unlock_via_validate_tasks(
-    monkeypatch, variant
+    monkeypatch, isolated_task_root, variant
 ) -> None:
-    fixture_root = ROOT / "tasks" / ".validator-fixture"
-    fixture_root.mkdir(exist_ok=True)
+    fixture_root = isolated_task_root
     dependency = fixture_root / "TASK-014.md"
     active = fixture_root / "TASK-031.md"
     waiver = {
@@ -790,7 +814,7 @@ def test_invalid_or_terminal_bootstrap_cannot_unlock_via_validate_tasks(
 
         monkeypatch.setattr(validator, "load_yaml", fake_load_yaml)
         errors: list[str] = []
-        validate_tasks({}, errors)
+        validate_tasks({}, errors, today=validator.date.fromisoformat("2026-08-06"))
         assert any(
             "TASK-031: dependency TASK-014 lacks trusted completed delivery" in error
             for error in errors
