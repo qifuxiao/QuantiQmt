@@ -16,15 +16,15 @@ implementation_contract:
     - package and load the reviewed immutable manifest-indexed control schema bundle
     - implement equivalent typed validation for Control Event, RecoveryPassed, Kill Switch Command, Kill Switch Result and Config Activation boundaries without changing their frozen input facts, order or decisions
     - direct schema-only probes never authorize persist/publish/apply/transition/recovery/side effects
-    - validate all four public Events as canonical MessageEnvelopeV1 plus the Control refinement and typed payload, including exact source/type/version/time/idempotency/aggregate binding and typed root/non-root lineage
-    - use PostgreSQL control_journal as System Mode/Kill Switch authority and component memory only as cache; duplicate decisions use one schema-valid exact-identity ACCEPTED persisted command/result fact and reject untrusted query returns fail-closed
+    - validate all four public Events as canonical MessageEnvelopeV1 plus the Control refinement and typed payload, including exact source/type/version/time/idempotency/aggregate binding and minimal AcceptedMessageRef root/non-root lineage
+    - use PostgreSQL control_journal as System Mode/Kill Switch authority and component memory only as cache; duplicate decisions use one exact-identity committed Port record and verify its stored-content integrity
     - implement expected-version CAS, stable same-identity replay, QQ-STORAGE-7001 content conflict, and same-identity reconciliation after uncertain commit
-    - load immutable typed config-component, hard-limit and RecoveryBarrierAuthorityFact inputs and verify exact scope/checksum/version/generation/policy/authorization/lease/fence/six-gate/freshness bindings fail-closed
+    - load immutable config-component and hard-limit inputs plus the exact committed RecoveryBarrierReadPort snapshot and verify scope/reference/checksum/version/generation/lease/fence/complete-evidence/freshness bindings fail-closed
     - implement redacted correlation-chain logs/traces, bounded metrics and P0/P1/P2 alert runbooks
-    - implement atomic config ActiveVersion + config.version_activated.v1 + Outbox plus the exhaustive APPLIED/REJECTED/PARTIAL/ROLLED_BACK/UNKNOWN internal result matrix, stable result identity and same-identity reconciliation
+    - implement atomic config ActiveVersion + config.version_activated.v1 + Outbox plus the exhaustive per-component prepare/candidate-effect/rollback-effect APPLIED/REJECTED/PARTIAL/ROLLED_BACK/UNKNOWN internal result matrix, safe-scope, stable result identity and same-identity reconciliation
     - implement scoped Kill Switch CommandBus, lease/fencing and recovery-barrier gates within the NFR latency budget without mutating OMS state
     - restore latest valid System Mode and Kill Switch per scope from control_journal before opening the recovery barrier
-    - raise a separate storage spec-change task before defining any missing Control Journal repository/table contract
+    - verify trusted Port provenance, PostgreSQL transaction/CAS/unique-key behavior and uncertain-commit reconciliation in integration tests; raise a separate storage spec-change task before defining any missing Control Journal repository/table contract
     - order component-health transitions by state_version while generation remains instance fencing only
   failure_paths: [stale_fencing_reject, partial_activation_rollback, unknown_command_reconcile, untrusted_persisted_fact_reject, incomplete_barrier_closed, high_cardinality_record_reject, envelope_payload_mismatch, lineage_mismatch, sensitive_field_reject]
   verification:

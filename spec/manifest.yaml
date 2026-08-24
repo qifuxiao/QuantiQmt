@@ -193,15 +193,15 @@ catalogs:
 
 change:
   id: SPEC-0.11.0-OBSERVABILITY-CONTROL-CONTRACTS
-  compatibility: additive_operation_specific_internal_authority_facts_and_first_freeze_correction_for_pre_release_control_V1_events; canonical_MessageEnvelopeV1_unchanged; release_prohibited_until_independent_review_and_runtime_owner_delivery
+  compatibility: calibrated_logical_Port_authority_and_first_freeze_correction_for_pre_release_control_V1_events; canonical_MessageEnvelopeV1_unchanged; release_prohibited_until_independent_review_and_runtime_owner_delivery
   previous_version: 0.10.0
   public_message_schema_changes: "first-freeze correction for four previously planned and unreleased Control V1 events: component health adds independent strictly increasing state_version while generation remains instance fencing; complete envelope/lineage/identity bindings and required condition fixtures are frozen; no previously active public schema changes"
   storage_schema_changes: "references existing STORAGE-SOT PostgreSQL control_journal authority and recovery order only; no database object or migration is created; any physical storage contract requires an independent spec-change task"
   error_catalog_change: none
   runtime_code_change: "none in TASK-022; TASK-025 remains blocked and owns future ControlPlane/Observability runtime implementation only after TASK-022 trusted completion"
   review_change: none
-  contract_change: "adds small immutable RecoveryBarrier, parent lineage and persisted operation authority facts; freezes exhaustive ConfigActivationResult outcomes, component health state_version and per-operation trust boundaries without history/registry/storage layout; shared MessageEnvelopeV1 remains unchanged"
-  semantic_validation_change: "machine-checks complete Event envelope and lineage bindings, exact persisted fact identity/fingerprint/decision before duplicate, shared RecoveryPassed/OFF barrier authority, exhaustive config outcomes and distinct alert-definition/runtime metric label allowlists"
+  contract_change: "freezes untrusted wire validation and controlled logical Port pre/postconditions without recursive self-authenticating facts; ConfigActivationResult adds finite per-component prepare/candidate/rollback effects and safe-scope semantics; shared MessageEnvelopeV1 remains unchanged"
+  semantic_validation_change: "binds Event envelopes to payload facts and minimal AcceptedMessageRef lineage, verifies exact committed-record identity/content integrity before duplicate, shares one RecoveryBarrierReadPort snapshot rule for RecoveryPassed/OFF, and checks the exhaustive config phase/effect matrix"
   internal_contracts_added: [CONTRACT-CONTROL-PLANE-V1, CONTRACT-CONTROL-SEMANTIC-VALIDATION-V1, CONTRACT-CONTROL-COMBINED-MESSAGE-V1, PORTS-CONTROL, WF-CONTROL-PLANE]
   public_contracts_added: [system.mode_changed.v1, system.component_health_changed.v1, system.kill_switch_changed.v1, config.version_activated.v1]
   task_queue_change: "TASK-022 remains active/draft/in-progress pending independent Review; TASK-025 remains blocked and constrained to the frozen contracts; no other task changes state"

@@ -15,14 +15,23 @@ workflow:
   result_contract:
     identity: [CONFIG_ACTIVATION, config_domain, candidate_version, idempotency_key]
     canonical_result_fingerprint: required
+    prior_result_source: exact_committed_VersionedConfigStorePort_record
     exact_duplicate: return_persisted_result_before_mutable_active_state
     same_identity_different_content: QQ-STORAGE-7001
+    component_evidence:
+      exact_key_set: required_components
+      binds: [component_id, generation, capability_version, activation_mode, safe_boundary]
+      prepare: [PREPARED, REJECTED, UNKNOWN]
+      candidate_effect: [NOT_ATTEMPTED, APPLIED, REJECTED, UNKNOWN]
+      rollback_effect: [NOT_REQUIRED, APPLIED, REJECTED, UNKNOWN]
     outcomes:
-      APPLIED: candidate_is_committed_active_version_complete_APPLIED_ACKs
-      REJECTED: no_new_active_authority_no_side_effect_claim
-      PARTIAL: fail_closed_no_second_active_authority_reconcile_same_identity
-      ROLLED_BACK: verified_rollback_authority_is_current_active_version
-      UNKNOWN: no_active_claim_query_same_identity_never_change_key
+      APPLIED: committed_candidate_active_all_candidate_effects_APPLIED_rollback_NOT_REQUIRED
+      REJECTED: no_new_active_no_candidate_APPLIED_rollback_NOT_REQUIRED
+      PARTIAL: no_second_active_fail_closed_ENTER_SAFE_MODE_reconcile_same_identity
+      ROLLED_BACK: previous_ActiveVersion_restored_and_every_applied_component_rolled_back_to_it
+      UNKNOWN: no_new_active_claim_ENTER_SAFE_MODE_query_same_identity_never_change_key_all_candidate_APPLIED_still_allowed_when_commit_unknown
+    checksum_role: stored_content_integrity_not_source_authenticity
+    source_authenticity: VersionedConfigStorePort_and_transaction_integration
   risk_rule_set:
     schema: CONTRACT-RISK-RULE-SET-V1
     hard_limit_source: accepted_immutable_system_hard_limit_policy

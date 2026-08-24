@@ -30,6 +30,13 @@ delivery:
 - 不修改交易状态机以绕过控制。
 - 不定义 Control Journal 的 Repository、表、内存历史、快照、容量、保留或压缩实现。
 
+## Calibrated trust boundary
+
+- Message/Event/Command/Result wire DTOs are untrusted and require structural, enum, precision, time, scope, identity and integrity validation.
+- Immutable domain objects, controlled Port return values and opaque references are operation inputs; they are not recursively self-authenticating JSON facts and need not all be public schemas.
+- `control_journal`, `versioned_config_store`, Inbox and Outbox are logical trust anchors. Their source authenticity comes from controlled adapters, committed PostgreSQL transactions, exact query keys, CAS/unique constraints and TASK-025 or independent storage integration tests.
+- A checksum/fingerprint proves canonical content integrity or identity, not authorization or source authenticity. Contract probes may corrupt stored content without updating its stored checksum, but do not model an attacker controlling a trusted Port and recomputing every hash.
+
 ## Acceptance criteria
 
 - [x] 定义每条交易链路必须携带的 log/metric/trace 字段。
@@ -45,11 +52,11 @@ delivery:
 - [x] Config hot-reload/restart boundaries, immutable version/checksum, secret references, prepare/ack, atomic ActiveVersion+Event+Outbox, rollback and UNKNOWN behavior are schema- and semantic-tested.
 - [x] Kill switch, system-mode transitions, leader lease/fencing and stale-token rejection are frozen in the event schemas, `SM-SYSTEM-MODE`, `PORTS-CONTROL` and deterministic negative probes.
 - [x] TASK-025 references the frozen contract IDs, implementation owner, failure paths and bundle boundary while remaining blocked; no runtime or release behavior is implemented.
-- [x] `RecoveryBarrierAuthorityFact` provides one immutable operation-specific authority with strict version/checksum, scope/generation, policy/authorization, lease/fence, freshness and exact six-gate bindings; RecoveryPassed and Kill Switch OFF use the same fail-closed validator probes.
-- [x] `ConfigActivationResult` has a stable typed identity/fingerprint and an exhaustive Draft 2020-12 APPLIED/REJECTED/PARTIAL/ROLLED_BACK/UNKNOWN matrix with exact duplicate, conflict, rollback and UNKNOWN reconciliation probes.
-- [x] All four public Events machine-check source/type/schema/time/idempotency/aggregate binding plus root/non-root typed lineage; component health has an independent strictly increasing `state_version` while generation remains instance fencing.
-- [x] Typed persisted command/result facts reject wrong query identity, non-ACCEPTED decision, missing/tampered fingerprints and content before duplicate; exact late replay returns DUPLICATE before mutable current state.
-- [x] Fixed golden fixture categories and conditional branches, alert-definition versus runtime metric label namespaces, and removal of the unused `control-events.json` aggregate fixture are contract-tested.
+- [x] RecoveryPassed and Kill Switch OFF consume one exact committed `RecoveryBarrierReadPort` snapshot and bind scope/reference/generation/version, OPEN/opened-at/freshness, lease/fence and complete barrier evidence; stored checksum probes cover corruption detection without claiming source authentication.
+- [x] `ConfigActivationResult` has a stable identity/fingerprint and an exhaustive Draft 2020-12 APPLIED/REJECTED/PARTIAL/ROLLED_BACK/UNKNOWN matrix with per-component prepare/candidate-effect/rollback-effect evidence, safe-scope and same-identity reconciliation rules.
+- [x] The four public Event wires bind canonical Envelope fields to payload facts. Non-root lineage consumes a minimal trusted `AcceptedMessageRef`; parent ingress validation and Inbox record authenticity remain their own boundaries.
+- [x] Kill/config duplicate probes consume one exact committed Port record, recompute its stored-content fingerprint, return exact late replay before mutable current state, and reject same-identity/different-content. Port provenance/CAS/transaction correctness remains TASK-025 integration work.
+- [x] Each active Event retains the fixed six golden fixture categories; actual conditional invariants use only dedicated fixtures or direct tests. Alert-definition and runtime metric-label namespaces remain distinct.
 
 ## Activation evidence
 
@@ -66,10 +73,10 @@ delivery:
 - `PORTS-CONTROL`, `WF-CONTROL-PLANE`, `STORAGE-SOT`, and `WF-RECOVERY` establish the authority split: PostgreSQL `control_journal` is durable authority, component memory is cache, and latest valid per-scope System Mode/Kill Switch facts are restored before opening the barrier. TASK-022 does not define the physical Control Journal contract; that remains a separate storage spec-change gap for runtime delivery.
 - Kill Switch identity binds type, `scope_type`, `scope_id`, and idempotency key. Duplicate/conflict decisions consume one persisted command/result fact; they do not consume or define a global history structure. Expected-version conflicts use `QQ-COMMON-1003`; only same-identity/different-content uses `QQ-STORAGE-7001`.
 - Exact Decimal/I-JSON ingress, configuration security checksum and hard-limit policy binding, component ACK authority, instant-based time comparisons, complete recovery barrier gates, recursive redaction and low-cardinality labels remain frozen.
-- Round-eight Review counterexamples are covered directly in `test_control_contracts.py`: rehashed OFF/barrier tampering, all ConfigActivationResult outcomes, complete Event lineage/envelope mismatches, persisted-fact trust failures, and same-generation health transitions with increasing state version all fail closed or pass only in their frozen valid form.
+- Review Calibration removes recursive accepted-fact provenance, full parent payload revalidation and prior-state checks from single wire schemas. The retained probes cover untrusted wire errors, exact Port lookup/content corruption, barrier reference/scope/state/freshness/fence mismatch, minimal parent lineage, and health producer/consumer version responsibilities.
 - TASK-025 remains `blocked`, references the final behavior contracts, and no longer requires a giant validator context, one prescribed Python entrypoint, or source-tree/runtime call-graph shape. No runtime code, migration, monitoring product, OMS mutation or release is implemented; delivery stays `in_progress/partial/pending/prohibited`.
 - Verification evidence remains partial and is not a full-suite pass. On 2026-08-17 the bare user-level `poetry` launcher failed before collection because its executable is zero bytes. Using the dependency-complete repository `.venv` Poetry executable, the prescribed spec validator passed and the prescribed full pytest command recorded `574 passed / 6 failed`. The same full suite with workspace `--basetemp` also recorded `574 passed / 6 failed`; a sandboxed run against the default Windows `%TEMP%` recorded `570 passed / 6 failed / 4 errors` from that directory's ACL. Control authority/semantic tests passed `51`, and the broader message/control selection passed `277`. The six baseline-existing failures are two expired `2026-08-13` waiver expectations plus four fixture-cleanup cascades. These governance/environment failures are outside TASK-022 paths and are not masked or claimed as passing.
-- On 2026-08-24 both original bare `poetry run ...` commands still failed before execution because the user-level Poetry launcher could not start. In the dependency-complete repository `.venv` Poetry 2.4.1 environment, `scripts/validate_specs.py` passed, Control/authority tests passed `83`, message+Control regression passed `318`, and the full `tests/spec tests/contract` suite recorded `615 passed / 6 failed`. The same six failures are the existing two expired `2026-08-13` waiver roots plus four cleanup cascades; no new TASK-022 failure remains. Delivery therefore stays `in_progress/partial/pending/prohibited` and the complete prescribed suite is not claimed as passing.
+- On 2026-08-24, after Review Calibration, both original bare `poetry run ...` commands still failed before execution because the user-level Poetry launcher could not start. The dependency-complete repository `.venv` direct equivalent passed `scripts/validate_specs.py`, Control/authority tests passed `82`, and message+Control regression passed `312`. The full `tests/spec tests/contract` equivalent with a workspace basetemp recorded `609 passed / 6 failed`; the two expired `2026-08-13` waiver assertions are the roots and four same-directory cleanup assertions are cascades. No TASK-022 test failed, but the prescribed suite is not a pass; delivery remains `in_progress/partial/pending/prohibited`.
 
 ## Review focus
 
