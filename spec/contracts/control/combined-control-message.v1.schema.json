@@ -10,7 +10,7 @@
         {"type": "object", "required": ["causation_id", "aggregate_id", "aggregate_version", "idempotency_key"], "properties": {
           "occurred_at": {"$ref": "#/$defs/controlTimestamp"},
           "received_at": {"$ref": "#/$defs/controlTimestamp"},
-          "causation_id": {"type": "string", "minLength": 16, "maxLength": 64},
+          "causation_id": {"type": ["string", "null"], "minLength": 16, "maxLength": 64},
           "aggregate_id": {"type": "string", "minLength": 1, "maxLength": 128},
           "aggregate_version": {"type": "integer", "minimum": 1, "maximum": 9007199254740991},
           "idempotency_key": {"type": "string", "minLength": 1, "maxLength": 256}

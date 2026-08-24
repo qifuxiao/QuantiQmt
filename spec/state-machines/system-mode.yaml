@@ -26,6 +26,8 @@ machine:
     - "control plane never mutates OMS business state or bypasses Risk/Execution"
   control_guards:
     recovery_barrier_open_and_verified_requires: [barrier_present, barrier_state_OPEN, opened_at_present, CONFIG_VERIFIED, MARKET_FRESH, AUDIT_AVAILABLE, RECONCILIATION_COMPLETE, LEASE_FENCED, OUTBOX_HEALTHY]
+    recovery_passed_authority_input: RECOVERY_BARRIER_AUTHORITY_FACT
+    recovery_passed_authority_binding: [scope, barrier_id, generation, strictly_incremented_authority_version, canonical_checksum, evidence_and_aggregate_digests, policy_and_authorization, leader_lease_and_fencing, exact_six_ACCEPTED_gate_facts, freshness]
     kill_switch_on_allows: [CANCEL, RECOVERY, APPROVED_REDUCE_RISK]
     kill_switch_on_forbids: [NEW_ORDER_INTENT, NEW_RISK_APPROVAL]
     stale_lease_or_fencing_token: reject_without_side_effect

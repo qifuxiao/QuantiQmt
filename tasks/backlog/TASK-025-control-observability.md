@@ -14,18 +14,19 @@ implementation_contract:
   owner: ControlPlane/Observability runtime team after TASK-022 trusted completion
   deliverables:
     - package and load the reviewed immutable manifest-indexed control schema bundle
-    - implement equivalent typed validation for Control Event, Kill Switch Command, Kill Switch Result and Config Activation boundaries without changing their frozen input facts, order or decisions
+    - implement equivalent typed validation for Control Event, RecoveryPassed, Kill Switch Command, Kill Switch Result and Config Activation boundaries without changing their frozen input facts, order or decisions
     - direct schema-only probes never authorize persist/publish/apply/transition/recovery/side effects
-    - validate all four public Events as canonical MessageEnvelopeV1 plus the Control refinement and typed payload
-    - use PostgreSQL control_journal as System Mode/Kill Switch authority and component memory only as cache; duplicate decisions use the single persisted prior command/result fact
+    - validate all four public Events as canonical MessageEnvelopeV1 plus the Control refinement and typed payload, including exact source/type/version/time/idempotency/aggregate binding and typed root/non-root lineage
+    - use PostgreSQL control_journal as System Mode/Kill Switch authority and component memory only as cache; duplicate decisions use one schema-valid exact-identity ACCEPTED persisted command/result fact and reject untrusted query returns fail-closed
     - implement expected-version CAS, stable same-identity replay, QQ-STORAGE-7001 content conflict, and same-identity reconciliation after uncertain commit
-    - load immutable typed config-component, hard-limit and recovery-barrier authorities and verify exact checksum/version/generation/capability/freshness bindings fail-closed
+    - load immutable typed config-component, hard-limit and RecoveryBarrierAuthorityFact inputs and verify exact scope/checksum/version/generation/policy/authorization/lease/fence/six-gate/freshness bindings fail-closed
     - implement redacted correlation-chain logs/traces, bounded metrics and P0/P1/P2 alert runbooks
-    - implement atomic config ActiveVersion + config.version_activated.v1 + Outbox with rollback/UNKNOWN reconciliation
+    - implement atomic config ActiveVersion + config.version_activated.v1 + Outbox plus the exhaustive APPLIED/REJECTED/PARTIAL/ROLLED_BACK/UNKNOWN internal result matrix, stable result identity and same-identity reconciliation
     - implement scoped Kill Switch CommandBus, lease/fencing and recovery-barrier gates within the NFR latency budget without mutating OMS state
     - restore latest valid System Mode and Kill Switch per scope from control_journal before opening the recovery barrier
     - raise a separate storage spec-change task before defining any missing Control Journal repository/table contract
-  failure_paths: [stale_fencing_reject, partial_activation_rollback, unknown_command_reconcile, incomplete_barrier_closed, high_cardinality_record_reject, envelope_payload_mismatch, lineage_mismatch, sensitive_field_reject]
+    - order component-health transitions by state_version while generation remains instance fencing only
+  failure_paths: [stale_fencing_reject, partial_activation_rollback, unknown_command_reconcile, untrusted_persisted_fact_reject, incomplete_barrier_closed, high_cardinality_record_reject, envelope_payload_mismatch, lineage_mismatch, sensitive_field_reject]
   verification:
     - installed_runtime_loads_immutable_manifest_indexed_bundle
     - typed_semantic_validation_runs_before_persist_publish_apply_transition_recovery_side_effect

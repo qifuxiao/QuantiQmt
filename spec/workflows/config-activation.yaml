@@ -12,6 +12,17 @@ workflow:
     - one_risk_decision_uses_one_rule_set_version
     - secrets_are_references_not_plaintext
     - partial_silent_activation_is_forbidden
+  result_contract:
+    identity: [CONFIG_ACTIVATION, config_domain, candidate_version, idempotency_key]
+    canonical_result_fingerprint: required
+    exact_duplicate: return_persisted_result_before_mutable_active_state
+    same_identity_different_content: QQ-STORAGE-7001
+    outcomes:
+      APPLIED: candidate_is_committed_active_version_complete_APPLIED_ACKs
+      REJECTED: no_new_active_authority_no_side_effect_claim
+      PARTIAL: fail_closed_no_second_active_authority_reconcile_same_identity
+      ROLLED_BACK: verified_rollback_authority_is_current_active_version
+      UNKNOWN: no_active_claim_query_same_identity_never_change_key
   risk_rule_set:
     schema: CONTRACT-RISK-RULE-SET-V1
     hard_limit_source: accepted_immutable_system_hard_limit_policy

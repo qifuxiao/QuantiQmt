@@ -10,7 +10,12 @@
     {"$ref": "#/$defs/killSwitchCommand"},
     {"$ref": "#/$defs/killSwitchResult"},
     {"$ref": "#/$defs/leaderLease"},
-    {"$ref": "#/$defs/recoveryBarrier"}
+    {"$ref": "#/$defs/recoveryBarrier"},
+    {"$ref": "#/$defs/recoveryBarrierAuthorityFact"},
+    {"$ref": "#/$defs/controlEventParentFact"},
+    {"$ref": "#/$defs/persistedKillSwitchCommandFact"},
+    {"$ref": "#/$defs/persistedKillSwitchResultFact"},
+    {"$ref": "#/$defs/persistedConfigActivationResultFact"}
   ],
   "$defs": {
     "base": {
@@ -41,6 +46,29 @@
       "if": {"properties": {"scope_type": {"const": "GLOBAL"}}, "required": ["scope_type"]},
       "then": {"properties": {"scope_id": {"type": "null"}}},
       "else": {"properties": {"scope_id": {"type": "string", "minLength": 1, "maxLength": 128}}}
+    },
+    "killSwitchIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["operation_type", "scope_type", "scope_id", "idempotency_key"],
+      "properties": {
+        "operation_type": {"const": "KILL_SWITCH_COMMAND"},
+        "scope_type": {"enum": ["GLOBAL", "ACCOUNT", "STRATEGY", "INSTRUMENT"]},
+        "scope_id": {"type": ["string", "null"], "minLength": 1, "maxLength": 128},
+        "idempotency_key": {"type": "string", "minLength": 16, "maxLength": 256}
+      },
+      "allOf": [{"$ref": "#/$defs/scopeRule"}]
+    },
+    "configActivationIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["operation_type", "config_domain", "candidate_version", "idempotency_key"],
+      "properties": {
+        "operation_type": {"const": "CONFIG_ACTIVATION"},
+        "config_domain": {"type": "string", "pattern": "^[a-z][a-z0-9_.-]{1,63}$"},
+        "candidate_version": {"type": "string", "minLength": 1, "maxLength": 64},
+        "idempotency_key": {"type": "string", "minLength": 16, "maxLength": 256}
+      }
     },
     "observabilityContext": {
       "unevaluatedProperties": false,
@@ -152,18 +180,36 @@
       "unevaluatedProperties": false,
       "allOf": [
         {"$ref": "#/$defs/base"},
-        {"type": "object", "required": ["dto_type", "config_domain", "candidate_version", "candidate_checksum", "required_components", "outcome", "component_acks", "active_version", "active_checksum", "rollback_version"], "properties": {
+        {"type": "object", "required": ["dto_type", "result_id", "result_fingerprint", "idempotency_key", "config_domain", "candidate_version", "candidate_checksum", "required_components", "outcome", "component_acks", "previous_active_version", "previous_active_checksum", "active_version", "active_checksum", "rollback_version", "rollback_checksum", "rollback_authority_id", "rollback_authority_checksum", "commit_state", "side_effect_state", "reconciliation_required"], "properties": {
           "dto_type": {"const": "CONFIG_ACTIVATION_RESULT"},
-          "config_domain": {"type": "string", "minLength": 1},
-          "candidate_version": {"type": "string", "minLength": 1},
+          "result_id": {"type": "string", "minLength": 16, "maxLength": 256},
+          "result_fingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+          "idempotency_key": {"type": "string", "minLength": 16, "maxLength": 256},
+          "config_domain": {"type": "string", "pattern": "^[a-z][a-z0-9_.-]{1,63}$"},
+          "candidate_version": {"type": "string", "minLength": 1, "maxLength": 64},
           "candidate_checksum": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
           "required_components": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
           "outcome": {"enum": ["APPLIED", "REJECTED", "PARTIAL", "ROLLED_BACK", "UNKNOWN"]},
-          "component_acks": {"type": "object", "minProperties": 1, "additionalProperties": {"$ref": "#/$defs/componentAck"}},
-          "active_version": {"type": ["string", "null"], "minLength": 1},
+          "component_acks": {"type": "object", "additionalProperties": {"$ref": "#/$defs/componentAck"}},
+          "previous_active_version": {"type": ["string", "null"], "minLength": 1, "maxLength": 64},
+          "previous_active_checksum": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"},
+          "active_version": {"type": ["string", "null"], "minLength": 1, "maxLength": 64},
           "active_checksum": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"},
-          "rollback_version": {"type": ["string", "null"], "minLength": 1}
-        }}
+          "rollback_version": {"type": ["string", "null"], "minLength": 1, "maxLength": 64},
+          "rollback_checksum": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"},
+          "rollback_authority_id": {"type": ["string", "null"], "minLength": 1, "maxLength": 128},
+          "rollback_authority_checksum": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"},
+          "commit_state": {"enum": ["COMMITTED", "NOT_COMMITTED", "UNKNOWN"]},
+          "side_effect_state": {"enum": ["NONE", "COMPLETE", "PARTIAL", "UNKNOWN"]},
+          "reconciliation_required": {"type": "boolean"}
+        }},
+        {"oneOf": [
+          {"properties": {"outcome": {"const": "APPLIED"}, "active_version": {"type": "string"}, "active_checksum": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "rollback_version": {"type": "null"}, "rollback_checksum": {"type": "null"}, "rollback_authority_id": {"type": "null"}, "rollback_authority_checksum": {"type": "null"}, "commit_state": {"const": "COMMITTED"}, "side_effect_state": {"const": "COMPLETE"}, "reconciliation_required": {"const": false}, "component_acks": {"minProperties": 1}}},
+          {"properties": {"outcome": {"const": "REJECTED"}, "active_version": {"type": "null"}, "active_checksum": {"type": "null"}, "rollback_version": {"type": "null"}, "rollback_checksum": {"type": "null"}, "rollback_authority_id": {"type": "null"}, "rollback_authority_checksum": {"type": "null"}, "commit_state": {"const": "NOT_COMMITTED"}, "side_effect_state": {"const": "NONE"}, "reconciliation_required": {"const": false}}},
+          {"properties": {"outcome": {"const": "PARTIAL"}, "active_version": {"type": "null"}, "active_checksum": {"type": "null"}, "rollback_version": {"type": "null"}, "rollback_checksum": {"type": "null"}, "rollback_authority_id": {"type": "null"}, "rollback_authority_checksum": {"type": "null"}, "commit_state": {"const": "NOT_COMMITTED"}, "side_effect_state": {"const": "PARTIAL"}, "reconciliation_required": {"const": true}, "component_acks": {"minProperties": 1}}},
+          {"properties": {"outcome": {"const": "ROLLED_BACK"}, "active_version": {"type": "string"}, "active_checksum": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "rollback_version": {"type": "string"}, "rollback_checksum": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "rollback_authority_id": {"type": "string"}, "rollback_authority_checksum": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "commit_state": {"const": "COMMITTED"}, "side_effect_state": {"const": "COMPLETE"}, "reconciliation_required": {"const": false}, "component_acks": {"minProperties": 1}}},
+          {"properties": {"outcome": {"const": "UNKNOWN"}, "active_version": {"type": "null"}, "active_checksum": {"type": "null"}, "rollback_version": {"type": "null"}, "rollback_checksum": {"type": "null"}, "rollback_authority_id": {"type": "null"}, "rollback_authority_checksum": {"type": "null"}, "commit_state": {"const": "UNKNOWN"}, "side_effect_state": {"const": "UNKNOWN"}, "reconciliation_required": {"const": true}}}
+        ]}
       ]
     },
     "authorizationEvidence": {
@@ -183,7 +229,7 @@
       "unevaluatedProperties": false,
       "allOf": [
         {"$ref": "#/$defs/base"},
-        {"type": "object", "required": ["dto_type", "command_id", "command_fingerprint", "scope_type", "scope_id", "desired_state", "cancel_active_orders", "reason", "reason_code", "operator_id", "authorization_evidence", "expected_version", "leader_lease_id", "fencing_token", "deadline_at", "idempotency_key", "recovery_evidence_reference", "recovery_barrier_generation", "recovery_barrier_version", "recovery_barrier_checksum", "recovery_evidence_digest", "recovery_aggregate_evidence_digest"], "properties": {
+        {"type": "object", "required": ["dto_type", "command_id", "command_fingerprint", "scope_type", "scope_id", "desired_state", "cancel_active_orders", "reason", "reason_code", "operator_id", "authorization_evidence", "expected_version", "leader_lease_id", "fencing_token", "deadline_at", "idempotency_key", "recovery_evidence_reference", "recovery_barrier_generation", "recovery_barrier_version", "recovery_barrier_checksum", "recovery_evidence_digest", "recovery_aggregate_evidence_digest", "recovery_policy_version", "recovery_policy_checksum", "recovery_authorization_id", "recovery_authorization_checksum"], "properties": {
           "dto_type": {"const": "KILL_SWITCH_COMMAND"},
           "command_id": {"type": "string", "minLength": 16, "maxLength": 256},
           "command_fingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
@@ -203,14 +249,18 @@
           "idempotency_key": {"type": "string", "minLength": 16, "maxLength": 256},
           "recovery_evidence_reference": {"type": ["string", "null"], "minLength": 1},
           "recovery_barrier_generation": {"type": ["integer", "null"], "minimum": 1, "maximum": 9007199254740991},
-          "recovery_barrier_version": {"type": ["string", "null"], "minLength": 1, "maxLength": 64},
+          "recovery_barrier_version": {"type": ["integer", "null"], "minimum": 1, "maximum": 9007199254740991},
           "recovery_barrier_checksum": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"},
           "recovery_evidence_digest": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"},
-          "recovery_aggregate_evidence_digest": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"}
+          "recovery_aggregate_evidence_digest": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"},
+          "recovery_policy_version": {"type": ["string", "null"], "minLength": 1, "maxLength": 64},
+          "recovery_policy_checksum": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"},
+          "recovery_authorization_id": {"type": ["string", "null"], "minLength": 1, "maxLength": 128},
+          "recovery_authorization_checksum": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"}
         }},
         {"$ref": "#/$defs/scopeRule"},
-        {"if": {"properties": {"desired_state": {"const": "ON"}}, "required": ["desired_state"]}, "then": {"properties": {"recovery_evidence_reference": {"type": "null"}, "recovery_barrier_generation": {"type": "null"}, "recovery_barrier_version": {"type": "null"}, "recovery_barrier_checksum": {"type": "null"}, "recovery_evidence_digest": {"type": "null"}, "recovery_aggregate_evidence_digest": {"type": "null"}}}},
-        {"if": {"properties": {"desired_state": {"const": "OFF"}}, "required": ["desired_state"]}, "then": {"properties": {"recovery_evidence_reference": {"type": "string", "minLength": 1}, "recovery_barrier_generation": {"type": "integer", "minimum": 1}, "recovery_barrier_version": {"type": "string", "minLength": 1}, "recovery_barrier_checksum": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "recovery_evidence_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "recovery_aggregate_evidence_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}}}}
+        {"if": {"properties": {"desired_state": {"const": "ON"}}, "required": ["desired_state"]}, "then": {"properties": {"recovery_evidence_reference": {"type": "null"}, "recovery_barrier_generation": {"type": "null"}, "recovery_barrier_version": {"type": "null"}, "recovery_barrier_checksum": {"type": "null"}, "recovery_evidence_digest": {"type": "null"}, "recovery_aggregate_evidence_digest": {"type": "null"}, "recovery_policy_version": {"type": "null"}, "recovery_policy_checksum": {"type": "null"}, "recovery_authorization_id": {"type": "null"}, "recovery_authorization_checksum": {"type": "null"}}}},
+        {"if": {"properties": {"desired_state": {"const": "OFF"}}, "required": ["desired_state"]}, "then": {"properties": {"recovery_evidence_reference": {"type": "string", "minLength": 1}, "recovery_barrier_generation": {"type": "integer", "minimum": 1}, "recovery_barrier_version": {"type": "integer", "minimum": 1}, "recovery_barrier_checksum": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "recovery_evidence_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "recovery_aggregate_evidence_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "recovery_policy_version": {"type": "string", "minLength": 1}, "recovery_policy_checksum": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "recovery_authorization_id": {"type": "string", "minLength": 1}, "recovery_authorization_checksum": {"type": "string", "pattern": "^[0-9a-f]{64}$"}}}}
       ]
     },
     "effectEvidence": {
@@ -320,6 +370,119 @@
         "component_health": {"type": "object", "minProperties": 1, "additionalProperties": {"enum": ["HEALTHY", "DEGRADED", "UNAVAILABLE", "RECOVERING"]}},
         "observed_at": {"$ref": "#/$defs/controlTimestamp"}
       }
+    },
+    "acceptedGateAuthorityFact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["gate", "decision", "authority_id", "authority_version", "authority_checksum", "evidence_digest", "observed_at", "valid_until"],
+      "properties": {
+        "gate": {"enum": ["CONFIG_VERIFIED", "MARKET_FRESH", "AUDIT_AVAILABLE", "RECONCILIATION_COMPLETE", "LEASE_FENCED", "OUTBOX_HEALTHY"]},
+        "decision": {"const": "ACCEPTED"},
+        "authority_id": {"type": "string", "minLength": 1, "maxLength": 128},
+        "authority_version": {"type": "integer", "minimum": 1, "maximum": 9007199254740991},
+        "authority_checksum": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "evidence_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "observed_at": {"$ref": "#/$defs/controlTimestamp"},
+        "valid_until": {"$ref": "#/$defs/controlTimestamp"}
+      }
+    },
+    "recoveryGateAuthoritySet": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["CONFIG_VERIFIED", "MARKET_FRESH", "AUDIT_AVAILABLE", "RECONCILIATION_COMPLETE", "LEASE_FENCED", "OUTBOX_HEALTHY"],
+      "properties": {
+        "CONFIG_VERIFIED": {"allOf": [{"$ref": "#/$defs/acceptedGateAuthorityFact"}, {"properties": {"gate": {"const": "CONFIG_VERIFIED"}}}]},
+        "MARKET_FRESH": {"allOf": [{"$ref": "#/$defs/acceptedGateAuthorityFact"}, {"properties": {"gate": {"const": "MARKET_FRESH"}}}]},
+        "AUDIT_AVAILABLE": {"allOf": [{"$ref": "#/$defs/acceptedGateAuthorityFact"}, {"properties": {"gate": {"const": "AUDIT_AVAILABLE"}}}]},
+        "RECONCILIATION_COMPLETE": {"allOf": [{"$ref": "#/$defs/acceptedGateAuthorityFact"}, {"properties": {"gate": {"const": "RECONCILIATION_COMPLETE"}}}]},
+        "LEASE_FENCED": {"allOf": [{"$ref": "#/$defs/acceptedGateAuthorityFact"}, {"properties": {"gate": {"const": "LEASE_FENCED"}}}]},
+        "OUTBOX_HEALTHY": {"allOf": [{"$ref": "#/$defs/acceptedGateAuthorityFact"}, {"properties": {"gate": {"const": "OUTBOX_HEALTHY"}}}]}
+      }
+    },
+    "recoveryBarrierAuthorityFact": {
+      "unevaluatedProperties": false,
+      "allOf": [
+        {"$ref": "#/$defs/base"},
+        {"type": "object", "required": ["dto_type", "scope_type", "scope_id", "barrier", "previous_authority_version", "authority_version", "authority_checksum", "evidence_digest", "aggregate_evidence_digest", "policy_version", "policy_checksum", "authorization_id", "authorization_checksum", "leader_lease_id", "fencing_token", "accepted_gates"], "properties": {
+          "dto_type": {"const": "RECOVERY_BARRIER_AUTHORITY_FACT"},
+          "scope_type": {"enum": ["GLOBAL", "ACCOUNT", "STRATEGY", "INSTRUMENT"]},
+          "scope_id": {"type": ["string", "null"], "minLength": 1, "maxLength": 128},
+          "barrier": {"$ref": "#/$defs/recoveryBarrier"},
+          "previous_authority_version": {"type": "integer", "minimum": 0, "maximum": 9007199254740990},
+          "authority_version": {"type": "integer", "minimum": 1, "maximum": 9007199254740991},
+          "authority_checksum": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+          "evidence_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+          "aggregate_evidence_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+          "policy_version": {"type": "string", "minLength": 1, "maxLength": 64},
+          "policy_checksum": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+          "authorization_id": {"type": "string", "minLength": 1, "maxLength": 128},
+          "authorization_checksum": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+          "leader_lease_id": {"type": "string", "minLength": 1, "maxLength": 128},
+          "fencing_token": {"type": "string", "minLength": 16, "maxLength": 256},
+          "accepted_gates": {"$ref": "#/$defs/recoveryGateAuthoritySet"}
+        }},
+        {"$ref": "#/$defs/scopeRule"}
+      ]
+    },
+    "controlEventParentFact": {
+      "unevaluatedProperties": false,
+      "allOf": [
+        {"$ref": "#/$defs/base"},
+        {"type": "object", "required": ["dto_type", "decision", "message_id", "message_type", "occurred_at", "aggregate_id", "aggregate_version", "source", "canonical_message_fingerprint", "message"], "properties": {
+          "dto_type": {"const": "CONTROL_EVENT_PARENT_FACT"},
+          "decision": {"const": "ACCEPTED"},
+          "message_id": {"type": "string", "minLength": 16, "maxLength": 64},
+          "message_type": {"type": "string", "pattern": "^[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*\\.v[1-9][0-9]*$"},
+          "occurred_at": {"$ref": "#/$defs/controlTimestamp"},
+          "aggregate_id": {"type": "string", "minLength": 1, "maxLength": 128},
+          "aggregate_version": {"type": "integer", "minimum": 1, "maximum": 9007199254740991},
+          "source": {"type": "string", "minLength": 1, "maxLength": 128},
+          "canonical_message_fingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+          "message": {"$ref": "urn:quantiqmt:contract:message-envelope:v1"}
+        }}
+      ]
+    },
+    "persistedKillSwitchCommandFact": {
+      "unevaluatedProperties": false,
+      "allOf": [
+        {"$ref": "#/$defs/base"},
+        {"type": "object", "required": ["dto_type", "query_identity", "decision", "command_fingerprint", "command"], "properties": {
+          "dto_type": {"const": "PERSISTED_KILL_SWITCH_COMMAND_FACT"},
+          "query_identity": {"$ref": "#/$defs/killSwitchIdentity"},
+          "decision": {"const": "ACCEPTED"},
+          "command_fingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+          "command": {"$ref": "#/$defs/killSwitchCommand"}
+        }}
+      ]
+    },
+    "persistedKillSwitchResultFact": {
+      "unevaluatedProperties": false,
+      "allOf": [
+        {"$ref": "#/$defs/base"},
+        {"type": "object", "required": ["dto_type", "query_identity", "decision", "command_fingerprint", "result_id", "result_fingerprint", "result"], "properties": {
+          "dto_type": {"const": "PERSISTED_KILL_SWITCH_RESULT_FACT"},
+          "query_identity": {"$ref": "#/$defs/killSwitchIdentity"},
+          "decision": {"const": "ACCEPTED"},
+          "command_fingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+          "result_id": {"type": "string", "minLength": 16, "maxLength": 256},
+          "result_fingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+          "result": {"$ref": "#/$defs/killSwitchResult"}
+        }}
+      ]
+    },
+    "persistedConfigActivationResultFact": {
+      "unevaluatedProperties": false,
+      "allOf": [
+        {"$ref": "#/$defs/base"},
+        {"type": "object", "required": ["dto_type", "query_identity", "decision", "result_id", "result_fingerprint", "result"], "properties": {
+          "dto_type": {"const": "PERSISTED_CONFIG_ACTIVATION_RESULT_FACT"},
+          "query_identity": {"$ref": "#/$defs/configActivationIdentity"},
+          "decision": {"const": "ACCEPTED"},
+          "result_id": {"type": "string", "minLength": 16, "maxLength": 256},
+          "result_fingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+          "result": {"$ref": "#/$defs/configActivationResult"}
+        }}
+      ]
     },
     "recoveryBarrier": {
       "unevaluatedProperties": false,

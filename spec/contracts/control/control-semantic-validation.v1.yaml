@@ -13,17 +13,20 @@ contract:
 
 operations:
   ValidateControlEvent:
-    inputs: [canonical_message_envelope, typed_event_payload, optional_prior_scoped_state, optional_parent_fact, injected_time]
-    order: [envelope_schema, payload_schema, canonical_control_refinement, envelope_payload_binding, lineage_binding, prior_state_transition, event_fact_rules, decision]
+    inputs: [canonical_message_envelope, typed_event_payload, prior_scoped_state_when_required, parent_fact_when_non_root, injected_time]
+    order: [envelope_schema, payload_schema, canonical_control_refinement, message_identity, envelope_payload_binding, lineage_binding, prior_state_transition, event_fact_rules, decision]
+  ValidateRecoveryPassed:
+    inputs: [mode_transition, recovery_barrier_authority_fact, injected_time]
+    order: [transition_schema, authority_fact_schema, canonical_authority_checksum, strictly_incrementing_authority_version, exact_scope_generation_policy_lease_and_digest_binding, accepted_gate_authority_facts, freshness, decision]
   ValidateKillSwitchCommand:
-    inputs: [command, current_scoped_state, authorization_fact, leader_lease_fact, optional_open_recovery_barrier_fact, optional_prior_persisted_command_result, injected_time]
-    order: [dto_schema, exact_number_and_time_ingress, canonical_command_fingerprint, scope_binding, prior_persisted_identity_decision, current_version, authorization, lease_and_fence, deadline, disable_barrier, decision]
+    inputs: [command, current_scoped_state, authorization_fact, leader_lease_fact, recovery_barrier_authority_fact_when_disabling, optional_prior_persisted_command_fact, injected_time]
+    order: [dto_schema, exact_number_and_time_ingress, canonical_command_fingerprint, scope_binding, persisted_fact_schema_and_exact_query_identity, persisted_accepted_decision_and_content, duplicate_or_conflict, current_version, authorization, lease_and_fence, deadline, disable_barrier_authority, decision]
   ValidateKillSwitchResult:
     inputs: [result, persisted_command_fact, optional_prior_persisted_result_fact, current_scoped_state, expected_effect_ack_authority, injected_time]
-    order: [dto_schema, canonical_result_fingerprint, result_command_scope_binding, prior_persisted_result_decision, persisted_command_binding, current_scoped_state, outcome_version_and_effect, decision]
+    order: [dto_schema, canonical_result_fingerprint, result_command_scope_binding, persisted_command_fact_schema_and_exact_identity, persisted_command_accepted_decision_and_content, prior_result_fact_schema_and_exact_identity, exact_duplicate_or_conflict, current_scoped_state, outcome_version_and_effect, decision]
   ValidateConfigActivation:
-    inputs: [candidate_or_result, accepted_policy, accepted_component_authority, accepted_hard_limit_policy, optional_prior_persisted_result_fact, injected_time]
-    order: [dto_schema, exact_number_and_time_ingress, canonical_candidate_checksum, accepted_policy_and_hard_limits, component_authority_and_ack_binding, prior_persisted_identity_decision, outcome, decision]
+    inputs: [candidate_or_result, accepted_policy, accepted_component_authority, accepted_hard_limit_policy, current_active_version_fact, optional_prior_persisted_result_fact, injected_time]
+    order: [dto_schema, exact_number_and_time_ingress, canonical_candidate_or_result_fingerprint, accepted_policy_and_hard_limits, component_authority_and_ack_binding, persisted_fact_schema_and_exact_identity, exact_duplicate_or_conflict, outcome_matrix, decision]
 
 canonicalization:
   algorithm: RFC8785_JCS
@@ -56,24 +59,42 @@ public_events:
     canonical_envelope: CONTRACT-MESSAGE-ENVELOPE-V1
     combined_refinement: CONTRACT-CONTROL-COMBINED-MESSAGE-V1
     payload_fingerprint: semantic_SHA256_RFC8785_JCS_of_full_payload_not_wire_field
-    causation: known_earlier_parent_with_same_correlation
+    message_identity: envelope.message_id_is_the_unique_event_identity_and_Inbox_key
+    schema_version: 1
+    root_event:
+      only_when: [causation_id_is_null, correlation_id_equals_message_id, no_parent_fact]
+    non_root_event:
+      requires: [causation_id_non_null, typed_ACCEPTED_parent_fact]
+      exact_binding: [causation_id_equals_parent.message_id, correlation_id_equals_parent.correlation_id]
+      ordering: [parent.occurred_at_not_after_child.occurred_at, same_aggregate_parent_version_less_than_child_version]
+      parent_fingerprint: recompute_and_match_before_lineage_use
     wire_timestamp: canonical_UTC_Z_zero_to_6_fraction_digits
   bindings:
     system.mode_changed.v1:
+      message_type: system.mode_changed.v1
+      schema_version: 1
       source: TradingCore
       aggregate_id: scope_key
       partition_key: scope_key
       aggregate_version: payload.state_version
       occurred_at: payload.changed_at
+      idempotency_key: "system.mode_changed.v1:{scope_key}:{payload.state_version}"
       fact_condition: legal_accepted_mode_transition_already_persisted
     system.component_health_changed.v1:
+      message_type: system.component_health_changed.v1
+      schema_version: 1
       source: HealthService
       aggregate_id: payload.component_id
       partition_key: payload.component_id
-      aggregate_version: payload.generation
+      aggregate_version: payload.state_version
       occurred_at: payload.changed_at
+      idempotency_key: "system.component_health_changed.v1:{payload.component_id}:{payload.state_version}"
+      generation: component_instance_generation_fencing_only_not_aggregate_order
+      ordering: state_version_strictly_increases_within_component_aggregate_including_same_generation
       fact_condition: legal_accepted_health_transition
     system.kill_switch_changed.v1:
+      message_type: system.kill_switch_changed.v1
+      schema_version: 1
       source: ControlPlane
       aggregate_id: scope_key
       partition_key: scope_key
@@ -83,11 +104,14 @@ public_events:
       fact_condition: control_journal_state_change_persisted
       forbidden_result_states: [REJECTED, PARTIAL, TIMEOUT, UNKNOWN]
     config.version_activated.v1:
+      message_type: config.version_activated.v1
+      schema_version: 1
       source: ConfigService
       aggregate_id: payload.config_domain
       partition_key: payload.config_domain
       aggregate_version: payload.activation_sequence
       occurred_at: payload.activated_at
+      idempotency_key: "config.version_activated.v1:{payload.config_domain}:{payload.activation_sequence}"
       fact_condition: ActiveVersion_event_and_Outbox_committed_atomically
       forbidden_result_states: [REJECTED, PARTIAL, UNKNOWN, ROLLED_BACK]
   envelope_wire_fields_only: [message_id, message_type, schema_version, occurred_at, received_at, correlation_id, causation_id, aggregate_id, aggregate_version, source, partition_key, idempotency_key, payload]
@@ -100,8 +124,23 @@ idempotency:
   same_identity_different_content: CONFLICT_QQ_STORAGE_7001
   decision_source: one_optional_prior_persisted_fact
   cumulative_history_input: forbidden
+  persisted_fact_trust_boundary:
+    required: [typed_schema, exact_requested_query_identity, ACCEPTED_decision, canonical_fingerprint_recomputed, immutable_snapshot_exact_binding]
+    wrong_identity_rejected_fact_missing_fingerprint_or_tampered_content: reject_fail_closed_never_treat_as_absent
+    duplicate_order: immutable_persisted_authority_before_mutable_current_state
 
 config_activation:
+  result_identity:
+    fields: [config_domain, candidate_version, idempotency_key]
+    type_discriminator: CONFIG_ACTIVATION
+    result_id: immutable_result_entity_identity
+    canonical_result_fingerprint:
+      excludes: [result_fingerprint]
+      covers: [dto_type, schema_version, result_id, idempotency_key, config_domain, candidate_version, candidate_checksum, required_components, outcome, component_acks, previous_active_version, previous_active_checksum, active_version, active_checksum, rollback_version, rollback_checksum, rollback_authority_id, rollback_authority_checksum, commit_state, side_effect_state, reconciliation_required]
+    prior_fact: one_typed_PERSISTED_CONFIG_ACTIVATION_RESULT_FACT
+    same_identity_same_canonical_result: DUPLICATE_before_mutable_active_version
+    same_identity_different_content: CONFLICT_QQ_STORAGE_7001
+    UNKNOWN_action: query_same_identity_and_reconcile_never_change_idempotency_key
   candidate_checksum:
     projection_order: [config_domain, candidate_version, payload, secret_references, required_components, activation_mode, safe_boundary, system_hard_limit_policy_version, system_hard_limit_policy_checksum, valuation_currency, dynamic_limits, system_hard_limit_policy, component_authority, policy_version, policy_checksum]
     set_sorted_fields: [secret_references, required_components]
@@ -127,6 +166,48 @@ config_activation:
     event_only_after_commit: true
     unsuccessful_results: internal_CONFIG_ACTIVATION_RESULT_and_audit_only
     uncertain_commit: query_same_candidate_identity_and_reconcile
+  result_outcome_matrix:
+    APPLIED:
+      active_version: candidate_version
+      active_checksum: candidate_checksum
+      rollback_authority: forbidden_null
+      component_ACKs: complete_APPLIED_set
+      commit_state: COMMITTED
+      side_effect_state: COMPLETE
+      reconciliation_required: false
+    REJECTED:
+      active_version_and_checksum: null_no_new_authority
+      previous_active_authority: unchanged
+      rollback_authority: forbidden_null
+      component_ACKs: no_APPLIED_effect_claim
+      commit_state: NOT_COMMITTED
+      side_effect_state: NONE
+      reconciliation_required: false
+    PARTIAL:
+      active_version_and_checksum: null_never_second_authority
+      previous_active_authority: remains_authoritative
+      rollback_authority: forbidden_null
+      component_ACKs: non_empty_incomplete_or_mixed_set
+      commit_state: NOT_COMMITTED
+      side_effect_state: PARTIAL
+      reconciliation_required: true
+      action: fail_closed_safe_scope_and_reconcile_same_identity
+    ROLLED_BACK:
+      active_version_and_checksum: exact_accepted_rollback_authority
+      candidate_must_not_remain_active: true
+      rollback_authority: required_and_checksum_verified
+      component_ACKs: rollback_effect_authority_complete
+      commit_state: COMMITTED
+      side_effect_state: COMPLETE
+      reconciliation_required: false
+    UNKNOWN:
+      active_version_and_checksum: null_not_claimed
+      rollback_authority: forbidden_null
+      component_ACKs: only_known_incomplete_evidence
+      commit_state: UNKNOWN
+      side_effect_state: UNKNOWN
+      reconciliation_required: true
+      action: query_same_identity_and_reconcile_never_retry_with_new_key
 
 control_journal:
   authority: PostgreSQL_control_journal
@@ -138,11 +219,22 @@ control_journal:
     command_id: tracing_identity_not_scope_or_idempotency_substitute
   canonical_command_fingerprint:
     excludes: [command_fingerprint]
-    covers: [dto_type, schema_version, command_id, scope_type, scope_id, desired_state, cancel_active_orders, reason, reason_code, operator_id, approval_id, authorization_evidence, expected_version, leader_lease_id, fencing_token, deadline_at, idempotency_key, recovery_evidence_reference, recovery_barrier_generation, recovery_barrier_version, recovery_barrier_checksum, recovery_evidence_digest, recovery_aggregate_evidence_digest]
+    covers: [dto_type, schema_version, command_id, scope_type, scope_id, desired_state, cancel_active_orders, reason, reason_code, operator_id, approval_id, authorization_evidence, expected_version, leader_lease_id, fencing_token, deadline_at, idempotency_key, recovery_evidence_reference, recovery_barrier_generation, recovery_barrier_version, recovery_barrier_checksum, recovery_evidence_digest, recovery_aggregate_evidence_digest, recovery_policy_version, recovery_policy_checksum, recovery_authorization_id, recovery_authorization_checksum]
   duplicate: same_identity_and_same_canonical_command_returns_original_persisted_result
   conflict: same_identity_and_different_canonical_command_is_QQ_STORAGE_7001
   expected_version_CAS_conflict: QQ_COMMON_1003
   uncertain_commit: query_and_reconcile_same_identity_never_change_idempotency_key
+  typed_persisted_command_fact:
+    dto_type: PERSISTED_KILL_SWITCH_COMMAND_FACT
+    required: [exact_query_identity, ACCEPTED_decision, canonical_command_fingerprint, complete_immutable_command_snapshot]
+    canonical_fingerprint_recomputed_before_use: true
+    wrong_query_identity_or_non_ACCEPTED_decision_or_tampering: reject_fail_closed
+  typed_persisted_result_fact:
+    dto_type: PERSISTED_KILL_SWITCH_RESULT_FACT
+    required: [exact_query_identity, ACCEPTED_decision, command_fingerprint, result_id, canonical_result_fingerprint, complete_immutable_result_snapshot]
+    canonical_fingerprint_recomputed_before_use: true
+    exact_duplicate: return_original_result_before_reading_mutable_current_scoped_state
+    different_result_id_fingerprint_or_content: CONFLICT_QQ_STORAGE_7001
   recovery:
     restore_before_barrier: latest_valid_Kill_Switch_and_System_Mode_for_each_scope
     authority_reference: STORAGE-SOT_system_mode_kill_switch_and_WF_RECOVERY_restore_system_mode_kill_switch
@@ -157,7 +249,8 @@ kill_switch:
     stale_lease_or_fence: reject_without_side_effect
     expired_deadline_before_dispatch: reject_without_side_effect
     ON_effect: [block_new_OrderIntent, block_new_Risk_approval, preserve_cancel, preserve_recovery, preserve_explicitly_approved_reduce_risk]
-    OFF_requires: complete_fresh_OPEN_recovery_barrier_authority
+    OFF_requires: typed_complete_fresh_OPEN_RecoveryBarrierAuthorityFact
+    OFF_exact_authority_binding: [scope_type, scope_id, barrier_id, generation, authority_version, authority_checksum, evidence_digest, aggregate_evidence_digest, policy_version, policy_checksum, authorization_id, authorization_checksum, leader_lease_id, fencing_token, all_six_ACCEPTED_gate_facts]
     OFF_never_restores_NORMAL: true
   result:
     outcomes: [APPLIED, REJECTED, UNKNOWN]
@@ -183,9 +276,28 @@ recovery_barrier:
     - market_fresh_until_strictly_after_injected_time
     - exact_config_market_audit_reconciliation_component_lease_policy_authorities
     - verified_checksums_generations_versions_watermarks_and_fencing
+  authority_fact:
+    dto_type: RECOVERY_BARRIER_AUTHORITY_FACT
+    immutable: true
+    scope: exact_operation_scope
+    authority_version: previous_authority_version_plus_one
+    canonical_authority_checksum_projection: [scope_type, scope_id, barrier, previous_authority_version, authority_version, evidence_digest, aggregate_evidence_digest, policy_version, policy_checksum, authorization_id, authorization_checksum, leader_lease_id, fencing_token, accepted_gates]
+    evidence_digest: canonical_checksum_of_barrier.evidence
+    aggregate_evidence_digest: canonical_checksum_of_barrier
+    accepted_gate_authority_facts:
+      exact_keys: [CONFIG_VERIFIED, MARKET_FRESH, AUDIT_AVAILABLE, RECONCILIATION_COMPLETE, LEASE_FENCED, OUTBOX_HEALTHY]
+      every_gate_requires: [matching_gate_discriminator, ACCEPTED_decision, authority_id, strictly_positive_authority_version, canonical_authority_checksum, evidence_digest, observed_at_not_future, valid_until_after_injected_time]
+      CONFIG_VERIFIED_binds: [evidence.config_version, evidence.config_checksum]
+      MARKET_FRESH_binds: [evidence.market_calendar_version, evidence.market_calendar_checksum, evidence.market_policy_version, evidence.market_policy_checksum, evidence.market_source_version, evidence.market_quality, evidence.unresolved_gap_count, evidence.market_fresh_until]
+      AUDIT_AVAILABLE_binds: [evidence.audit_watermark, evidence.audit_checksum, evidence.audit_healthy]
+      RECONCILIATION_COMPLETE_binds: [evidence.reconciliation_version, evidence.reconciliation_checksum, evidence.reconciliation_case_count]
+      LEASE_FENCED_binds: [evidence.lease_id, evidence.lease_authority_version, evidence.lease_epoch, evidence.fencing_token, evidence.lease_expires_at]
+      OUTBOX_HEALTHY_binds: [evidence.audit_outbox_position, evidence.audit_inbox_position, evidence.audit_lag]
+      component_health_authority_binds: [evidence.component_versions, evidence.component_checksums, evidence.component_generations, evidence.component_health]
+      critical_lag_authority_binds: [evidence.critical_lag_policy_version, evidence.critical_lag_policy_checksum, evidence.critical_lag_threshold, evidence.critical_lag_measurement_source, evidence.critical_lag_window_seconds, evidence.critical_lag_recovery_window_seconds, evidence.critical_lag_current]
   closed_or_invalidated_opened_at: null
-  STARTING_to_NORMAL_RECOVERY_PASSED: complete_fresh_OPEN_barrier_required
-  kill_switch_OFF: same_complete_validator_and_authority_required
+  STARTING_to_NORMAL_RECOVERY_PASSED: ValidateRecoveryPassed_with_typed_authority_fact_required
+  kill_switch_OFF: same_ValidateRecoveryBarrierAuthorityFact_required
   reconnect_auto_open_or_auto_normal: forbidden
 
 time:
@@ -197,7 +309,19 @@ time:
 
 observability:
   recursive_redaction_forbidden_keys: [password, secret, credential, token, access_token, private_key, raw_account_id, raw_account_identifier]
-  metric_label_allowlist: [severity, component, alert_code, environment, policy_version]
+  alert_definition_label_allowlist: [severity, component, alert_code, environment, policy_version]
+  runtime_metric_label_allowlists:
+    control_command_total: [command, outcome, reason]
+    config_activation_total: [domain, outcome, mode]
+    config_activation_latency_ms: [domain, mode]
+    kill_switch_transition_total: [scope_type, desired_state, outcome]
+    leader_fencing_rejection_total: [component, reason]
+    recovery_barrier_transition_total: [from_state, to_state, reason]
+    critical_lag_seconds: [source, component]
+    audit_record_rejection_total: [source, reason]
+  raw_scope_id_metric_label: forbidden
+  runtime_scope_label_semantics: scope_type_low_cardinality_only
+  runtime_metric_forbidden_labels: [scope_id, order_id, trade_id, correlation_id, instrument_id, account_id, strategy_id, message_id, raw_account_id]
   high_cardinality_evidence_in_logs_traces_audit_not_metric_labels: true
   alert_authority: metric_threshold_version_sustained_window_recovery_window_owner_runbook
   alert_state_is_trading_authority: false
