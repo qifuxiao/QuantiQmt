@@ -46,7 +46,7 @@ workflow:
         - expired_outbox_leases_reclaimable
         - outbox_oldest_pending_age_within_recovery_budget
         - consumer_inbox_and_projection_lag_within_budget
-    - {id: open_recovery_barrier, owner: TradingCore, guard: all_completion_conditions}
+    - {id: open_recovery_barrier, owner: TradingCore, guard: all_completion_conditions, output: committed_RECOVERY_BARRIER_read_through_RecoveryBarrierReadPort}
     - {id: start_market_and_strategies, owner: Supervisor, guard: recovery_barrier_open}
   completion_conditions:
     - all_active_orders_definite_or_suspended_case
@@ -58,6 +58,12 @@ workflow:
     - order_journal_versions_and_checksums_verified
     - portfolio_ledger_sequence_versions_and_checksums_verified
     - no_critical_order_outbox_dead_letter
+  recovery_passed_input:
+    contract: logical_RecoveryBarrierReadPort_snapshot_not_public_JSON_DTO
+    validation: CONTRACT-CONTROL-SEMANTIC-VALIDATION-V1_ValidateRecoveryPassed
+    required_binding: [exact_scope_and_reference, barrier_id, generation, barrier_version, stored_checksum, OPEN_state, opened_at, evidence_freshness, lease_and_fence, complete_six_gate_evidence]
+    checksum_role: content_integrity_not_source_authenticity
+    authenticity: controlled_Port_committed_transaction_and_exact_query_key
   order_failure_rules:
     invalid_snapshot: "diagnose QQ-STORAGE-7003, discard snapshot for this recovery attempt, and replay full Journal"
     journal_gap_or_corruption: "QQ-RECOVERY-8002 + HALTED; never open barrier"

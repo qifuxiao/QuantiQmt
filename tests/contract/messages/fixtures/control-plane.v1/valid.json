@@ -1,0 +1,58 @@
+{
+  "dtos": [
+    {
+      "dto_type": "OBSERVABILITY_CONTEXT",
+      "schema_version": 1,
+      "correlation_id": "correlation-observe-0001",
+      "created_at": "2026-08-11T01:00:00Z",
+      "message_id": "message-observe-0001",
+      "causation_id": null,
+      "source": "ControlPlane",
+      "service": "control",
+      "instance": "control-1",
+      "environment": "test",
+      "error_code": "QQ-COMMON-1003",
+      "redaction_policy": "NO_SECRETS_OR_CREDENTIALS"
+    },
+    {
+      "dto_type": "ALERT_DEFINITION",
+      "schema_version": 1,
+      "correlation_id": "correlation-alert-0001",
+      "created_at": "2026-08-11T01:00:00Z",
+      "alert_id": "CONTROL_AUDIT_UNAVAILABLE",
+      "severity": "P0",
+      "trigger": {"metric": "audit_record_rejection_total", "threshold": ">0", "window_seconds": 60, "threshold_version": "v1"},
+      "recovery": {"metric": "audit_record_rejection_total", "threshold": "==0", "window_seconds": 300, "threshold_version": "v1"},
+      "owner": "ControlPlane",
+      "runbook_uri": "runbook://control/audit-unavailable",
+      "evidence_fields": ["correlation_id", "source", "error_code"],
+      "label_keys": ["severity", "component", "alert_code", "environment", "policy_version"],
+      "dedupe_window_seconds": 60,
+      "silence_allowed": false
+    },
+    {
+      "dto_type": "CONFIG_CANDIDATE",
+      "schema_version": 1,
+      "correlation_id": "correlation-config-0001",
+      "created_at": "2026-08-11T01:00:00Z",
+      "config_domain": "risk.rules",
+      "candidate_version": "v2",
+      "candidate_checksum": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "payload": {"rules": "immutable", "retry_budget": 1},
+      "secret_references": ["secret://risk/api"],
+      "required_components": ["RiskEngine"],
+      "activation_mode": "HOT_RELOAD",
+      "safe_boundary": "NEXT_ORDER_BOUNDARY",
+      "system_hard_limit_policy_version": "hard-v1",
+      "system_hard_limit_policy_checksum": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "valuation_currency": "CNY",
+      "dynamic_limits": {"maximum_order_notional": "500000"},
+      "system_hard_limit_policy": {"valuation_currency": "CNY", "limits": {"maximum_order_notional": "1000000"}},
+      "component_authority": {"RiskEngine": {"component_id": "RiskEngine", "generation": 1, "capability_version": "risk-v1", "activation_mode": "HOT_RELOAD", "safe_boundary": "NEXT_ORDER_BOUNDARY"}},
+      "policy_version": "policy-v1",
+      "policy_checksum": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "deadline_at": "2026-08-11T01:01:00Z",
+      "idempotency_key": "config-idempotency-0001"
+    }
+  ]
+}

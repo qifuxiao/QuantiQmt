@@ -1,0 +1,1 @@
+{"component_id":"OMS","component_type":"ORDER_MANAGEMENT","from_state":"HEALTHY","to_state":"DEGRADED","reason_code":"DEPENDENCY_STALE","changed_at":"2026-08-11T01:00:00Z","component_version":"v1","generation":1,"state_version":1,"evidence":{"probe_id":"probe-1","policy_version":"policy-v1","policy_checksum":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}
