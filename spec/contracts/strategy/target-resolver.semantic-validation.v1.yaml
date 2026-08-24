@@ -1,0 +1,447 @@
+contract:
+  id: CONTRACT-TARGET-RESOLVER-SEMANTIC-V1
+  schema_contract: CONTRACT-TARGET-RESOLVER-V1
+  version: 1
+  status: draft_pending_independent_review
+
+canonicalization:
+  algorithm: RFC8785_JCS
+  encoding: UTF-8_without_BOM
+  object_key_order: original_property_name_UTF16_code_units
+  unicode_normalization: none
+  number_serialization: RFC8785
+  decimal_representation: canonical_plain_JSON_string_never_number_or_float
+  array_order: preserved_and_semantically_frozen
+  hash: SHA-256_lowercase_hex
+  normative_vectors:
+    - input: {"": 1, "𐀀": 2}
+      canonical_json: '{"𐀀":2,"":1}'
+    - input: {price: "10.01000000", quantity: 100}
+      canonical_json: '{"price":"10.01000000","quantity":100}'
+
+identity:
+  target_fingerprint:
+    projection: complete_strategy_submit_target_v1_payload
+    formula: SHA256(RFC8785_JCS(projection))
+  accepted_target_payload_fingerprint: MUST_equal_target_fingerprint
+  mandate_checksum:
+    projection: complete_strategy_mandate_without_mandate_checksum
+    formula: SHA256(RFC8785_JCS(projection))
+  instrument_spec_checksum:
+    projection: complete_instrument_spec_without_instrument_spec_checksum
+    formula: SHA256(RFC8785_JCS(projection))
+  policy_checksum:
+    projection: complete_resolution_policy_without_policy_checksum
+    formula: SHA256(RFC8785_JCS(projection))
+  input_fingerprint:
+    projection: complete_resolution_request_without_resolution_trigger_and_input_fingerprint
+    formula: SHA256(RFC8785_JCS(projection))
+    invariant: same_target_mandate_spec_policy_and_snapshot_always_same_input_fingerprint_regardless_trigger
+  resolution_trigger_fingerprint:
+    projection: complete_resolution_trigger_without_trigger_fingerprint
+    formula: SHA256(RFC8785_JCS(projection))
+    source_payload_fingerprint: SHA256_RFC8785_JCS_of_exact_trusted_Inbox_source_payload
+    source_contract_id_and_state_version: manifest_or_internal_contract_identity_separate_from_authoritative_projection_snapshot_version
+    allowed_source_contracts:
+      TARGET_ACCEPTED: [CONTRACT-STRATEGY-TARGET-V1]
+      POSITION_CHANGED: [CONTRACT-PORTFOLIO-POSITION-CHANGED-V1]
+      ORDER_CHANGED: [CONTRACT-ORDER-REGISTERED-V1, CONTRACT-ORDER-STATUS-V1]
+      ACCOUNT_CHANGED: [CONTRACT-TARGET-RESOLVER-V1#ACCOUNT-SNAPSHOT]
+      MARKET_CHANGED: [CONTRACT-MARKET-DATA-V1]
+      SCHEDULED_REEVALUATION: [CONTRACT-TARGET-RESOLVER-V1#SCHEDULE]
+  resolution_namespace_uuid: 7a6bdb48-22b7-5f65-bb55-63e4a8ff6325
+  resolution_id: UUID5(resolution_namespace_uuid,input_fingerprint)
+  intent_id: 'UUID5(resolution_id,"order-intent:0")'
+  intent_envelope_message_id: intent_id
+  intent_envelope_idempotency_key: intent_id
+  result_fingerprint:
+    projection: complete_resolution_result
+    formula: SHA256(RFC8785_JCS(projection))
+  collision: reject_QQ_STORAGE_7011_without_intent_and_open_integrity_incident
+  reference_vector:
+    executable_source: tests/contract/messages/test_target_resolver_contracts.py::_request
+    target_fingerprint: 6dd0f03f555f94e1df8d3ea05b9f9b8f26347c21d0be3cd39f3caec2c99395ad
+    input_fingerprint: b158076e8c75feb5aa51c6b18ac25159195f820de7bb3c1d01d7a263a45924cc
+    resolution_id: 9a1031d2-e465-50ee-9327-4f3296fc7bce
+    intent_id: 3495958b-75e3-502c-bb50-38c38fc923a8
+    result_fingerprint: 5145e998f927269fdd07e27dd3599d46bd900e4211e3334cce9b9887159604de
+
+decimal_arithmetic:
+  local_context_precision: 38
+  process_global_context_mutation: forbidden
+  traps: [InvalidOperation, DivisionByZero, Overflow]
+  inputs: canonical_plain_Decimal_strings_or_integer_quantity_only
+  float_NaN_Infinity_exponent_negative_zero: forbidden
+  computed_exact_decimal: plain_not_exponent_strip_trailing_fractional_zero_and_dot_zero_is_0
+  limit_price: quantize_to_tick_size_exponent_and_preserve_that_scale
+  computed_money: round_CEILING_to_currency_minor_unit_and_preserve_that_scale
+  comparisons: exact_Decimal_before_display_serialization
+
+source_authority:
+  resolution_snapshot: immutable_derived_read_model_not_source_of_truth
+  portfolio_source: CONTRACT_PORTFOLIO_PROJECTION_V1_verified_snapshot_or_equivalent_authoritative_projection
+  current_position: Portfolio_projection_for_account_scope_instrument
+  strategy_sleeve: attribution_projection_for_exact_strategy_scope_instrument
+  account_source: authoritative_internal_account_projection_not_Broker_query
+  market_source: accepted_versioned_market_snapshot_with_reference_price_and_daily_limits
+  active_order_source: one_complete_OMS_read_snapshot_for_exact_strategy_scope_account_instrument
+  broker_snapshot: forbidden_as_resolution_authority
+  resolver_io: none_pure_calculation_receives_verified_immutable_values
+  builder_guards:
+    - recompute_and_verify_every_source_record_checksum_before_projection
+    - bind_all_source_versions_checksums_and_as_of_values_into_resolution_snapshot
+    - reject_mixed_account_portfolio_scope_instrument_or_currency
+    - require_current_position_available_quantity_not_above_quantity
+    - require_strategy_sleeve_quantity_not_above_current_position_quantity
+    - require_strategy_sleeve_available_quantity_not_above_both_sleeve_and_current_available
+    - require_portfolio_strategy_sleeve_and_active_order_trade_watermarks_equal
+    - require_account_reserved_orders_snapshot_version_equal_active_order_source.snapshot_version
+    - require_each_source_completeness_COMPLETE
+    - require_trigger_source_state_version_exactly_included_by_corresponding_snapshot_source
+    - require_each_active_order_from_same_complete_OMS_snapshot
+    - sort_active_order_effects_by_order_id_and_reject_duplicate_order_id_or_intent_id
+    - sort_allowed_instrument_ids_lexicographically
+
+operations:
+  RegisterTargetAndTrigger:
+    owner: TargetResolutionApplication
+    inputs: [new_accepted_target_message_or_canonical_registered_target, resolution_trigger, absolute_deadline]
+    canonical_target: use_registered_target_payload_and_accepted_target_ref_after_identity_match
+    target_identity: target_id_plus_target_fingerprint
+    trigger_identity: target_id_plus_trigger_message_id_plus_trigger_fingerprint
+    ordering: before_any_new_snapshot_read
+    exact_trigger_replay: return_EXACT_TRIGGER_REPLAY_receipt_and_exact_committed_record_or_return_exact_prior_SNAPSHOT_REJECTED_receipt
+    target_conflict: reject_QQ_STRATEGY_3002_without_snapshot_or_intent
+    trigger_conflict: reject_QQ_STRATEGY_3002_without_snapshot_or_intent
+    new_trigger_invalid: atomically_insert_TRIGGER_REJECTED_RESOLUTION_TRIGGER_INVALID_QQ_STRATEGY_3003_without_snapshot_resolution_or_intent
+  GuardIntentHandoff:
+    owner: TargetResolutionJournalPort
+    lookup_scope: canonical_account_plus_scope_plus_instrument
+    unresolved_states: [PENDING_OUTBOX, PUBLISHED_AWAITING_OMS]
+    ordering: after_exact_trigger_lookup_and_before_any_new_snapshot_read
+    unresolved_result: atomically_insert_HANDOFF_DEFERRED_INTENT_HANDOFF_PENDING_trigger_receipt_without_resolution_or_Outbox
+    lookup_result: bounded_existence_query_not_unbounded_record_collection
+    release_evidence: canonical_oms.order_registered.v1_binding_same_intent_and_every_OrderIntent_field
+  BuildResolutionSnapshot:
+    owner: TargetResolutionApplication
+    inputs:
+      - accepted_target_message
+      - new_verified_resolution_trigger
+      - verified_mandate
+      - verified_instrument_spec
+      - portfolio_snapshot
+      - account_snapshot
+      - market_snapshot
+      - strategy_sleeve_snapshot
+      - complete_active_order_snapshot
+      - injected_UTC_time
+      - absolute_deadline
+    result: TARGET_RESOLUTION_REQUEST_or_SNAPSHOT_REJECTED_trigger_receipt
+    failure_transaction: atomically_insert_SNAPSHOT_REJECTED_trigger_receipt_without_resolution_or_Outbox
+    trigger_source_inclusion:
+      TARGET_ACCEPTED: null_state_version_and_canonical_target_registry
+      POSITION_CHANGED: source_state_version_equals_portfolio_source.snapshot_version_with_shared_trade_watermark
+      ORDER_CHANGED: source_state_version_equals_active_order_source.snapshot_version_with_shared_trade_and_account_reservation_watermarks
+      ACCOUNT_CHANGED: source_state_version_equals_account_source.snapshot_version
+      MARKET_CHANGED: source_state_version_equals_market_source.snapshot_version
+      SCHEDULED_REEVALUATION: null_state_version_and_latest_complete_sources
+    inclusion_failure: SNAPSHOT_REJECTED_SNAPSHOT_IDENTITY_MISMATCH_QQ_STRATEGY_3003
+    timeout: SNAPSHOT_BUILD_FAILED_QQ_STRATEGY_3003_without_fabricated_snapshot_resolution_or_intent
+  LookupResolutionInput:
+    owner: TargetResolutionJournalPort
+    input: verified_TARGET_RESOLUTION_REQUEST
+    lookup_key: input_fingerprint
+    exact_input_replay: atomically_record_trigger_receipt_and_return_exact_committed_record_without_new_Outbox
+  ResolveTarget:
+    owner: pure_TargetResolver
+    input: TARGET_RESOLUTION_REQUEST
+    result: TARGET_RESOLUTION_RESULT
+    external_io: forbidden
+    system_clock: forbidden
+    broker_oms_repository_database_redis: forbidden
+  CommitResolution:
+    owner: TargetResolutionApplication
+    input: request_and_result
+    result: STORED_TARGET_RESOLUTION
+    transaction: NEW_RESOLUTION_trigger_receipt_plus_resolution_record_plus_optional_INTENT_outbox_atomically
+
+guards:
+  application_order:
+    - accepted_target_and_trigger_schema_fingerprint_and_trust_validation
+    - target_identity_registration_then_existing_trigger_replay_lookup_before_any_new_snapshot_read
+    - new_trigger_time_account_scope_instrument_and_TARGET_ACCEPTED_lineage_validation
+    - unresolved_intent_handoff_guard_before_any_new_snapshot_read
+    - bounded_snapshot_build_or_persist_SNAPSHOT_REJECTED_receipt
+    - complete_request_JSON_Schema_and_fingerprint_validation
+    - existing_input_fingerprint_replay_lookup_after_verified_snapshot_build
+    - pure_resolution
+    - atomic_commit
+  resolver_order:
+    - target_mandate_spec_policy_checksum_and_snapshot_source_reference_validation
+    - target_time_window_and_mandate_time_window
+    - target_mandate_snapshot_scope_strategy_instrument_currency_binding
+    - complete_fresh_coherent_snapshot_and_age
+    - target_type_and_value_mandate_limits
+    - active_order_effect_validation_and_direction
+    - deterministic_conversion_deadband_and_rounding
+    - sell_availability_or_buy_cash_buffer
+    - price_band
+    - output_schema_envelope_and_lineage
+  time:
+    resolution_time: exactly_snapshot.captured_at_so_same_target_and_snapshot_have_same_resolution_input
+    accepted_target: accepted_target.accepted_at_not_after_resolution_trigger.accepted_at
+    resolution_trigger: occurred_at_not_after_accepted_at_not_after_resolution_time
+    TARGET_ACCEPTED_trigger: message_id_payload_fingerprint_and_accepted_at_equal_canonical_accepted_target
+    target_active: target.effective_at_less_than_or_equal_resolution_time_strictly_less_than_target.valid_until
+    mandate_active: mandate.effective_from_less_than_or_equal_resolution_time_strictly_less_than_mandate.effective_until
+    instrument_spec_active: instrument_spec.effective_from_less_than_or_equal_resolution_time_strictly_less_than_instrument_spec.effective_until
+    snapshot_age: each_source_as_of_not_after_resolution_time_and_age_ms_not_above_policy.max_snapshot_age_ms
+    resolved_at: exactly_request.resolution_time
+  target_shape:
+    WEIGHT: non_null_target_weight_required_and_target_quantity_absent_or_null
+    POSITION: non_null_target_quantity_required_and_target_weight_absent_or_null
+  identity_bindings:
+    strategy: target_strategy_equals_mandate_strategy
+    scope: target_scope_equals_mandate_scope_equals_snapshot_scope
+    account: mandate_account_equals_snapshot_account
+    portfolio: mandate_portfolio_equals_snapshot_portfolio
+    instrument: target_instrument_equals_spec_instrument_equals_snapshot_instrument_and_is_allowed
+    currency: instrument_spec_currency_equals_snapshot_and_price_reference_currency
+    trigger: resolution_trigger_account_scope_instrument_equal_target_mandate_and_snapshot
+    trigger_validation_owner: application_before_snapshot_builder
+    resolver_trigger_dependency: forbidden_because_trigger_is_excluded_from_input_fingerprint_and_result
+  mandate:
+    WEIGHT: zero_less_than_or_equal_target_weight_less_than_or_equal_min_of_max_target_weight_and_one_minus_cash_buffer_ratio
+    POSITION: zero_less_than_or_equal_target_quantity_less_than_or_equal_max_position_quantity
+    long_only: negative_weight_or_quantity_forbidden
+  snapshot:
+    all_source_quality: FRESH
+    all_source_completeness: COMPLETE
+    current_and_sleeve_quantity: non_negative_integer
+    projected_available_cash_and_total_equity: canonical_non_negative_Decimal_strings
+    price_reference: positive_and_lower_limit_less_than_or_equal_price_less_than_or_equal_upper_limit
+
+resolution:
+  risk_decision: never_performed_by_resolver
+  order_chain: OrderIntent_then_OMS_registration_then_Risk_then_OMS_transition_then_Execution
+  active_order_effect: signed_leaves_quantity_from_complete_OMS_snapshot
+  active_order_sign:
+    common: cumulative_quantity_equals_position_applied_cumulative_quantity_and_leaves_equals_original_minus_cumulative
+    BUY: expected_delta_equals_positive_leaves_quantity
+    SELL: expected_delta_equals_negative_leaves_quantity
+  active_order_states:
+    - REGISTERED
+    - RISK_PENDING
+    - APPROVED
+    - SUBMITTING
+    - SUBMIT_UNKNOWN
+    - SUBMITTED
+    - PARTIALLY_FILLED
+    - CANCEL_PENDING
+    - CANCEL_UNKNOWN
+    - SUSPENDED
+  active_order_rules:
+    - Portfolio_and_StrategySleeve_quantities_must_include_each_order_cumulative_quantity_at_the_shared_trade_watermark
+    - terminal_orders_are_excluded_by_OMS_snapshot_builder
+    - UNKNOWN_or_CANCEL_UNKNOWN_is_conservatively_counted_not_retried
+    - mixed_positive_and_negative_effects_reject_ACTIVE_ORDER_DIRECTION_CONFLICT
+    - active_effect_opposite_unadjusted_delta_reject_ACTIVE_ORDER_DIRECTION_CONFLICT
+    - absolute_active_effect_above_absolute_unadjusted_delta_reject_ACTIVE_ORDERS_OVERSHOOT_TARGET
+    - active_effect_exactly_covers_unadjusted_delta_returns_NO_ACTION_ACTIVE_ORDERS_COVER_TARGET
+  target_conversion:
+    POSITION_desired_quantity: target.target_quantity
+    WEIGHT_target_notional: Decimal(snapshot.total_equity)_times_Decimal(target.target_weight)
+    WEIGHT_desired_quantity: floor_toward_zero(WEIGHT_target_notional_divided_by_reference_price)
+  delta:
+    sleeve_quantity: snapshot.strategy_sleeve.quantity
+    unadjusted_delta: desired_quantity_minus_sleeve_quantity
+    active_order_expected_delta: sum_order_id_sorted_expected_delta
+    effective_quantity: sleeve_quantity_plus_active_order_expected_delta
+    residual_delta: desired_quantity_minus_effective_quantity
+  no_action_order:
+    - unadjusted_delta_zero_and_active_effect_zero_is_TARGET_ALREADY_SATISFIED
+    - exact_active_cover_is_ACTIVE_ORDERS_COVER_TARGET
+    - absolute_residual_not_above_quantity_deadband_or_residual_notional_not_above_notional_deadband_is_WITHIN_DEADBAND
+    - toward_zero_lot_rounding_zero_is_ROUNDED_TO_ZERO
+    - rounded_quantity_below_minimum_is_BELOW_MIN_ORDER_QUANTITY
+  quantity_rounding:
+    normal: floor_absolute_residual_to_multiple_of_lot_size
+    direction: never_round_away_from_zero
+    sell_to_zero_exception: >-
+      only when desired_quantity is zero, residual is SELL, absolute residual equals
+      sleeve.available_quantity minus active SELL leaves, and
+      instrument_spec.sell_to_zero_odd_lot_allowed is true; emit that exact remaining
+      available quantity even when it is not a lot multiple or is below min_order_quantity
+  sell_availability:
+    available_sell_quantity: strategy_sleeve.available_quantity_minus_sum_active_SELL_leaves
+    negative_available: reject_ACTIVE_ORDER_SNAPSHOT_INVALID
+    candidate_above_available: reject_INSUFFICIENT_AVAILABLE_QUANTITY
+    pending_BUY_quantity: never_used_as_sell_availability
+  price:
+    raw_limit_price: snapshot.price_reference.price
+    BUY: floor_to_tick_size
+    SELL: ceiling_to_tick_size
+    band: rounded_limit_price_must_be_within_inclusive_snapshot_lower_and_upper_limits
+  cash_buffer:
+    required_cash_buffer_raw: max(mandate.cash_buffer_absolute,total_equity_times_cash_buffer_ratio)
+    required_cash_buffer: round_up_to_instrument_spec.currency_minor_unit
+    estimated_buy_notional: round_up(quantity_times_limit_price_to_currency_minor_unit)
+    guard: projected_available_cash_minus_estimated_buy_notional_not_below_required_cash_buffer
+    failure: REJECTED_CASH_BUFFER_BREACH_without_quantity_shrink
+    sell: no_cash_buffer_guard
+  output:
+    side: sign_of_residual_delta
+    quantity: rounded_positive_quantity
+    limit_price: side_specific_tick_rounded_price
+    order_type: LIMIT
+    time_in_force: DAY
+    position_effect: AUTO
+    signal_time: target.effective_at
+    market_data_version: snapshot.market_source.snapshot_version
+    decision_id: target.decision_id
+    valid_until: target.valid_until
+    tags:
+      target_id: target.target_id
+      resolution_id: resolution_id
+      resolution_input_fingerprint: input_fingerprint
+      scope_id: target.scope_id
+      mandate_version: mandate.mandate_version
+      instrument_spec_version: instrument_spec.instrument_spec_version
+      portfolio_snapshot_version: snapshot.portfolio_source.snapshot_version
+      account_snapshot_version: snapshot.account_source.snapshot_version
+      market_snapshot_version: snapshot.market_source.snapshot_version
+      strategy_sleeve_version: snapshot.strategy_sleeve_source.snapshot_version
+      active_order_snapshot_version: snapshot.active_order_source.snapshot_version
+      resolver_policy_version: policy.resolver_policy_version
+    envelope:
+      message_id: intent_id
+      message_type: strategy.submit_order_intent.v1
+      schema_version: 1
+      occurred_at: request.resolution_time
+      correlation_id: accepted_target.correlation_id
+      causation_id: accepted_target.message_id
+      partition_key: snapshot.account_id
+      idempotency_key: intent_id
+
+reasons:
+  INTENT: [ORDER_INTENT_CREATED]
+  NO_ACTION:
+    - TARGET_ALREADY_SATISFIED
+    - ACTIVE_ORDERS_COVER_TARGET
+    - WITHIN_DEADBAND
+    - ROUNDED_TO_ZERO
+    - BELOW_MIN_ORDER_QUANTITY
+  REJECTED:
+    QQ-STRATEGY-3001:
+      - TARGET_SHAPE_INVALID
+      - TARGET_NOT_YET_EFFECTIVE
+      - TARGET_EXPIRED
+      - MANDATE_NOT_EFFECTIVE
+      - TARGET_STRATEGY_MISMATCH
+      - TARGET_SCOPE_UNAUTHORIZED
+      - TARGET_TYPE_UNAUTHORIZED
+      - INSTRUMENT_UNAUTHORIZED
+      - TARGET_WEIGHT_OUT_OF_RANGE
+      - TARGET_POSITION_OUT_OF_RANGE
+      - INSTRUMENT_SPEC_NOT_EFFECTIVE
+      - PRICE_REFERENCE_INVALID
+      - PRICE_OUTSIDE_BAND
+      - ACTIVE_ORDER_DIRECTION_CONFLICT
+      - ACTIVE_ORDERS_OVERSHOOT_TARGET
+      - INSUFFICIENT_AVAILABLE_QUANTITY
+      - CASH_BUFFER_BREACH
+    QQ-STRATEGY-3003:
+      - SNAPSHOT_IDENTITY_MISMATCH
+      - SNAPSHOT_NOT_FRESH
+      - SNAPSHOT_TOO_OLD
+      - ACTIVE_ORDER_SNAPSHOT_INVALID
+  PRE_RESOLUTION_RECEIPT:
+    no_error: [INTENT_HANDOFF_PENDING]
+    QQ-STRATEGY-3002: [TARGET_REPLAY_CONFLICT, RESOLUTION_TRIGGER_CONFLICT]
+    QQ-STRATEGY-3003:
+      - RESOLUTION_TRIGGER_INVALID
+      - SNAPSHOT_BUILD_FAILED
+      - SNAPSHOT_IDENTITY_MISMATCH
+      - SNAPSHOT_NOT_FRESH
+      - SNAPSHOT_TOO_OLD
+      - SOURCE_CHECKSUM_MISMATCH
+      - ACTIVE_ORDER_SNAPSHOT_INVALID
+    QQ-STORAGE-7011: [DETERMINISTIC_IDENTITY_COLLISION]
+
+replay:
+  target_lookup_key: target_id
+  trigger_lookup_key: [target_id, resolution_trigger.trigger_message_id]
+  trigger_lookup_timing: before_reading_or_building_any_new_snapshot
+  same_target_id_same_target_fingerprint: retain_canonical_target_and_allow_only_a_new_verified_trigger_to_build_a_snapshot
+  same_target_id_different_target_fingerprint: reject_QQ_STRATEGY_3002_without_intent
+  same_trigger_id_same_trigger_fingerprint: return_EXACT_TRIGGER_REPLAY_receipt_and_exact_committed_resolution_or_exact_prior_SNAPSHOT_REJECTED_receipt_before_new_snapshot_read
+  same_trigger_id_different_trigger_fingerprint: reject_QQ_STRATEGY_3002_RESOLUTION_TRIGGER_CONFLICT_without_snapshot_or_intent
+  new_trigger_new_snapshot: may_create_new_resolution_while_target_is_valid
+  invalid_new_trigger: record_TRIGGER_REJECTED_receipt_without_snapshot_resolution_or_Outbox
+  new_trigger_with_unresolved_intent_handoff: record_HANDOFF_DEFERRED_receipt_without_snapshot_resolution_or_Outbox
+  new_trigger_same_input_fingerprint: record_EXACT_INPUT_REPLAY_receipt_and_return_exact_committed_record_without_new_Outbox
+  same_resolution_id_different_input_fingerprint: reject_QQ_STORAGE_7011_and_open_integrity_incident
+  commit_unknown: query_same_target_trigger_input_and_resolution_ids_never_recompute_with_new_snapshots
+  duplicate_outbox: stable_message_id_and_idempotency_key_equal_intent_id
+  exact_replay_includes: [request, result, result_fingerprint, outbox_message_id, publication_status, intent_handoff_status, registered_order_id, oms_registration_ref, persisted_at]
+  re_resolution_triggers:
+    TARGET_ACCEPTED: initial_resolution_only
+    POSITION_CHANGED: accepted_position_projection_for_exact_target_scope_and_instrument
+    ORDER_CHANGED: accepted_OMS_order_fact_for_exact_target_scope_and_instrument
+    ACCOUNT_CHANGED: accepted_account_projection_for_exact_target_account
+    MARKET_CHANGED: accepted_market_snapshot_for_exact_target_instrument
+    SCHEDULED_REEVALUATION: bounded_debounced_scheduler_command_with_stable_identity
+  trigger_storm: bounded_debounce_and_frequency_limit_before_snapshot_build
+
+storage_transaction:
+  target_registration_atomic: [insert_target_identity_if_absent_or_return_identical]
+  snapshot_rejection_atomic: [insert_SNAPSHOT_REJECTED_trigger_receipt_without_resolution_or_Outbox]
+  handoff_deferred_atomic: [insert_HANDOFF_DEFERRED_trigger_receipt_without_resolution_or_Outbox]
+  new_resolution_atomic:
+    - insert_NEW_RESOLUTION_trigger_receipt
+    - insert_target_resolution_record
+    - insert_INTENT_outbox_message_when_outcome_INTENT
+  exact_input_replay_atomic: [insert_resolution_trigger_receipt_referencing_existing_resolution]
+  no_action_or_rejected: record_without_order_intent_outbox
+  external_io_inside_transaction: forbidden
+  unique: [target_id_in_registry, target_id_plus_trigger_message_id, resolution_id, input_fingerprint, result_fingerprint]
+  partial_commit: forbidden
+
+intent_handoff:
+  authority: committed_STORED_TARGET_RESOLUTION_plus_canonical_OMS_registration_receipt
+  blocking_scope: account_id_plus_scope_id_plus_instrument_id
+  states:
+    NOT_APPLICABLE: NO_ACTION_or_REJECTED
+    PENDING_OUTBOX: INTENT_committed_not_yet_marked_published
+    PUBLISHED_AWAITING_OMS: Outbox_marked_published_without_verified_OMS_registration
+    OMS_REGISTERED: verified_same_intent_id_is_durably_registered_in_OMS
+  transition_graph: [PENDING_OUTBOX_to_PUBLISHED_AWAITING_OMS, PENDING_OUTBOX_to_OMS_REGISTERED_on_verified_ack_race, PUBLISHED_AWAITING_OMS_to_OMS_REGISTERED]
+  publication_registration_race: OMS_REGISTERED_may_coexist_with_PENDING_publication_status_until_local_Outbox_receipt_catches_up
+  registration_binding: accepted_message_fingerprint_verified_order_id_non_null_and_event_intent_account_instrument_side_position_effect_order_type_quantity_limit_price_time_in_force_owner_strategy_all_equal_committed_OrderIntent
+  safety: no_new_snapshot_or_resolution_for_scope_while_any_handoff_is_unresolved
+  next_attempt: requires_new_verified_ORDER_CHANGED_trigger_after_OMS_registration
+  recovery: PENDING_OUTBOX_republish_same_message_id; PUBLISHED_AWAITING_OMS_query_or_redeliver_same_intent_id_and_never_release_without_verified_registration
+
+observability:
+  audit_record: STORED_TARGET_RESOLUTION_with_complete_calculation_and_source_versions
+  resolution_structured_log:
+    event: target_resolution_completed
+    required_fields: [resolution_id, target_id, strategy_id, scope_id, instrument_id, outcome, reason_code, input_fingerprint]
+    secrets: forbidden
+  trigger_structured_log:
+    event: target_resolution_trigger_completed
+    required_fields: [target_id, trigger_type, outcome, reason_code, error_code]
+    optional_fields: [resolution_id]
+    secrets: forbidden
+  metrics:
+    target_resolution_total_labels: [outcome, reason_code, target_type]
+    target_resolution_duration_seconds_labels: [outcome]
+    target_resolution_trigger_total_labels: [trigger_type, outcome, reason_code]
+    forbidden_high_cardinality_labels: [target_id, resolution_id, strategy_id, scope_id, account_id, instrument_id, input_fingerprint]
+
+limits:
+  active_orders_max: 1000
+  mandate_instruments_max: 4096
+  snapshot_build: bounded_by_absolute_deadline
+  retries: none_inside_pure_resolver
+  conflict_retry: forbidden_same_payload

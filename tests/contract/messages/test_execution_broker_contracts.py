@@ -448,13 +448,11 @@ def test_normative_text_freezes_ownership_unknown_and_determinism() -> None:
     ]
 
 
-def test_manifest_preserves_execution_contracts_across_market_spec_revision() -> None:
+def test_manifest_preserves_execution_contracts_across_later_spec_revisions() -> None:
     manifest = yaml.safe_load(Path("spec/manifest.yaml").read_text(encoding="utf-8"))
     change = manifest["change"]
     ids = {entry["id"] for entries in manifest["catalogs"].values() for entry in entries}
 
-    assert manifest["specification"]["version"] == "0.11.0"
-    assert change["previous_version"] == "0.10.0"
     assert {
         "CONTRACT-EXECUTION-BROKER-GATEWAY-V1",
         "PORTS-BROKER-SIMULATOR",

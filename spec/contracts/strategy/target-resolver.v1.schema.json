@@ -1,0 +1,623 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:quantiqmt:internal:target-resolver:v1",
+  "title": "TargetResolverContractsV1",
+  "oneOf": [
+    {"$ref": "#/$defs/strategyMandate"},
+    {"$ref": "#/$defs/instrumentSpec"},
+    {"$ref": "#/$defs/resolutionPolicy"},
+    {"$ref": "#/$defs/resolutionSnapshot"},
+    {"$ref": "#/$defs/resolutionRequest"},
+    {"$ref": "#/$defs/resolutionResult"},
+    {"$ref": "#/$defs/storedResolutionRecord"},
+    {"$ref": "#/$defs/resolutionTriggerReceipt"}
+  ],
+  "$defs": {
+    "uuid": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+    },
+    "identifier": {"type": "string", "minLength": 1, "maxLength": 128},
+    "instrumentId": {"type": "string", "minLength": 1, "maxLength": 64},
+    "currency": {"type": "string", "pattern": "^[A-Z]{3}$"},
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,6})?Z$"
+    },
+    "hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "decimal": {
+      "type": "string",
+      "pattern": "^(?!-0(?:\\.0+)?$)-?(0|[1-9][0-9]{0,17})(\\.[0-9]{1,8})?$"
+    },
+    "nonNegativeDecimal": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]{0,17})(\\.[0-9]{1,8})?$"
+    },
+    "positiveDecimal": {
+      "type": "string",
+      "pattern": "^(?=.*[1-9])(0|[1-9][0-9]{0,17})(\\.[0-9]{1,8})?$"
+    },
+    "ratio": {
+      "type": "string",
+      "pattern": "^(0(\\.[0-9]{1,8})?|1(\\.0{1,8})?)$"
+    },
+    "sourceSnapshotRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source", "snapshot_version", "checksum", "as_of", "quality", "completeness"],
+      "properties": {
+        "source": {"$ref": "#/$defs/identifier"},
+        "snapshot_version": {"$ref": "#/$defs/identifier"},
+        "checksum": {"$ref": "#/$defs/hash"},
+        "as_of": {"$ref": "#/$defs/timestamp"},
+        "quality": {"enum": ["FRESH", "STALE", "UNAVAILABLE", "UNCERTAIN"]},
+        "completeness": {"enum": ["COMPLETE", "PARTIAL"]}
+      }
+    },
+    "strategyMandate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "dto_type", "schema_version", "mandate_id", "mandate_version", "mandate_checksum",
+        "strategy_id", "strategy_version", "scope_type", "scope_id", "account_id",
+        "portfolio_id", "allowed_target_types", "allowed_instrument_ids", "long_only",
+        "max_target_weight", "max_position_quantity", "cash_buffer_ratio",
+        "cash_buffer_absolute", "effective_from", "effective_until"
+      ],
+      "properties": {
+        "dto_type": {"const": "STRATEGY_MANDATE"},
+        "schema_version": {"const": 1},
+        "mandate_id": {"$ref": "#/$defs/uuid"},
+        "mandate_version": {"$ref": "#/$defs/identifier"},
+        "mandate_checksum": {"$ref": "#/$defs/hash"},
+        "strategy_id": {"$ref": "#/$defs/identifier"},
+        "strategy_version": {"type": "string", "minLength": 1, "maxLength": 64},
+        "scope_type": {"const": "STRATEGY_SLEEVE"},
+        "scope_id": {"$ref": "#/$defs/identifier"},
+        "account_id": {"$ref": "#/$defs/identifier"},
+        "portfolio_id": {"$ref": "#/$defs/uuid"},
+        "allowed_target_types": {
+          "type": "array", "items": {"enum": ["WEIGHT", "POSITION"]},
+          "minItems": 1, "maxItems": 2, "uniqueItems": true
+        },
+        "allowed_instrument_ids": {
+          "type": "array", "items": {"$ref": "#/$defs/instrumentId"},
+          "minItems": 1, "maxItems": 4096, "uniqueItems": true
+        },
+        "long_only": {"const": true},
+        "max_target_weight": {"$ref": "#/$defs/ratio"},
+        "max_position_quantity": {"type": "integer", "minimum": 0, "maximum": 9007199254740991},
+        "cash_buffer_ratio": {"$ref": "#/$defs/ratio"},
+        "cash_buffer_absolute": {"$ref": "#/$defs/nonNegativeDecimal"},
+        "effective_from": {"$ref": "#/$defs/timestamp"},
+        "effective_until": {"$ref": "#/$defs/timestamp"}
+      }
+    },
+    "instrumentSpec": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "dto_type", "schema_version", "instrument_id", "instrument_spec_version",
+        "instrument_spec_checksum", "currency", "quantity_scale", "lot_size",
+        "min_order_quantity", "tick_size", "currency_minor_unit", "price_band_source",
+        "quantity_rounding", "buy_price_rounding", "sell_price_rounding",
+        "sell_to_zero_odd_lot_allowed", "effective_from", "effective_until"
+      ],
+      "properties": {
+        "dto_type": {"const": "INSTRUMENT_SPEC"},
+        "schema_version": {"const": 1},
+        "instrument_id": {"$ref": "#/$defs/instrumentId"},
+        "instrument_spec_version": {"$ref": "#/$defs/identifier"},
+        "instrument_spec_checksum": {"$ref": "#/$defs/hash"},
+        "currency": {"$ref": "#/$defs/currency"},
+        "quantity_scale": {"const": 0},
+        "lot_size": {"type": "integer", "minimum": 1, "maximum": 9007199254740991},
+        "min_order_quantity": {"type": "integer", "minimum": 1, "maximum": 9007199254740991},
+        "tick_size": {"$ref": "#/$defs/positiveDecimal"},
+        "currency_minor_unit": {"$ref": "#/$defs/positiveDecimal"},
+        "price_band_source": {"const": "MARKET_SNAPSHOT_LIMITS"},
+        "quantity_rounding": {"const": "TOWARD_ZERO"},
+        "buy_price_rounding": {"const": "FLOOR"},
+        "sell_price_rounding": {"const": "CEILING"},
+        "sell_to_zero_odd_lot_allowed": {"type": "boolean"},
+        "effective_from": {"$ref": "#/$defs/timestamp"},
+        "effective_until": {"$ref": "#/$defs/timestamp"}
+      }
+    },
+    "resolutionPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "dto_type", "schema_version", "resolver_policy_version", "policy_checksum",
+        "order_type", "time_in_force", "position_effect", "price_reference_source",
+        "quantity_deadband", "notional_deadband", "max_snapshot_age_ms"
+      ],
+      "properties": {
+        "dto_type": {"const": "TARGET_RESOLUTION_POLICY"},
+        "schema_version": {"const": 1},
+        "resolver_policy_version": {"const": "TARGET_RESOLVER_V1"},
+        "policy_checksum": {"$ref": "#/$defs/hash"},
+        "order_type": {"const": "LIMIT"},
+        "time_in_force": {"const": "DAY"},
+        "position_effect": {"const": "AUTO"},
+        "price_reference_source": {"const": "MARKET_REFERENCE_PRICE"},
+        "quantity_deadband": {"type": "integer", "minimum": 0, "maximum": 9007199254740991},
+        "notional_deadband": {"$ref": "#/$defs/nonNegativeDecimal"},
+        "max_snapshot_age_ms": {"type": "integer", "minimum": 1, "maximum": 86400000}
+      }
+    },
+    "positionInput": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["quantity", "available_quantity"],
+      "properties": {
+        "quantity": {"type": "integer", "minimum": 0, "maximum": 9007199254740991},
+        "available_quantity": {"type": "integer", "minimum": 0, "maximum": 9007199254740991}
+      }
+    },
+    "priceReference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source", "price", "currency", "lower_price_limit", "upper_price_limit",
+        "observed_at"
+      ],
+      "properties": {
+        "source": {"const": "MARKET_REFERENCE_PRICE"},
+        "price": {"$ref": "#/$defs/positiveDecimal"},
+        "currency": {"$ref": "#/$defs/currency"},
+        "lower_price_limit": {"$ref": "#/$defs/positiveDecimal"},
+        "upper_price_limit": {"$ref": "#/$defs/positiveDecimal"},
+        "observed_at": {"$ref": "#/$defs/timestamp"}
+      }
+    },
+    "activeOrderEffect": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "order_id", "intent_id", "order_version", "strategy_id", "strategy_version",
+        "scope_id", "account_id", "instrument_id", "state", "side", "original_quantity",
+        "cumulative_quantity", "position_applied_cumulative_quantity", "leaves_quantity",
+        "expected_delta", "effect_basis"
+      ],
+      "properties": {
+        "order_id": {"$ref": "#/$defs/uuid"},
+        "intent_id": {"$ref": "#/$defs/uuid"},
+        "order_version": {"type": "integer", "minimum": 1, "maximum": 9007199254740991},
+        "strategy_id": {"$ref": "#/$defs/identifier"},
+        "strategy_version": {"type": "string", "minLength": 1, "maxLength": 64},
+        "scope_id": {"$ref": "#/$defs/identifier"},
+        "account_id": {"$ref": "#/$defs/identifier"},
+        "instrument_id": {"$ref": "#/$defs/instrumentId"},
+        "state": {"enum": [
+          "REGISTERED", "RISK_PENDING", "APPROVED", "SUBMITTING", "SUBMIT_UNKNOWN",
+          "SUBMITTED", "PARTIALLY_FILLED", "CANCEL_PENDING", "CANCEL_UNKNOWN", "SUSPENDED"
+        ]},
+        "side": {"enum": ["BUY", "SELL"]},
+        "original_quantity": {"type": "integer", "minimum": 1, "maximum": 9007199254740991},
+        "cumulative_quantity": {"type": "integer", "minimum": 0, "maximum": 9007199254740991},
+        "position_applied_cumulative_quantity": {"type": "integer", "minimum": 0, "maximum": 9007199254740991},
+        "leaves_quantity": {"type": "integer", "minimum": 1, "maximum": 9007199254740991},
+        "expected_delta": {"type": "integer", "minimum": -9007199254740991, "maximum": 9007199254740991, "not": {"const": 0}},
+        "effect_basis": {"const": "OMS_LEAVES_CONSERVATIVE_V1"}
+      }
+    },
+    "resolutionSnapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "dto_type", "schema_version", "snapshot_id", "account_id", "portfolio_id",
+        "scope_id", "instrument_id", "currency", "portfolio_source", "account_source",
+        "market_source", "strategy_sleeve_source", "active_order_source", "total_equity",
+        "projected_available_cash", "current_position", "strategy_sleeve", "price_reference",
+        "portfolio_trade_watermark", "strategy_sleeve_trade_watermark",
+        "active_order_trade_watermark", "account_reserved_orders_snapshot_version",
+        "active_order_effects", "captured_at"
+      ],
+      "properties": {
+        "dto_type": {"const": "TARGET_RESOLUTION_SNAPSHOT"},
+        "schema_version": {"const": 1},
+        "snapshot_id": {"$ref": "#/$defs/uuid"},
+        "account_id": {"$ref": "#/$defs/identifier"},
+        "portfolio_id": {"$ref": "#/$defs/uuid"},
+        "scope_id": {"$ref": "#/$defs/identifier"},
+        "instrument_id": {"$ref": "#/$defs/instrumentId"},
+        "currency": {"$ref": "#/$defs/currency"},
+        "portfolio_source": {"$ref": "#/$defs/sourceSnapshotRef"},
+        "account_source": {"$ref": "#/$defs/sourceSnapshotRef"},
+        "market_source": {"$ref": "#/$defs/sourceSnapshotRef"},
+        "strategy_sleeve_source": {"$ref": "#/$defs/sourceSnapshotRef"},
+        "active_order_source": {"$ref": "#/$defs/sourceSnapshotRef"},
+        "total_equity": {"$ref": "#/$defs/nonNegativeDecimal"},
+        "projected_available_cash": {"$ref": "#/$defs/nonNegativeDecimal"},
+        "current_position": {"$ref": "#/$defs/positionInput"},
+        "strategy_sleeve": {"$ref": "#/$defs/positionInput"},
+        "price_reference": {"$ref": "#/$defs/priceReference"},
+        "portfolio_trade_watermark": {"type": "integer", "minimum": 0, "maximum": 9007199254740991},
+        "strategy_sleeve_trade_watermark": {"type": "integer", "minimum": 0, "maximum": 9007199254740991},
+        "active_order_trade_watermark": {"type": "integer", "minimum": 0, "maximum": 9007199254740991},
+        "account_reserved_orders_snapshot_version": {"$ref": "#/$defs/identifier"},
+        "active_order_effects": {
+          "type": "array", "items": {"$ref": "#/$defs/activeOrderEffect"},
+          "maxItems": 1000
+        },
+        "captured_at": {"$ref": "#/$defs/timestamp"}
+      }
+    },
+    "acceptedTargetRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["message_id", "correlation_id", "accepted_at", "generation", "payload_fingerprint"],
+      "properties": {
+        "message_id": {"type": "string", "minLength": 16, "maxLength": 64},
+        "correlation_id": {"type": "string", "minLength": 16, "maxLength": 64},
+        "accepted_at": {"$ref": "#/$defs/timestamp"},
+        "generation": {"type": "integer", "minimum": 1, "maximum": 9007199254740991},
+        "payload_fingerprint": {"$ref": "#/$defs/hash"}
+      }
+    },
+    "acceptedOmsRegistrationRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["message_id", "accepted_at", "payload_fingerprint"],
+      "properties": {
+        "message_id": {"type": "string", "minLength": 16, "maxLength": 64},
+        "accepted_at": {"$ref": "#/$defs/timestamp"},
+        "payload_fingerprint": {"$ref": "#/$defs/hash"}
+      }
+    },
+    "resolutionTrigger": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "trigger_message_id", "trigger_type", "source_contract_id", "source_state_version", "account_id", "scope_id",
+        "instrument_id", "source_payload_fingerprint", "trigger_fingerprint", "occurred_at",
+        "accepted_at"
+      ],
+      "properties": {
+        "trigger_message_id": {"type": "string", "minLength": 16, "maxLength": 64},
+        "trigger_type": {"enum": [
+          "TARGET_ACCEPTED", "POSITION_CHANGED", "ORDER_CHANGED", "ACCOUNT_CHANGED",
+          "MARKET_CHANGED", "SCHEDULED_REEVALUATION"
+        ]},
+        "source_contract_id": {"$ref": "#/$defs/identifier"},
+        "source_state_version": {"oneOf": [{"$ref": "#/$defs/identifier"}, {"type": "null"}]},
+        "account_id": {"$ref": "#/$defs/identifier"},
+        "scope_id": {"$ref": "#/$defs/identifier"},
+        "instrument_id": {"$ref": "#/$defs/instrumentId"},
+        "source_payload_fingerprint": {"$ref": "#/$defs/hash"},
+        "trigger_fingerprint": {"$ref": "#/$defs/hash"},
+        "occurred_at": {"$ref": "#/$defs/timestamp"},
+        "accepted_at": {"$ref": "#/$defs/timestamp"}
+      },
+      "allOf": [
+        {"if": {"properties": {"trigger_type": {"const": "TARGET_ACCEPTED"}}, "required": ["trigger_type"]}, "then": {"properties": {"source_contract_id": {"const": "CONTRACT-STRATEGY-TARGET-V1"}, "source_state_version": {"type": "null"}}}},
+        {"if": {"properties": {"trigger_type": {"const": "POSITION_CHANGED"}}, "required": ["trigger_type"]}, "then": {"properties": {"source_contract_id": {"const": "CONTRACT-PORTFOLIO-POSITION-CHANGED-V1"}, "source_state_version": {"$ref": "#/$defs/identifier"}}}},
+        {"if": {"properties": {"trigger_type": {"const": "ORDER_CHANGED"}}, "required": ["trigger_type"]}, "then": {"properties": {"source_contract_id": {"enum": ["CONTRACT-ORDER-REGISTERED-V1", "CONTRACT-ORDER-STATUS-V1"]}, "source_state_version": {"$ref": "#/$defs/identifier"}}}},
+        {"if": {"properties": {"trigger_type": {"const": "ACCOUNT_CHANGED"}}, "required": ["trigger_type"]}, "then": {"properties": {"source_contract_id": {"const": "CONTRACT-TARGET-RESOLVER-V1#ACCOUNT-SNAPSHOT"}, "source_state_version": {"$ref": "#/$defs/identifier"}}}},
+        {"if": {"properties": {"trigger_type": {"const": "MARKET_CHANGED"}}, "required": ["trigger_type"]}, "then": {"properties": {"source_contract_id": {"const": "CONTRACT-MARKET-DATA-V1"}, "source_state_version": {"$ref": "#/$defs/identifier"}}}},
+        {"if": {"properties": {"trigger_type": {"const": "SCHEDULED_REEVALUATION"}}, "required": ["trigger_type"]}, "then": {"properties": {"source_contract_id": {"const": "CONTRACT-TARGET-RESOLVER-V1#SCHEDULE"}, "source_state_version": {"type": "null"}}}}
+      ]
+    },
+    "resolutionRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "dto_type", "schema_version", "accepted_target", "resolution_trigger", "target", "mandate",
+        "instrument_spec", "snapshot", "policy", "resolution_time", "target_fingerprint",
+        "input_fingerprint"
+      ],
+      "properties": {
+        "dto_type": {"const": "TARGET_RESOLUTION_REQUEST"},
+        "schema_version": {"const": 1},
+        "accepted_target": {"$ref": "#/$defs/acceptedTargetRef"},
+        "resolution_trigger": {"$ref": "#/$defs/resolutionTrigger"},
+        "target": {"$ref": "urn:quantiqmt:command:strategy.submit_target:v1"},
+        "mandate": {"$ref": "#/$defs/strategyMandate"},
+        "instrument_spec": {"$ref": "#/$defs/instrumentSpec"},
+        "snapshot": {"$ref": "#/$defs/resolutionSnapshot"},
+        "policy": {"$ref": "#/$defs/resolutionPolicy"},
+        "resolution_time": {"$ref": "#/$defs/timestamp"},
+        "target_fingerprint": {"$ref": "#/$defs/hash"},
+        "input_fingerprint": {"$ref": "#/$defs/hash"}
+      }
+    },
+    "resolutionCalculation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "decision_stage", "target_weight", "desired_quantity", "sleeve_quantity",
+        "active_order_expected_delta", "effective_quantity", "unadjusted_delta",
+        "residual_delta", "deadband_notional", "rounded_quantity", "side",
+        "reference_price", "limit_price", "estimated_notional", "projected_available_cash",
+        "required_cash_buffer", "available_sell_quantity"
+      ],
+      "properties": {
+        "decision_stage": {"enum": ["INPUT_GUARD", "TARGET_CONVERSION", "ACTIVE_ORDER_NETTING", "DEADBAND", "ROUNDING", "CASH_OR_AVAILABILITY", "OUTPUT"]},
+        "target_weight": {"oneOf": [{"$ref": "#/$defs/ratio"}, {"type": "null"}]},
+        "desired_quantity": {"type": ["integer", "null"], "minimum": 0},
+        "sleeve_quantity": {"type": ["integer", "null"], "minimum": 0},
+        "active_order_expected_delta": {"type": ["integer", "null"]},
+        "effective_quantity": {"type": ["integer", "null"]},
+        "unadjusted_delta": {"type": ["integer", "null"]},
+        "residual_delta": {"type": ["integer", "null"]},
+        "deadband_notional": {"oneOf": [{"$ref": "#/$defs/nonNegativeDecimal"}, {"type": "null"}]},
+        "rounded_quantity": {"type": ["integer", "null"], "minimum": 0},
+        "side": {"enum": ["BUY", "SELL", null]},
+        "reference_price": {"oneOf": [{"$ref": "#/$defs/positiveDecimal"}, {"type": "null"}]},
+        "limit_price": {"oneOf": [{"$ref": "#/$defs/positiveDecimal"}, {"type": "null"}]},
+        "estimated_notional": {"oneOf": [{"$ref": "#/$defs/nonNegativeDecimal"}, {"type": "null"}]},
+        "projected_available_cash": {"oneOf": [{"$ref": "#/$defs/nonNegativeDecimal"}, {"type": "null"}]},
+        "required_cash_buffer": {"oneOf": [{"$ref": "#/$defs/nonNegativeDecimal"}, {"type": "null"}]},
+        "available_sell_quantity": {"type": ["integer", "null"], "minimum": 0}
+      }
+    },
+    "intentEnvelopeBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "message_id", "message_type", "schema_version", "occurred_at", "correlation_id",
+        "causation_id", "partition_key", "idempotency_key"
+      ],
+      "properties": {
+        "message_id": {"$ref": "#/$defs/uuid"},
+        "message_type": {"const": "strategy.submit_order_intent.v1"},
+        "schema_version": {"const": 1},
+        "occurred_at": {"$ref": "#/$defs/timestamp"},
+        "correlation_id": {"type": "string", "minLength": 16, "maxLength": 64},
+        "causation_id": {"type": "string", "minLength": 16, "maxLength": 64},
+        "partition_key": {"type": "string", "minLength": 1, "maxLength": 256},
+        "idempotency_key": {"$ref": "#/$defs/uuid"}
+      }
+    },
+    "noActionReason": {"enum": [
+      "TARGET_ALREADY_SATISFIED", "ACTIVE_ORDERS_COVER_TARGET", "WITHIN_DEADBAND",
+      "ROUNDED_TO_ZERO", "BELOW_MIN_ORDER_QUANTITY"
+    ]},
+    "rejectedReason": {"enum": [
+      "TARGET_SHAPE_INVALID", "TARGET_NOT_YET_EFFECTIVE", "TARGET_EXPIRED",
+      "MANDATE_NOT_EFFECTIVE", "TARGET_STRATEGY_MISMATCH", "TARGET_SCOPE_UNAUTHORIZED",
+      "TARGET_TYPE_UNAUTHORIZED", "INSTRUMENT_UNAUTHORIZED", "TARGET_WEIGHT_OUT_OF_RANGE",
+      "TARGET_POSITION_OUT_OF_RANGE", "SNAPSHOT_IDENTITY_MISMATCH", "SNAPSHOT_NOT_FRESH",
+      "SNAPSHOT_TOO_OLD", "INSTRUMENT_SPEC_NOT_EFFECTIVE",
+      "PRICE_REFERENCE_INVALID", "PRICE_OUTSIDE_BAND", "ACTIVE_ORDER_SNAPSHOT_INVALID",
+      "ACTIVE_ORDER_DIRECTION_CONFLICT", "ACTIVE_ORDERS_OVERSHOOT_TARGET",
+      "INSUFFICIENT_AVAILABLE_QUANTITY", "CASH_BUFFER_BREACH"
+    ]},
+    "businessRejectedReason": {"enum": [
+      "TARGET_SHAPE_INVALID", "TARGET_NOT_YET_EFFECTIVE", "TARGET_EXPIRED",
+      "MANDATE_NOT_EFFECTIVE", "TARGET_STRATEGY_MISMATCH", "TARGET_SCOPE_UNAUTHORIZED",
+      "TARGET_TYPE_UNAUTHORIZED", "INSTRUMENT_UNAUTHORIZED", "TARGET_WEIGHT_OUT_OF_RANGE",
+      "TARGET_POSITION_OUT_OF_RANGE", "INSTRUMENT_SPEC_NOT_EFFECTIVE",
+      "PRICE_REFERENCE_INVALID", "PRICE_OUTSIDE_BAND", "ACTIVE_ORDER_DIRECTION_CONFLICT",
+      "ACTIVE_ORDERS_OVERSHOOT_TARGET", "INSUFFICIENT_AVAILABLE_QUANTITY", "CASH_BUFFER_BREACH"
+    ]},
+    "snapshotRejectedReason": {"enum": [
+      "SNAPSHOT_IDENTITY_MISMATCH", "SNAPSHOT_NOT_FRESH", "SNAPSHOT_TOO_OLD",
+      "ACTIVE_ORDER_SNAPSHOT_INVALID"
+    ]},
+    "resolutionResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "dto_type", "schema_version", "resolution_id", "target_id", "target_fingerprint",
+        "input_fingerprint", "outcome", "reason_code", "error_code", "order_intent",
+        "intent_envelope", "calculation", "resolved_at"
+      ],
+      "properties": {
+        "dto_type": {"const": "TARGET_RESOLUTION_RESULT"},
+        "schema_version": {"const": 1},
+        "resolution_id": {"$ref": "#/$defs/uuid"},
+        "target_id": {"type": "string", "minLength": 16, "maxLength": 64},
+        "target_fingerprint": {"$ref": "#/$defs/hash"},
+        "input_fingerprint": {"$ref": "#/$defs/hash"},
+        "outcome": {"enum": ["INTENT", "NO_ACTION", "REJECTED"]},
+        "reason_code": {"type": "string"},
+        "error_code": {"enum": [null, "QQ-STRATEGY-3001", "QQ-STRATEGY-3003"]},
+        "order_intent": {"oneOf": [{"$ref": "urn:quantiqmt:command:strategy.submit_order_intent:v1"}, {"type": "null"}]},
+        "intent_envelope": {"oneOf": [{"$ref": "#/$defs/intentEnvelopeBinding"}, {"type": "null"}]},
+        "calculation": {"$ref": "#/$defs/resolutionCalculation"},
+        "resolved_at": {"$ref": "#/$defs/timestamp"}
+      },
+      "oneOf": [
+        {
+          "properties": {
+            "outcome": {"const": "INTENT"},
+            "reason_code": {"const": "ORDER_INTENT_CREATED"},
+            "error_code": {"type": "null"},
+            "order_intent": {"$ref": "urn:quantiqmt:command:strategy.submit_order_intent:v1"},
+            "intent_envelope": {"$ref": "#/$defs/intentEnvelopeBinding"}
+          }
+        },
+        {
+          "properties": {
+            "outcome": {"const": "NO_ACTION"},
+            "reason_code": {"$ref": "#/$defs/noActionReason"},
+            "error_code": {"type": "null"},
+            "order_intent": {"type": "null"},
+            "intent_envelope": {"type": "null"}
+          }
+        },
+        {
+          "properties": {
+            "outcome": {"const": "REJECTED"},
+            "reason_code": {"$ref": "#/$defs/rejectedReason"},
+            "error_code": {"enum": ["QQ-STRATEGY-3001", "QQ-STRATEGY-3003"]},
+            "order_intent": {"type": "null"},
+            "intent_envelope": {"type": "null"}
+          }
+        }
+      ],
+      "allOf": [
+        {
+          "if": {"properties": {"reason_code": {"$ref": "#/$defs/businessRejectedReason"}}, "required": ["reason_code"]},
+          "then": {"properties": {"outcome": {"const": "REJECTED"}, "error_code": {"const": "QQ-STRATEGY-3001"}}}
+        },
+        {
+          "if": {"properties": {"reason_code": {"$ref": "#/$defs/snapshotRejectedReason"}}, "required": ["reason_code"]},
+          "then": {"properties": {"outcome": {"const": "REJECTED"}, "error_code": {"const": "QQ-STRATEGY-3003"}}}
+        }
+      ]
+    },
+    "storedResolutionRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "dto_type", "schema_version", "target_id", "target_fingerprint", "resolution_id",
+        "input_fingerprint", "request", "result", "result_fingerprint", "outbox_message_id",
+        "publication_status", "intent_handoff_status", "registered_order_id",
+        "oms_registration_ref", "persisted_at"
+      ],
+      "properties": {
+        "dto_type": {"const": "STORED_TARGET_RESOLUTION"},
+        "schema_version": {"const": 1},
+        "target_id": {"type": "string", "minLength": 16, "maxLength": 64},
+        "target_fingerprint": {"$ref": "#/$defs/hash"},
+        "resolution_id": {"$ref": "#/$defs/uuid"},
+        "input_fingerprint": {"$ref": "#/$defs/hash"},
+        "request": {"$ref": "#/$defs/resolutionRequest"},
+        "result": {"$ref": "#/$defs/resolutionResult"},
+        "result_fingerprint": {"$ref": "#/$defs/hash"},
+        "outbox_message_id": {"oneOf": [{"$ref": "#/$defs/uuid"}, {"type": "null"}]},
+        "publication_status": {"enum": ["NOT_APPLICABLE", "PENDING", "PUBLISHED"]},
+        "intent_handoff_status": {"enum": ["NOT_APPLICABLE", "PENDING_OUTBOX", "PUBLISHED_AWAITING_OMS", "OMS_REGISTERED"]},
+        "registered_order_id": {"oneOf": [{"$ref": "#/$defs/uuid"}, {"type": "null"}]},
+        "oms_registration_ref": {"oneOf": [{"$ref": "#/$defs/acceptedOmsRegistrationRef"}, {"type": "null"}]},
+        "persisted_at": {"$ref": "#/$defs/timestamp"}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"result": {"properties": {"outcome": {"const": "INTENT"}}, "required": ["outcome"]}}, "required": ["result"]},
+          "then": {
+            "properties": {
+              "outbox_message_id": {"$ref": "#/$defs/uuid"},
+              "publication_status": {"enum": ["PENDING", "PUBLISHED"]},
+              "intent_handoff_status": {"enum": ["PENDING_OUTBOX", "PUBLISHED_AWAITING_OMS", "OMS_REGISTERED"]}
+            }
+          }
+        },
+        {
+          "if": {"properties": {"result": {"properties": {"outcome": {"enum": ["NO_ACTION", "REJECTED"]}}, "required": ["outcome"]}}, "required": ["result"]},
+          "then": {
+            "properties": {
+              "outbox_message_id": {"type": "null"},
+              "publication_status": {"const": "NOT_APPLICABLE"},
+              "intent_handoff_status": {"const": "NOT_APPLICABLE"},
+              "registered_order_id": {"type": "null"},
+              "oms_registration_ref": {"type": "null"}
+            }
+          }
+        },
+        {
+          "if": {"properties": {"intent_handoff_status": {"const": "PENDING_OUTBOX"}}, "required": ["intent_handoff_status"]},
+          "then": {"properties": {"publication_status": {"const": "PENDING"}, "registered_order_id": {"type": "null"}, "oms_registration_ref": {"type": "null"}}}
+        },
+        {
+          "if": {"properties": {"intent_handoff_status": {"const": "PUBLISHED_AWAITING_OMS"}}, "required": ["intent_handoff_status"]},
+          "then": {"properties": {"publication_status": {"const": "PUBLISHED"}, "registered_order_id": {"type": "null"}, "oms_registration_ref": {"type": "null"}}}
+        },
+        {
+          "if": {"properties": {"intent_handoff_status": {"const": "OMS_REGISTERED"}}, "required": ["intent_handoff_status"]},
+          "then": {
+            "properties": {
+              "registered_order_id": {"$ref": "#/$defs/uuid"},
+              "oms_registration_ref": {"$ref": "#/$defs/acceptedOmsRegistrationRef"}
+            }
+          }
+        }
+      ]
+    },
+    "resolutionTriggerReceipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "dto_type", "schema_version", "target_id", "target_fingerprint", "trigger",
+        "outcome", "reason_code", "error_code", "resolution_id", "recorded_at"
+      ],
+      "properties": {
+        "dto_type": {"const": "TARGET_RESOLUTION_TRIGGER_RECEIPT"},
+        "schema_version": {"const": 1},
+        "target_id": {"type": "string", "minLength": 16, "maxLength": 64},
+        "target_fingerprint": {"$ref": "#/$defs/hash"},
+        "trigger": {"$ref": "#/$defs/resolutionTrigger"},
+        "outcome": {"enum": ["NEW_RESOLUTION", "EXACT_TRIGGER_REPLAY", "EXACT_INPUT_REPLAY", "HANDOFF_DEFERRED", "TARGET_CONFLICT", "TRIGGER_CONFLICT", "TRIGGER_REJECTED", "SNAPSHOT_REJECTED", "INTEGRITY_REJECTED"]},
+        "reason_code": {"enum": ["NEW_RESOLUTION", "EXACT_TRIGGER_REPLAY", "EXACT_INPUT_REPLAY", "INTENT_HANDOFF_PENDING", "TARGET_REPLAY_CONFLICT", "RESOLUTION_TRIGGER_CONFLICT", "RESOLUTION_TRIGGER_INVALID", "SNAPSHOT_BUILD_FAILED", "SNAPSHOT_IDENTITY_MISMATCH", "SNAPSHOT_NOT_FRESH", "SNAPSHOT_TOO_OLD", "SOURCE_CHECKSUM_MISMATCH", "ACTIVE_ORDER_SNAPSHOT_INVALID", "DETERMINISTIC_IDENTITY_COLLISION"]},
+        "error_code": {"enum": [null, "QQ-STRATEGY-3002", "QQ-STRATEGY-3003", "QQ-STORAGE-7011"]},
+        "resolution_id": {"oneOf": [{"$ref": "#/$defs/uuid"}, {"type": "null"}]},
+        "recorded_at": {"$ref": "#/$defs/timestamp"}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"outcome": {"const": "NEW_RESOLUTION"}}, "required": ["outcome"]},
+          "then": {"properties": {"reason_code": {"const": "NEW_RESOLUTION"}}}
+        },
+        {
+          "if": {"properties": {"outcome": {"const": "EXACT_TRIGGER_REPLAY"}}, "required": ["outcome"]},
+          "then": {"properties": {"reason_code": {"const": "EXACT_TRIGGER_REPLAY"}}}
+        },
+        {
+          "if": {"properties": {"outcome": {"const": "EXACT_INPUT_REPLAY"}}, "required": ["outcome"]},
+          "then": {"properties": {"reason_code": {"const": "EXACT_INPUT_REPLAY"}}}
+        },
+        {
+          "if": {"properties": {"outcome": {"const": "HANDOFF_DEFERRED"}}, "required": ["outcome"]},
+          "then": {
+            "properties": {
+              "reason_code": {"const": "INTENT_HANDOFF_PENDING"},
+              "error_code": {"type": "null"},
+              "resolution_id": {"type": "null"}
+            }
+          }
+        },
+        {
+          "if": {"properties": {"outcome": {"const": "TARGET_CONFLICT"}}, "required": ["outcome"]},
+          "then": {"properties": {"reason_code": {"const": "TARGET_REPLAY_CONFLICT"}}}
+        },
+        {
+          "if": {"properties": {"outcome": {"const": "TRIGGER_CONFLICT"}}, "required": ["outcome"]},
+          "then": {"properties": {"reason_code": {"const": "RESOLUTION_TRIGGER_CONFLICT"}}}
+        },
+        {
+          "if": {"properties": {"outcome": {"const": "TRIGGER_REJECTED"}}, "required": ["outcome"]},
+          "then": {
+            "properties": {
+              "reason_code": {"const": "RESOLUTION_TRIGGER_INVALID"},
+              "error_code": {"const": "QQ-STRATEGY-3003"},
+              "resolution_id": {"type": "null"}
+            }
+          }
+        },
+        {
+          "if": {"properties": {"outcome": {"const": "SNAPSHOT_REJECTED"}}, "required": ["outcome"]},
+          "then": {
+            "properties": {
+              "reason_code": {"enum": ["SNAPSHOT_BUILD_FAILED", "SNAPSHOT_IDENTITY_MISMATCH", "SNAPSHOT_NOT_FRESH", "SNAPSHOT_TOO_OLD", "SOURCE_CHECKSUM_MISMATCH", "ACTIVE_ORDER_SNAPSHOT_INVALID"]},
+              "error_code": {"const": "QQ-STRATEGY-3003"},
+              "resolution_id": {"type": "null"}
+            }
+          }
+        },
+        {
+          "if": {"properties": {"outcome": {"const": "INTEGRITY_REJECTED"}}, "required": ["outcome"]},
+          "then": {
+            "properties": {
+              "reason_code": {"const": "DETERMINISTIC_IDENTITY_COLLISION"},
+              "error_code": {"const": "QQ-STORAGE-7011"},
+              "resolution_id": {"type": "null"}
+            }
+          }
+        },
+        {
+          "if": {"properties": {"outcome": {"enum": ["TARGET_CONFLICT", "TRIGGER_CONFLICT"]}}, "required": ["outcome"]},
+          "then": {"properties": {"error_code": {"const": "QQ-STRATEGY-3002"}, "resolution_id": {"type": "null"}}}
+        },
+        {
+          "if": {"properties": {"outcome": {"enum": ["NEW_RESOLUTION", "EXACT_TRIGGER_REPLAY", "EXACT_INPUT_REPLAY"]}}, "required": ["outcome"]},
+          "then": {"properties": {"error_code": {"type": "null"}, "resolution_id": {"$ref": "#/$defs/uuid"}}}
+        }
+      ]
+    }
+  }
+}

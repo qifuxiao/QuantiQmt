@@ -1,5 +1,5 @@
 catalog:
-  version: 4
+  version: 6
   format: "QQ-{DOMAIN}-{NUMBER}"
   ranges:
     COMMON: [1000, 1999]
@@ -12,6 +12,18 @@ catalog:
     RECOVERY: [8000, 8999]
     OPERATIONS: [9000, 9999]
 errors:
+  - code: QQ-STRATEGY-3001
+    name: TARGET_RESOLUTION_REJECTED
+    category: BUSINESS
+    retry: corrected_target_or_fresh_unchanged_identity_inputs_only
+  - code: QQ-STRATEGY-3002
+    name: TARGET_REPLAY_CONFLICT
+    category: CONFLICT
+    retry: never_reuse_the_conflicting_target_or_trigger_identity
+  - code: QQ-STRATEGY-3003
+    name: TARGET_RESOLUTION_SNAPSHOT_INVALID
+    category: DATA_QUALITY
+    retry: new_verified_trigger_after_fresh_coherent_verified_snapshot
   - code: QQ-COMMON-1003
     name: VERSION_CONFLICT
     category: CONFLICT
@@ -173,4 +185,5 @@ compatibility:
   version_3_additive_codes: [QQ-RISK-4003, QQ-RISK-4004, QQ-RISK-4005, QQ-RISK-4006, QQ-RISK-4007, QQ-RISK-4008, QQ-RISK-4009, QQ-RISK-4010, QQ-RISK-4011]
   version_4_additive_codes: [QQ-STORAGE-7007, QQ-STORAGE-7008, QQ-STORAGE-7009, QQ-STORAGE-7010, QQ-RECOVERY-8003, QQ-RECOVERY-8004, QQ-RECOVERY-8005, QQ-RECOVERY-8006, QQ-RECOVERY-8007]
   version_5_additive_codes: [QQ-STORAGE-7011, QQ-STORAGE-7012, QQ-STORAGE-7013, QQ-STORAGE-7014]
+  version_6_additive_codes: [QQ-STRATEGY-3001, QQ-STRATEGY-3002, QQ-STRATEGY-3003]
   existing_code_meanings_changed: false

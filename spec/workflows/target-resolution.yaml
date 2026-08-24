@@ -1,0 +1,113 @@
+workflow:
+  id: WF-TARGET-RESOLUTION
+  input: trusted accepted strategy.submit_target.v1 or canonical registered Target plus trusted ResolutionTrigger
+  contracts:
+    request_result: CONTRACT-TARGET-RESOLVER-V1
+    semantic_validation: CONTRACT-TARGET-RESOLVER-SEMANTIC-V1
+    output: CONTRACT-ORDER-INTENT-V1
+    persistence: STORAGE-TARGET-RESOLUTION
+  correlation_key: target_id
+  steps:
+    - id: validate_accepted_target
+      owner: TargetResolutionApplication
+      requires: [schema_valid, running_generation_accepted, EMIT_TARGET_scope_accepted, payload_fingerprint_verified]
+      failure: retain_upstream_Inbox_or_strategy_runtime_rejection_without_target_registry_snapshot_resolution_or_intent
+    - id: register_target_identity
+      owner: TargetResolutionJournalPort
+      lookup_key: target_id
+      same_fingerprint: retain_canonical_accepted_target
+      different_fingerprint: REJECTED_TARGET_REPLAY_CONFLICT_QQ-STRATEGY-3002
+      transaction: insert_target_registry_if_absent_or_read_identical
+      read_or_commit_failure: fail_closed_QQ-STRATEGY-3003
+    - id: trigger_replay_lookup
+      owner: TargetResolutionJournalPort
+      lookup_key: [target_id, resolution_trigger.trigger_message_id]
+      ordering: before_any_new_snapshot_read
+      same_fingerprint: return_EXACT_TRIGGER_REPLAY_receipt_and_exact_committed_resolution_or_exact_prior_SNAPSHOT_REJECTED_receipt
+      different_fingerprint: REJECTED_RESOLUTION_TRIGGER_CONFLICT_QQ-STRATEGY-3002
+      read_failure: fail_closed_QQ-STRATEGY-3003
+    - id: validate_new_resolution_trigger
+      owner: TargetResolutionApplication
+      requires: [trusted_source_payload_fingerprint, monotonic_times, canonical_account_scope_instrument_binding, TARGET_ACCEPTED_canonical_lineage_when_applicable]
+      failure: atomically_append_TRIGGER_REJECTED_RESOLUTION_TRIGGER_INVALID_QQ-STRATEGY-3003_without_snapshot_resolution_or_intent
+    - id: guard_unresolved_intent_handoff
+      owner: TargetResolutionJournalPort
+      lookup_scope: [account_id, scope_id, instrument_id]
+      unresolved_states: [PENDING_OUTBOX, PUBLISHED_AWAITING_OMS]
+      ordering: before_any_new_snapshot_read
+      unresolved_result: atomically_append_HANDOFF_DEFERRED_INTENT_HANDOFF_PENDING_trigger_receipt_without_resolution_or_Outbox
+      release_evidence: canonical_oms.order_registered.v1_matching_same_intent_and_every_OrderIntent_field
+    - id: build_resolution_snapshot
+      owner: TargetResolutionSnapshotPort
+      absolute_deadline_required: true
+      sources: [PortfolioProjection, AccountProjection, MarketSnapshot, StrategySleeveProjection, OMSActiveOrderReadModel]
+      guards: [one_coherent_identity, checksums_verified, complete_and_fresh, trigger_source_state_version_included, bounded_active_orders]
+      failure: atomically_append_SNAPSHOT_REJECTED_QQ-STRATEGY-3003_trigger_receipt_without_fabricated_snapshot_resolution_or_intent
+    - id: input_replay_lookup
+      owner: TargetResolutionJournalPort
+      lookup_key: input_fingerprint
+      same_fingerprint: atomically_record_EXACT_INPUT_REPLAY_trigger_receipt_and_return_exact_record_without_new_Outbox
+      different_content_same_identity: QQ-STORAGE-7011_integrity_incident
+    - id: resolve_purely
+      owner: TargetResolver
+      input: TARGET_RESOLUTION_REQUEST
+      output: TARGET_RESOLUTION_RESULT
+      deterministic: true
+      external_io: forbidden
+      risk_approval: forbidden
+    - id: commit_resolution
+      owner: TargetResolutionJournalPort
+      transaction:
+        - append_NEW_RESOLUTION_trigger_receipt
+        - append_STORED_TARGET_RESOLUTION
+        - append_OrderIntent_command_to_Outbox_only_for_INTENT
+      unique: [target_id_plus_trigger_message_id, resolution_id, input_fingerprint, result_fingerprint]
+      partial_commit: forbidden
+      external_io_inside_transaction: forbidden
+      uncertain_commit: query_same_target_trigger_input_and_resolution_ids_before_any_retry
+    - id: publish_intent
+      owner: OutboxPublisher
+      guard: committed_INTENT_record
+      envelope_idempotency_key: intent_id
+      destination: OrderApplication
+      next_workflow: WF-SUBMIT-ORDER
+      publish_receipt: transport_acceptance_only
+  result_semantics:
+    INTENT: committed_result_and_OrderIntent_Outbox_record
+    NO_ACTION: committed_audit_result_without_OrderIntent
+    REJECTED: committed_audit_result_without_OrderIntent
+    PRE_RESOLUTION_REJECTED: committed_trigger_receipt_without_resolution_or_OrderIntent
+    HANDOFF_DEFERRED: committed_trigger_receipt_without_snapshot_resolution_or_OrderIntent
+  replay:
+    same_target_same_fingerprint: retain_target_identity_but_new_verified_trigger_may_resolve_a_new_snapshot
+    same_target_different_fingerprint: reject_identity_reuse
+    same_trigger_same_fingerprint: exact_prior_record_or_snapshot_rejection_before_snapshot_read
+    same_trigger_different_fingerprint: reject_trigger_identity_reuse
+    invalid_new_trigger: reject_and_record_without_snapshot_or_resolution
+    new_trigger_unresolved_handoff: defer_without_snapshot_or_new_Outbox
+    new_trigger_same_input: exact_prior_record_plus_trigger_receipt_without_new_Outbox
+    new_trigger_new_snapshot: deterministic_new_resolution_while_target_valid
+    commit_unknown: query_not_recompute
+    outbox_redelivery: same_message_id_and_intent_id
+  safety:
+    - TargetResolver_never_calls_Broker_Execution_Risk_or_OMS_write_Port
+    - active_orders_are_read_only_OMS_evidence_and_never_mutated
+    - OrderIntent_still_requires_OMS_registration_and_Risk
+    - stale_partial_unavailable_or_mixed_snapshots_fail_closed
+    - Decimal_strings_and_integer_quantity_only_no_float
+    - UNKNOWN_active_order_states_are_conservatively_counted_not_retried
+    - unresolved_Intent_to_OMS_handoff_blocks_new_snapshot_and_resolution_for_same_scope
+  observability:
+    structured_logs: [target_resolution_trigger_completed, target_resolution_completed_only_when_resolution_exists]
+    metrics: [target_resolution_trigger_total, target_resolution_total, target_resolution_duration_seconds]
+    audit_authority: trigger_receipt_plus_optional_STORED_TARGET_RESOLUTION
+  forbidden:
+    - broker_or_execution_call
+    - OMS_repository_or_state_mutation
+    - Risk_approval_or_bypass
+    - new_snapshot_read_before_target_and_trigger_replay_lookup
+    - new_snapshot_read_while_same_scope_has_unresolved_Intent_handoff
+    - recompute_after_uncertain_commit
+    - shrink_buy_to_hide_cash_buffer_breach
+    - sell_pending_buy_quantity
+    - float_price_money_weight_or_notional

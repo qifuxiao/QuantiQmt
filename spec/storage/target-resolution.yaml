@@ -1,0 +1,158 @@
+storage:
+  id: STORAGE-TARGET-RESOLUTION
+  version: 1
+  implementation_status: logical_contract_only_no_migration
+  authority:
+    accepted_target_identity: trusted_Inbox_accepted_message
+    target_registry: target_registry
+    resolution_trigger_deduplication: target_resolution_triggers
+    target_resolution: target_resolution_records
+    intent_handoff: target_resolution_records.intent_handoff_status_plus_verified_OMS_registration_receipt
+    source_positions_cash_market_and_orders: referenced_authoritative_source_snapshots
+    OrderIntent_delivery: transactional_Outbox
+    resolver_memory_or_cache: never_authority
+  canonicalization:
+    algorithm: RFC8785_JCS
+    encoding: UTF-8_without_BOM
+    unicode_normalization: none
+    decimal: unchanged_plain_string
+    float: forbidden
+  identity:
+    target_fingerprint: CONTRACT-TARGET-RESOLVER-SEMANTIC-V1
+    input_fingerprint: CONTRACT-TARGET-RESOLVER-SEMANTIC-V1
+    resolution_id: UUID5_7a6bdb48-22b7-5f65-bb55-63e4a8ff6325_input_fingerprint
+    intent_id: UUID5_resolution_id_order-intent-colon-0
+    result_fingerprint: SHA256_RFC8785_JCS_complete_result
+  logical_tables:
+    target_registry:
+      primary_key: [target_id]
+      columns:
+        target_id: {type: varchar, max_length: 64, nullable: false}
+        account_id: {type: varchar, max_length: 128, nullable: false}
+        scope_id: {type: varchar, max_length: 128, nullable: false}
+        instrument_id: {type: varchar, max_length: 64, nullable: false}
+        target_fingerprint: {type: char, length: 64, nullable: false}
+        canonical_accepted_target_ref: {type: json, nullable: false}
+        target_payload: {type: json, nullable: false}
+        registered_at: {type: timestamptz, nullable: false}
+      checks: [target_payload_and_accepted_ref_fingerprints_match_target_fingerprint]
+      mutation: [INSERT]
+      append_only: true
+    target_resolution_triggers:
+      primary_key: [target_id, trigger_message_id]
+      columns:
+        target_id: {type: varchar, max_length: 64, nullable: false}
+        trigger_message_id: {type: varchar, max_length: 64, nullable: false}
+        trigger_fingerprint: {type: char, length: 64, nullable: false}
+        trigger_type: {type: enum, values: [TARGET_ACCEPTED, POSITION_CHANGED, ORDER_CHANGED, ACCOUNT_CHANGED, MARKET_CHANGED, SCHEDULED_REEVALUATION], nullable: false}
+        resolution_id: {type: uuid, nullable: true}
+        replay_outcome: {type: enum, values: [NEW_RESOLUTION, EXACT_INPUT_REPLAY, HANDOFF_DEFERRED, TRIGGER_REJECTED, SNAPSHOT_REJECTED], nullable: false}
+        reason_code: {type: varchar, max_length: 64, nullable: false}
+        error_code: {type: varchar, max_length: 32, nullable: true}
+        trigger_payload: {type: json, nullable: false}
+        recorded_at: {type: timestamptz, nullable: false}
+      unique: [[target_id, trigger_message_id]]
+      foreign_keys:
+        - {columns: [target_id], references: "target_registry[target_id]"}
+        - {columns: [resolution_id], references: "target_resolution_records[resolution_id]", nullable: true, deferrable_for_atomic_new_resolution: true}
+      checks:
+        - source_payload_and_trigger_fingerprints_match
+        - trigger_scope_matches_target
+        - NEW_RESOLUTION_requires_same_reason_resolution_belongs_to_same_target_and_null_error
+        - EXACT_INPUT_REPLAY_requires_same_reason_resolution_belongs_to_same_target_and_null_error
+        - HANDOFF_DEFERRED_requires_INTENT_HANDOFF_PENDING_null_resolution_and_null_error
+        - TRIGGER_REJECTED_requires_RESOLUTION_TRIGGER_INVALID_null_resolution_and_QQ-STRATEGY-3003
+        - SNAPSHOT_REJECTED_requires_snapshot_reason_null_resolution_and_QQ-STRATEGY-3003
+      mutation: [INSERT]
+      append_only: true
+    target_resolution_records:
+      primary_key: [resolution_id]
+      columns:
+        resolution_id: {type: uuid, nullable: false}
+        target_id: {type: varchar, max_length: 64, nullable: false}
+        target_fingerprint: {type: char, length: 64, nullable: false}
+        input_fingerprint: {type: char, length: 64, nullable: false}
+        result_fingerprint: {type: char, length: 64, nullable: false}
+        outcome: {type: enum, values: [INTENT, NO_ACTION, REJECTED], nullable: false}
+        reason_code: {type: varchar, max_length: 64, nullable: false}
+        error_code: {type: varchar, max_length: 32, nullable: true}
+        intent_id: {type: uuid, nullable: true}
+        request_payload: {type: json, nullable: false}
+        result_payload: {type: json, nullable: false}
+        outbox_message_id: {type: uuid, nullable: true}
+        publication_status: {type: enum, values: [NOT_APPLICABLE, PENDING, PUBLISHED], nullable: false}
+        intent_handoff_status: {type: enum, values: [NOT_APPLICABLE, PENDING_OUTBOX, PUBLISHED_AWAITING_OMS, OMS_REGISTERED], nullable: false}
+        registered_order_id: {type: uuid, nullable: true}
+        oms_registration_ref: {type: json, nullable: true}
+        persisted_at: {type: timestamptz, nullable: false}
+      unique:
+        - [input_fingerprint]
+        - [result_fingerprint]
+        - {columns: [intent_id], when: outcome_is_INTENT}
+        - {columns: [outbox_message_id], when: outcome_is_INTENT}
+      foreign_keys:
+        - {columns: [target_id], references: "target_registry[target_id]"}
+      indexes:
+        - [account_id, scope_id, instrument_id, intent_handoff_status]
+      checks:
+        - request_target_account_scope_instrument_and_fingerprints_match_columns
+        - result_identity_and_fingerprint_match_columns
+        - INTENT_requires_intent_id_outbox_message_id_and_PENDING_or_PUBLISHED
+        - NO_ACTION_or_REJECTED_requires_null_intent_and_outbox_and_NOT_APPLICABLE
+        - outbox_message_id_equals_intent_id_for_INTENT
+        - unresolved_handoff_requires_INTENT_null_registered_order_id
+        - OMS_REGISTERED_requires_INTENT_non_null_registered_order_id_and_verified_accepted_oms_registration_ref_bound_by_all_fields_of_oms.order_registered.v1
+      mutation:
+        - INSERT
+        - publication_status_monotonic_PENDING_to_PUBLISHED
+        - intent_handoff_status_monotonic_per_semantic_transition_graph_with_verified_OMS_ack
+      immutable_after_insert:
+        - resolution_id
+        - target_id
+        - target_fingerprint
+        - input_fingerprint
+        - result_fingerprint
+        - outcome
+        - reason_code
+        - error_code
+        - intent_id
+        - request_payload
+        - result_payload
+        - outbox_message_id
+        - persisted_at
+  transaction_rules:
+    target_registration: [target_registry_insert_or_identical_read]
+    INTENT: [trigger_insert_NEW_RESOLUTION, resolution_record_insert, order_intent_outbox_insert]
+    NO_ACTION: [trigger_insert_NEW_RESOLUTION, resolution_record_insert]
+    REJECTED: [trigger_insert_NEW_RESOLUTION, resolution_record_insert]
+    exact_input_replay: [trigger_insert_EXACT_INPUT_REPLAY_referencing_existing_resolution]
+    handoff_deferred: [trigger_insert_HANDOFF_DEFERRED_without_snapshot_resolution_or_outbox]
+    trigger_rejection: [trigger_insert_TRIGGER_REJECTED_without_snapshot_resolution_or_outbox]
+    snapshot_rejection: [trigger_insert_SNAPSHOT_REJECTED_without_resolution_or_outbox]
+    atomic: true
+    partial_commit: forbidden
+    external_io_inside_transaction: forbidden
+  replay:
+    target_lookup: exact_target_id
+    trigger_lookup: exact_target_id_plus_trigger_message_id_before_new_snapshot_read
+    unresolved_handoff_lookup: exact_account_scope_instrument_after_trigger_lookup_before_new_snapshot_read
+    same_target_fingerprint: retain_canonical_target_identity
+    different_target_fingerprint: QQ-STRATEGY-3002_no_insert_no_outbox
+    same_trigger_fingerprint: return_linked_stored_request_result_and_delivery_state_with_EXACT_TRIGGER_REPLAY_receipt_or_return_prior_SNAPSHOT_REJECTED_receipt_exactly
+    different_trigger_fingerprint: QQ-STRATEGY-3002_no_snapshot_no_outbox
+    unresolved_handoff: insert_HANDOFF_DEFERRED_trigger_receipt_no_snapshot_no_resolution_no_outbox
+    new_trigger_same_input_fingerprint: insert_trigger_alias_and_return_existing_resolution_without_outbox
+    new_trigger_new_input_fingerprint: insert_new_resolution_and_optional_outbox
+    deterministic_identity_collision: QQ-STORAGE-7011_integrity_incident
+    commit_outcome_unknown: query_target_trigger_input_and_resolution_ids_before_same_payload_retry
+    recompute_after_commit_unknown_with_new_snapshots: forbidden
+  recovery:
+    restore_before_consuming_new_targets: target_registry_all_trigger_links_including_handoff_deferrals_and_snapshot_rejections_all_resolution_records_handoff_states_and_pending_Outbox
+    missing_or_corrupt_record: fail_closed_QQ-STRATEGY-3003
+    pending_outbox: republish_same_message_id_and_intent_id
+    published_awaiting_OMS: query_by_intent_id_or_redeliver_same_idempotent_OrderIntent_never_clear_without_verified_registration
+  migration:
+    owned_by_TASK_019: false
+    required_follow_up: production_adapter_and_expand_only_migration_require_separate_human_authorized_task
+    destructive_backfill: forbidden
+  release: prohibited
