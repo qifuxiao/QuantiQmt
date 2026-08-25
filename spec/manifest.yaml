@@ -1,8 +1,8 @@
 specification:
   name: quantiqmt
-  version: 0.11.0
+  version: 0.12.0
   status: accepted
-  updated: 2026-08-11
+  updated: 2026-08-24
   normative_root: spec
   explanatory_root: docs
 
@@ -41,6 +41,10 @@ catalogs:
       path: contracts/strategy/strategy-output.v1.schema.json
     - id: CONTRACT-STRATEGY-CHECKPOINT-V1
       path: contracts/strategy/strategy-checkpoint.v1.schema.json
+    - id: CONTRACT-TARGET-RESOLVER-V1
+      path: contracts/strategy/target-resolver.v1.schema.json
+    - id: CONTRACT-TARGET-RESOLVER-SEMANTIC-V1
+      path: contracts/strategy/target-resolver.semantic-validation.v1.yaml
     - id: CONTRACT-STRATEGY-STATE-CHANGED-V1
       path: contracts/events/strategy.state_changed.v1.schema.json
     - id: CONTRACT-BROKER-TRADE-V1
@@ -160,6 +164,8 @@ catalogs:
       path: workflows/market-data.yaml
     - id: WF-CONTROL-PLANE
       path: workflows/control-plane.yaml
+    - id: WF-TARGET-RESOLUTION
+      path: workflows/target-resolution.yaml
   repositories:
     - id: REPO-ORDER
       path: repositories/order-repository.md
@@ -176,6 +182,8 @@ catalogs:
       path: storage/ledger-portfolio.yaml
     - id: STORAGE-MARKET-DATA
       path: storage/market-data.yaml
+    - id: STORAGE-TARGET-RESOLUTION
+      path: storage/target-resolution.yaml
   nfr:
     - id: NFR-PERFORMANCE
       path: nfr/performance.yaml
@@ -192,40 +200,38 @@ catalogs:
       path: reviews/IMPLEMENTATION-READINESS-0.7.md
 
 change:
-  id: SPEC-0.11.0-OBSERVABILITY-CONTROL-CONTRACTS
-  compatibility: calibrated_logical_Port_authority_and_first_freeze_correction_for_pre_release_control_V1_events; canonical_MessageEnvelopeV1_unchanged; release_prohibited_until_independent_review_and_runtime_owner_delivery
-  previous_version: 0.10.0
-  public_message_schema_changes: "first-freeze correction for four previously planned and unreleased Control V1 events: component health has independent state_version; config.version_activated removes future component ACK claims and distinguishes CANDIDATE_COMMIT from ROLLBACK_RESTORE ActiveVersion authority transactions; complete envelope/lineage/identity bindings are frozen; no previously active public schema changes"
-  storage_schema_changes: "references existing STORAGE-SOT PostgreSQL control_journal authority and recovery order only; no database object or migration is created; any physical storage contract requires an independent spec-change task"
-  error_catalog_change: none
-  runtime_code_change: "none in TASK-022; TASK-025 remains blocked and owns future ControlPlane/Observability runtime implementation only after TASK-022 trusted completion"
+  id: SPEC-0.12.0-TARGET-RESOLVER-CONTRACTS
+  compatibility: additive_internal_TargetResolver_contracts; existing_strategy_submit_target_v1_strategy_submit_order_intent_v1_and_MessageEnvelopeV1_wire_schemas_unchanged; release_prohibited_pending_independent_review_and_runtime_storage_delivery
+  previous_version: 0.11.0
+  public_message_schema_changes: none
+  storage_schema_changes: "adds logical STORAGE-TARGET-RESOLUTION authority, replay, atomic result-plus-Outbox and recovery contract only; no physical table or migration is created"
+  error_catalog_change: "adds QQ-STRATEGY-3001 TARGET_RESOLUTION_REJECTED, QQ-STRATEGY-3002 TARGET_REPLAY_CONFLICT and QQ-STRATEGY-3003 TARGET_RESOLUTION_SNAPSHOT_INVALID without changing existing code meanings"
+  runtime_code_change: "none in TASK-019; TASK-009 remains blocked and owns future pure resolver/application Port implementation after trusted TASK-019 completion; production persistence requires a separately authorized adapter/migration task"
   review_change: none
-  contract_change: "freezes untrusted wire validation and controlled logical Port pre/postconditions without recursive self-authenticating facts; ConfigActivationResult retains finite per-component effects and now binds candidate-commit/rollback-restore Event references; config.version_activated represents ActiveVersion authority changes only; shared MessageEnvelopeV1 remains unchanged"
-  semantic_validation_change: "binds Event envelopes to payload facts and minimal AcceptedMessageRef lineage, verifies exact committed-record identity/content integrity before duplicate, shares one RecoveryBarrierReadPort snapshot rule for RecoveryPassed/OFF, and orders config candidate commit before component effects plus rollback restore after complete rollback effects"
-  internal_contracts_added: [CONTRACT-CONTROL-PLANE-V1, CONTRACT-CONTROL-SEMANTIC-VALIDATION-V1, CONTRACT-CONTROL-COMBINED-MESSAGE-V1, PORTS-CONTROL, WF-CONTROL-PLANE]
-  public_contracts_added: [system.mode_changed.v1, system.component_health_changed.v1, system.kill_switch_changed.v1, config.version_activated.v1]
-  task_queue_change: "TASK-022 remains active/draft/in-progress pending independent Review; TASK-025 remains blocked and constrained to the frozen contracts; no other task changes state"
-  affected_tasks: [TASK-022, TASK-025]
+  contract_change: "freezes StrategyMandate, InstrumentSpec, coherent TargetResolutionSnapshot, active-order expected effect, deterministic calculation/audit Result, stable Target registration, trigger/input replay, Intent-to-OMS handoff gating and transactional journal/Outbox boundaries"
+  semantic_validation_change: "freezes RFC8785 fingerprints and UUIDv5 identities, target/trigger/input replay gates, unresolved Intent-to-OMS handoff deferral, pre-resolution snapshot-failure receipts without fabricated identities, scope/mandate/source bindings, snapshot freshness, weight/position conversion, active-order netting, deadband, lot/tick/minimum/sell-to-zero rules, cash buffer, price band, NoAction/Rejected reasons and OrderIntent envelope lineage"
+  internal_contracts_added: [CONTRACT-TARGET-RESOLVER-V1, CONTRACT-TARGET-RESOLVER-SEMANTIC-V1, WF-TARGET-RESOLUTION, STORAGE-TARGET-RESOLUTION]
+  public_contracts_added: []
+  task_queue_change: "TASK-019 is the only active task under 2026-08-24 human authorization; TASK-009 and every other downstream task remain blocked and unactivated"
+  affected_tasks: [TASK-019, TASK-009]
   deployment_order:
-    - preserve_TASK_020_trusted_market_contracts
-    - independently_review_and_merge_TASK_022_control_contracts
-    - human_authorize_TASK_022_closeout_with_trusted_delivery_evidence
-    - keep_TASK_025_blocked_until_TASK_022_trusted_completed
-    - separately_human_authorize_TASK_025_runtime_implementation
-    - generate_reviewed_immutable_schema_bundle_for_future_control_runtime
-    - deploy_control_schema_consumers_before_control_publishers
-    - activate_immutable_config_and_recovery_policies_before_control_traffic
+    - independently_review_and_merge_TASK_019_contracts
+    - human_authorize_TASK_019_closeout_with_trusted_delivery_evidence
+    - separately_human_authorize_TASK_009_pure_resolver_implementation
+    - create_and_review_expand_only_resolution_journal_storage_task
+    - deploy_immutable_schema_and_policy_consumers
+    - deploy_resolution_journal_and_Outbox_writer
+    - enable_Target_producers_only_after_replay_and_recovery_tests
   migration:
-    runtime_data: "not applicable in TASK-022 because no Control runtime is implemented; TASK-025 must load only a reviewed immutable manifest-indexed schema bundle and fail closed on missing, tampered or mismatched content"
-    public_events: "new event names have no historical published payload, so the config ACK removal and activation_kind correction are folded into V1 before first release; deploy accepted readers and immutable bundle before future publishers and reject unknown versions fail-closed"
-    storage: "no migration is created or authorized; future persistence requires independently authorized expand-only storage work"
-    task_queue: "TASK-022 remains active; TASK-025 remains blocked on TASK-004 and TASK-022; no downstream activation"
-    historical_evidence: "missing upstream ranges remain explicit GAP/UNAVAILABLE evidence and are never inferred or silently backfilled"
+    runtime_data: "not applicable because TASK-019 changes no runtime; future consumers must load the immutable manifest-indexed bundle and fail closed on missing, tampered or mismatched policy/spec content"
+    public_messages: "unchanged V1 Target and OrderIntent payload schemas; resolver-produced OrderIntent envelope idempotency_key is frozen equal to deterministic intent_id"
+    storage: "no migration is created or authorized; future storage work is expand-only and must preserve stable target identity, target-plus-trigger uniqueness, input-fingerprint replay, unresolved Intent-to-OMS handoff blocking, exact committed records and trigger-plus-result-plus-Outbox atomicity; a production StrategySleeveProjection provider is also outside TASK-019"
+    task_queue: "TASK-019 remains active pending independent Review; TASK-009 remains blocked until trusted closeout and separate human activation"
     destructive_backfill: forbidden
   rollback:
     runtime_data: not_applicable_no_runtime_change
-    public_events: "before runtime adoption revert only unimplemented routes; after adoption stop publishers before readers and preserve every emitted event, gap and quality record"
-    task_queue: "keep TASK-022 active until independent Review; keep TASK-025 and downstream tasks blocked"
-    contracts: "never reuse the four public names or weaken V1 meaning; rollback stops publishers before reverting the unreleased bundle, retains compatible readers, and preserves ActiveVersion/event ordering plus collision/checksum/gap/quality evidence"
-    storage: "no database rollback in TASK-022; future rollback preserves control audit, ActiveVersion, barrier and fencing evidence"
+    public_messages: unchanged
+    task_queue: "keep TASK-019 active until independent Review and keep TASK-009 plus downstream tasks blocked"
+    contracts: "before runtime adoption revert only this additive unimplemented bundle; after adoption stop Target producers before consumers and preserve every committed resolution and pending Outbox identity"
+    storage: "no database rollback in TASK-019; future rollback must preserve append-only resolution and replay evidence"
     release: prohibited

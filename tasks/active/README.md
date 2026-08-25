@@ -1,5 +1,5 @@
 # Active Tasks
 
-There are no active tasks.
+- TASK-019 — the only active task; it freezes the Target Resolver L4 contracts only.
 
-TASK-022 completed its independently reviewed L4 specification delivery with release prohibited. TASK-021, TASK-023, TASK-025, TASK-027, and all other backlog tasks remain blocked and unactivated; this closeout authorizes no downstream implementation or release.
+Runtime implementation, migrations, release, TASK-009 activation, and any other downstream activation remain prohibited. The 2026-08-24 human authorization covers TASK-019 backlog → active activation and contract implementation. Independent Review is required before any human-authorized active → completed closeout.
