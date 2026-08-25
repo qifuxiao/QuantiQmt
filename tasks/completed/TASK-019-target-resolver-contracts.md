@@ -1,10 +1,10 @@
 ---
 id: TASK-019
 title: Complete Target Resolver L4 contracts
-status: active
+status: completed
 depends_on: [TASK-046, TASK-016, TASK-018]
 spec_refs: [INV-TRADING, INV-RISK, PORTS-STRATEGY, PORTS-LEDGER-PORTFOLIO, PORTS-MARKET, CONTRACT-STRATEGY-TARGET-V1, CONTRACT-ORDER-INTENT-V1, CONTRACT-ORDER-REGISTERED-V1, CONTRACT-PORTFOLIO-PROJECTION-V1, SM-ORDER, STORAGE-OUTBOX, CONTRACT-TARGET-RESOLVER-V1, CONTRACT-TARGET-RESOLVER-SEMANTIC-V1, WF-TARGET-RESOLUTION, STORAGE-TARGET-RESOLUTION]
-allowed_paths: [spec/manifest.yaml, spec/contracts/**, spec/interfaces/**, spec/workflows/**, spec/storage/**, tests/contract/messages/**, tasks/backlog/TASK-009-target-resolver.md, tasks/backlog/TASK-019-target-resolver-contracts.md, tasks/active/TASK-019-target-resolver-contracts.md, tasks/active/README.md, tasks/index.yaml]
+allowed_paths: [spec/manifest.yaml, spec/contracts/**, spec/interfaces/**, spec/workflows/**, spec/storage/**, tests/contract/messages/**, tasks/backlog/TASK-009-target-resolver.md, tasks/backlog/TASK-019-target-resolver-contracts.md, tasks/active/TASK-019-target-resolver-contracts.md, tasks/completed/TASK-019-target-resolver-contracts.md, tasks/active/README.md, tasks/index.yaml]
 forbidden_paths: [src/**, tests/unit/**, tests/property/**, tests/integration/**, migrations/**]
 verification:
   commands:
@@ -12,11 +12,25 @@ verification:
     - poetry run pytest tests/spec tests/contract
 delivery:
   schema_version: 1
-  contract_status: draft
-  implementation_status: in_progress
-  acceptance_status: partial
-  review_status: pending
+  contract_status: accepted
+  implementation_status: merged
+  acceptance_status: passed
+  review_status: approved
   release_status: prohibited
+  completion_evidence:
+    mode: governance_closeout_after_independent_review
+    change_pr: https://github.com/qifuxiao/QuantiQmt/pull/80
+    reviewed_head_sha: 05fa9dba5908e158e247a0e37447392ad777f5f4
+    review_verdict: APPROVE
+    reviewer: qfxyyy
+    evidence_url: https://github.com/qifuxiao/QuantiQmt/pull/80#pullrequestreview-5014117457
+    merge_commit_sha: 5dd660b377b9e1a18c699aab9049ab042ed48eef
+    ci_evidence: reviewed_head_final_4_of_4_success_quality_x2_persistence_postgresql_x2
+    human_authorization_evidence: >-
+      2026-08-25 user confirmed PR #80 merged and explicitly approved execution of the
+      TASK-019 active-to-completed governance closeout. This authorization adds only the
+      exact completed TASK-019 path, activates no downstream task, and does not authorize
+      runtime implementation, migration, deployment, or release.
 ---
 
 # Objective
@@ -63,7 +77,7 @@ delivery:
 - `poetry run pytest tests/spec tests/contract`：`663 passed in 31.95s`。
 - `poetry run pytest tests/contract/messages/test_target_resolver_contracts.py -q`：`41 passed`。
 - `poetry run ruff check` 与 `poetry run ruff format --check`：TASK-019 涉及的三个契约测试文件全部通过。
-- 以上为本地实现证据，不构成独立 Review、CI、merge 或 completed delivery evidence；delivery 继续保持 `draft/in_progress/partial/pending/prohibited`。
+- 以上为实现阶段的本地证据；独立 Review、CI、merge 与 completed delivery 由下方精确 closeout evidence 补足，release 仍保持 `prohibited`。
 
 ## Review focus
 
@@ -74,3 +88,11 @@ delivery:
 ## Risks and rollback
 
 - TargetResolver 错误会造成过买/过卖；必须优先保证不下错单。
+
+## Final review and closeout evidence
+
+- PR #80 was formally approved by independent collaborator `qfxyyy` on exact reviewed Head `05fa9dba5908e158e247a0e37447392ad777f5f4`: https://github.com/qifuxiao/QuantiQmt/pull/80#pullrequestreview-5014117457.
+- GitHub reports 4/4 successful checks on the reviewed Head: quality jobs `97649540331` and `97649277790`, plus persistence-postgresql jobs `97649540142` and `97649277552`.
+- PR #80 merged into `main` as `5dd660b377b9e1a18c699aab9049ab042ed48eef`.
+- Closeout verification passed against the merged `main`: `scripts/validate_specs.py` passed and `tests/spec tests/contract` recorded `663 passed in 32.02s`. The bare user-level `poetry.exe` launcher failed before execution because of its Windows file-association error; the same commands then passed through Poetry 2.1.4 with the repository's locked dependencies.
+- The 2026-08-25 human closeout authorization is limited to this governance transition. TASK-009 remains blocked by TASK-007 and TASK-008 and requires separate human activation; runtime, physical storage, migration, deployment, and release remain prohibited.

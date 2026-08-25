@@ -201,7 +201,7 @@ catalogs:
 
 change:
   id: SPEC-0.12.0-TARGET-RESOLVER-CONTRACTS
-  compatibility: additive_internal_TargetResolver_contracts; existing_strategy_submit_target_v1_strategy_submit_order_intent_v1_and_MessageEnvelopeV1_wire_schemas_unchanged; release_prohibited_pending_independent_review_and_runtime_storage_delivery
+  compatibility: additive_internal_TargetResolver_contracts; existing_strategy_submit_target_v1_strategy_submit_order_intent_v1_and_MessageEnvelopeV1_wire_schemas_unchanged; release_prohibited_pending_runtime_storage_delivery
   previous_version: 0.11.0
   public_message_schema_changes: none
   storage_schema_changes: "adds logical STORAGE-TARGET-RESOLUTION authority, replay, atomic result-plus-Outbox and recovery contract only; no physical table or migration is created"
@@ -212,7 +212,7 @@ change:
   semantic_validation_change: "freezes RFC8785 fingerprints and UUIDv5 identities, target/trigger/input replay gates, unresolved Intent-to-OMS handoff deferral, pre-resolution snapshot-failure receipts without fabricated identities, scope/mandate/source bindings, snapshot freshness, weight/position conversion, active-order netting, deadband, lot/tick/minimum/sell-to-zero rules, cash buffer, price band, NoAction/Rejected reasons and OrderIntent envelope lineage"
   internal_contracts_added: [CONTRACT-TARGET-RESOLVER-V1, CONTRACT-TARGET-RESOLVER-SEMANTIC-V1, WF-TARGET-RESOLUTION, STORAGE-TARGET-RESOLUTION]
   public_contracts_added: []
-  task_queue_change: "TASK-019 is the only active task under 2026-08-24 human authorization; TASK-009 and every other downstream task remain blocked and unactivated"
+  task_queue_change: "TASK-019 completed after independent Review, merge and 2026-08-25 human-authorized closeout; no task is active, and TASK-009 plus every other downstream task remain blocked and unactivated"
   affected_tasks: [TASK-019, TASK-009]
   deployment_order:
     - independently_review_and_merge_TASK_019_contracts
@@ -226,12 +226,12 @@ change:
     runtime_data: "not applicable because TASK-019 changes no runtime; future consumers must load the immutable manifest-indexed bundle and fail closed on missing, tampered or mismatched policy/spec content"
     public_messages: "unchanged V1 Target and OrderIntent payload schemas; resolver-produced OrderIntent envelope idempotency_key is frozen equal to deterministic intent_id"
     storage: "no migration is created or authorized; future storage work is expand-only and must preserve stable target identity, target-plus-trigger uniqueness, input-fingerprint replay, unresolved Intent-to-OMS handoff blocking, exact committed records and trigger-plus-result-plus-Outbox atomicity; a production StrategySleeveProjection provider is also outside TASK-019"
-    task_queue: "TASK-019 remains active pending independent Review; TASK-009 remains blocked until trusted closeout and separate human activation"
+    task_queue: "TASK-019 has trusted completed delivery; TASK-009 remains blocked by TASK-007 and TASK-008 and requires separate human activation after all dependencies complete"
     destructive_backfill: forbidden
   rollback:
     runtime_data: not_applicable_no_runtime_change
     public_messages: unchanged
-    task_queue: "keep TASK-019 active until independent Review and keep TASK-009 plus downstream tasks blocked"
+    task_queue: "if TASK-019 delivery evidence is invalidated, restore it to active; keep TASK-009 and downstream tasks blocked unless all dependency and human-activation gates pass"
     contracts: "before runtime adoption revert only this additive unimplemented bundle; after adoption stop Target producers before consumers and preserve every committed resolution and pending Outbox identity"
     storage: "no database rollback in TASK-019; future rollback must preserve append-only resolution and replay evidence"
     release: prohibited
