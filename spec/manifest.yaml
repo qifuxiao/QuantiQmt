@@ -1,8 +1,8 @@
 specification:
   name: quantiqmt
-  version: 0.12.0
+  version: 0.13.0
   status: accepted
-  updated: 2026-08-24
+  updated: 2026-08-26
   normative_root: spec
   explanatory_root: docs
 
@@ -45,6 +45,10 @@ catalogs:
       path: contracts/strategy/target-resolver.v1.schema.json
     - id: CONTRACT-TARGET-RESOLVER-SEMANTIC-V1
       path: contracts/strategy/target-resolver.semantic-validation.v1.yaml
+    - id: CONTRACT-BACKTEST-PARITY-V1
+      path: contracts/simulation/backtest-parity.v1.schema.json
+    - id: CONTRACT-BACKTEST-PARITY-SEMANTIC-V1
+      path: contracts/simulation/backtest-parity.semantic-validation.v1.yaml
     - id: CONTRACT-STRATEGY-STATE-CHANGED-V1
       path: contracts/events/strategy.state_changed.v1.schema.json
     - id: CONTRACT-BROKER-TRADE-V1
@@ -124,6 +128,8 @@ catalogs:
       path: interfaces/market-ports.md
     - id: PORTS-CONTROL
       path: interfaces/control-ports.md
+    - id: PORTS-BACKTEST
+      path: interfaces/backtest-ports.md
   state_machines:
     - id: SM-ORDER
       path: state-machines/order.yaml
@@ -166,6 +172,8 @@ catalogs:
       path: workflows/control-plane.yaml
     - id: WF-TARGET-RESOLUTION
       path: workflows/target-resolution.yaml
+    - id: WF-BACKTEST-RUN
+      path: workflows/backtest-run.yaml
   repositories:
     - id: REPO-ORDER
       path: repositories/order-repository.md
@@ -200,38 +208,37 @@ catalogs:
       path: reviews/IMPLEMENTATION-READINESS-0.7.md
 
 change:
-  id: SPEC-0.12.0-TARGET-RESOLVER-CONTRACTS
-  compatibility: additive_internal_TargetResolver_contracts; existing_strategy_submit_target_v1_strategy_submit_order_intent_v1_and_MessageEnvelopeV1_wire_schemas_unchanged; release_prohibited_pending_runtime_storage_delivery
-  previous_version: 0.11.0
+  id: SPEC-0.13.0-BACKTEST-LIVE-PARITY-CONTRACTS
+  compatibility: additive_internal_BacktestLiveParity_contracts; all_existing_public_MessageEnvelope_Event_Command_and_Result_V1_schemas_unchanged; no_runtime_or_storage_migration; release_prohibited_pending_independent_review_and_implementation
+  previous_version: 0.12.0
   public_message_schema_changes: none
-  storage_schema_changes: "adds logical STORAGE-TARGET-RESOLUTION authority, replay, atomic result-plus-Outbox and recovery contract only; no physical table or migration is created"
-  error_catalog_change: "adds QQ-STRATEGY-3001 TARGET_RESOLUTION_REJECTED, QQ-STRATEGY-3002 TARGET_REPLAY_CONFLICT and QQ-STRATEGY-3003 TARGET_RESOLUTION_SNAPSHOT_INVALID without changing existing code meanings"
-  runtime_code_change: "none in TASK-019; TASK-009 remains blocked and owns future pure resolver/application Port implementation after trusted TASK-019 completion; production persistence requires a separately authorized adapter/migration task"
+  storage_schema_changes: none
+  error_catalog_change: none
+  runtime_code_change: none_in_TASK_021
   review_change: none
-  contract_change: "freezes StrategyMandate, InstrumentSpec, coherent TargetResolutionSnapshot, active-order expected effect, deterministic calculation/audit Result, stable Target registration, trigger/input replay, Intent-to-OMS handoff gating and transactional journal/Outbox boundaries"
-  semantic_validation_change: "freezes RFC8785 fingerprints and UUIDv5 identities, target/trigger/input replay gates, unresolved Intent-to-OMS handoff deferral, pre-resolution snapshot-failure receipts without fabricated identities, scope/mandate/source bindings, snapshot freshness, weight/position conversion, active-order netting, deadband, lot/tick/minimum/sell-to-zero rules, cash buffer, price band, NoAction/Rejected reasons and OrderIntent envelope lineage"
-  internal_contracts_added: [CONTRACT-TARGET-RESOLVER-V1, CONTRACT-TARGET-RESOLVER-SEMANTIC-V1, WF-TARGET-RESOLUTION, STORAGE-TARGET-RESOLUTION]
+  contract_change: "adds internal Backtest run, immutable dataset, Historical read, VirtualClock, Scheduler, execution simulation policy, reproducibility evidence and two-level parity DTO/Port/workflow contracts"
+  semantic_validation_change: "freezes recorded available_at no-lookahead with WAIT/HISTORICAL_RELEASE liveness, deterministic virtual time and content-derived total event order, one-use competing-order liquidity allocation, DAY/IOC/FOK and scenario fill authority, exact Decimal matching/slippage/cumulative fees/latency, end-boundary failure, existing ExecutionGateway and Broker report reuse, shared logic boundaries, RFC8785/SHA256/UUIDv5 identities, trace normalization and append-only failure/completion evidence"
+  internal_contracts_added: [CONTRACT-BACKTEST-PARITY-V1, CONTRACT-BACKTEST-PARITY-SEMANTIC-V1, PORTS-BACKTEST, WF-BACKTEST-RUN]
   public_contracts_added: []
-  task_queue_change: "TASK-019 completed after independent Review, merge and 2026-08-25 human-authorized closeout; no task is active, and TASK-009 plus every other downstream task remain blocked and unactivated"
-  affected_tasks: [TASK-019, TASK-009]
+  task_queue_change: "TASK-021 is the only active task under 2026-08-26 human authorization; TASK-010, TASK-024 and every other downstream task remain blocked and unactivated"
+  affected_tasks: [TASK-021, TASK-010, TASK-024]
   deployment_order:
-    - independently_review_and_merge_TASK_019_contracts
-    - human_authorize_TASK_019_closeout_with_trusted_delivery_evidence
-    - separately_human_authorize_TASK_009_pure_resolver_implementation
-    - create_and_review_expand_only_resolution_journal_storage_task
-    - deploy_immutable_schema_and_policy_consumers
-    - deploy_resolution_journal_and_Outbox_writer
-    - enable_Target_producers_only_after_replay_and_recovery_tests
+    - independently_review_and_merge_TASK_021_contracts
+    - human_authorize_TASK_021_closeout_with_trusted_delivery_evidence
+    - separately_authorize_Strategy_Market_Execution_and_Backtest_runtime_tasks
+    - package_immutable_contract_calendar_tzdb_policy_and_dataset_manifests
+    - verify_recorded_trace_replay_and_zero_future_reads
+    - treat_backtest_results_as_evidence_only_not_live_release_approval
   migration:
-    runtime_data: "not applicable because TASK-019 changes no runtime; future consumers must load the immutable manifest-indexed bundle and fail closed on missing, tampered or mismatched policy/spec content"
-    public_messages: "unchanged V1 Target and OrderIntent payload schemas; resolver-produced OrderIntent envelope idempotency_key is frozen equal to deterministic intent_id"
-    storage: "no migration is created or authorized; future storage work is expand-only and must preserve stable target identity, target-plus-trigger uniqueness, input-fingerprint replay, unresolved Intent-to-OMS handoff blocking, exact committed records and trigger-plus-result-plus-Outbox atomicity; a production StrategySleeveProjection provider is also outside TASK-019"
-    task_queue: "TASK-019 has trusted completed delivery; TASK-009 remains blocked by TASK-007 and TASK-008 and requires separate human activation after all dependencies complete"
+    runtime_data: "not applicable because TASK-021 changes no runtime; future adapters must consume the immutable manifest-indexed contract bundle and preserve the shared OMS/Risk/Execution/Ledger chain"
+    public_messages: "unchanged; Backtest Market and Broker facts use the same existing public V1 MessageEnvelope and payload contracts as Live"
+    storage: "no table, physical artifact store or migration is created; future Backtest storage must be isolated, append-only for run/event/evidence facts and preserve shared UoW/Journal/Inbox/Outbox/Snapshot semantics"
+    task_queue: "TASK-021 is active; TASK-010 and TASK-024 remain blocked until all direct dependencies complete and a human separately activates them"
     destructive_backfill: forbidden
   rollback:
     runtime_data: not_applicable_no_runtime_change
     public_messages: unchanged
-    task_queue: "if TASK-019 delivery evidence is invalidated, restore it to active; keep TASK-009 and downstream tasks blocked unless all dependency and human-activation gates pass"
-    contracts: "before runtime adoption revert only this additive unimplemented bundle; after adoption stop Target producers before consumers and preserve every committed resolution and pending Outbox identity"
-    storage: "no database rollback in TASK-019; future rollback must preserve append-only resolution and replay evidence"
+    task_queue: "keep TASK-021 active until independent Review; keep TASK-010, TASK-024 and downstream tasks blocked"
+    contracts: "before runtime adoption revert only this additive internal bundle; after artifacts exist stop new runs before readers and preserve run specs, event journals, failures, checksums and parity evidence"
+    storage: "no database rollback in TASK-021; never delete or relabel retained failed, mismatched or completed run evidence"
     release: prohibited

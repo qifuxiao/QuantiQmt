@@ -1,0 +1,397 @@
+contract:
+  id: CONTRACT-BACKTEST-PARITY-SEMANTIC-V1
+  version: 1
+  status: draft
+  structural_contract: CONTRACT-BACKTEST-PARITY-V1
+  authority:
+    - INV-TRADING
+    - INV-CONSISTENCY
+    - PORTS-CORE
+    - PORTS-STRATEGY
+    - PORTS-MARKET
+    - PORTS-BROKER-SIMULATOR
+
+canonicalization:
+  algorithm: RFC8785_JCS
+  encoding: UTF-8_without_BOM
+  unicode_normalization: forbidden
+  integer_domain: I_JSON_0_to_9007199254740991
+  decimal_wire_type: canonical_plain_string
+  binary_float: forbidden
+  hash: SHA-256_lowercase_hex
+  timestamp: canonical_RFC3339_UTC_Z_max_6_fraction_digits
+
+identity:
+  namespace_uuid: 2f35004e-90c8-5da8-97b8-767a692f0fcb
+  input_fingerprint_projection:
+    - schema_version
+    - mode
+    - start_at
+    - end_at
+    - seed
+    - contract_bundle
+    - code_artifact
+    - strategy_artifact
+    - strategy_parameters
+    - historical_dataset
+    - calendar
+    - tzdb
+    - market_policy
+    - execution_policy
+    - risk_rule_set
+    - target_policy
+    - initial_state
+    - scheduler_policy
+    - storage_policy
+    - no_lookahead
+    - ambient_randomness
+    - wall_clock
+  run_id: UUID5(namespace_uuid,input_fingerprint)
+  scheduler_event_fingerprint_projection:
+    - schema_version
+    - run_id
+    - event_type
+    - dispatch_at
+    - priority
+    - source_id
+    - source_sequence
+    - causal_sequence
+    - contract_id
+    - payload_checksum
+    - idempotency_key
+  scheduler_event_fingerprint: SHA256(JCS(scheduler_event_fingerprint_projection))
+  scheduler_event_id: UUID5(run_id,scheduler_event_fingerprint)
+  same_scheduler_event_id_different_fingerprint: fail_closed_integrity_incident
+  same_run_id_different_input_fingerprint: fail_closed_integrity_incident
+
+run_spec:
+  mode: BACKTEST
+  start_before_end: mandatory
+  all_artifacts:
+    immutable: true
+    version_and_content_checksum: required
+    missing_or_tampered: reject_before_run
+  contract_bundle:
+    source_checkout_access: forbidden
+    manifest_indexed_immutable_bundle: required
+  initial_state:
+    source: validated_checkpoint_or_explicit_empty_genesis
+    checksum_required: true
+  mutable_environment_inputs: forbidden
+  release_claim: forbidden
+
+historical_data:
+  authority: HISTORICAL_DATASET_MANIFEST
+  availability_policy: AS_RECORDED_AVAILABLE_AT_V1
+  required_event_contracts:
+    - CONTRACT-MARKET-TICK-RECEIVED-V1
+    - CONTRACT-MARKET-BAR-CLOSED-V1
+    - CONTRACT-MARKET-QUALITY-CHANGED-V1
+    - CONTRACT-MARKET-SESSION-CHANGED-V1
+  partition_order: [source_id, first_source_sequence, partition_id]
+  partition_rules:
+    - first_source_sequence_lte_last_source_sequence
+    - min_event_time_lte_max_event_time
+    - min_available_at_lte_max_available_at
+    - source_sequence_ranges_do_not_overlap
+    - every_partition_checksum_matches_exact_bytes
+    - manifest_checksum_matches_RFC8785_projection_without_content_checksum
+  event_rules:
+    - event_time_lte_available_at
+    - available_at_equals_first_accepted_envelope_received_at
+    - source_sequence_strictly_increases_per_source_except_exact_duplicate
+    - same_event_id_same_fingerprints_is_duplicate
+    - same_event_id_different_fingerprint_is_integrity_failure
+    - event_contract_and_message_type_are_exactly_bound
+    - envelope_and_payload_are_validated_before_scheduler_admission
+  adjustment:
+    modes: [RAW_AS_TRADED, POINT_IN_TIME_ADJUSTED]
+    raw_adjusted_and_tradeable_price_mixing: forbidden
+    point_in_time_action_effective_before_available_at: forbidden
+  gaps:
+    forward_fill_missing_tradeable_data: forbidden
+    unresolved_gap_action: reject_or_remain_fail_visible
+
+no_lookahead:
+  release_guard: historical_event.available_at_lte_virtual_clock.current_at
+  request_guard: request.available_at_lte_lte_virtual_clock.current_at
+  snapshot_as_of_guard: snapshot.as_of_lte_virtual_clock.current_at
+  future_cursor_or_payload_visibility_to_Strategy_or_business_logic: forbidden
+  coordinator_release_hint: opaque_cursor_and_next_available_at_only_for_HISTORICAL_RELEASE_wakeup
+  future_partition_metadata_as_strategy_input: forbidden
+  bar_rules:
+    full_OHLCV_visible_before_final_bar_available_at: forbidden
+    current_incomplete_bar_close_high_low_or_volume_visibility: forbidden
+    NEXT_BAR_OPEN_fill_report_may_be_emitted_only_when_the_final_bar_fact_is_available: true
+  correction_rules:
+    apply_only_at_recorded_available_at: true
+    retroactive_strategy_state_rewrite: forbidden
+  violation:
+    historical_read_result: REJECTED/FUTURE_DATA_REQUESTED
+    run_evidence: REJECTED/FUTURE_DATA_REQUESTED
+    continue_with_partial_future_data: forbidden
+
+virtual_clock:
+  business_time_source: injected_virtual_clock_only
+  latency_time_source: deterministic_elapsed_microseconds_from_start
+  wall_clock: forbidden
+  ambient_monotonic_clock: forbidden_for_business_outcomes
+  start_state: current_at_equals_start_at_and_elapsed_us_zero
+  advance:
+    target: minimum_next_dispatch_at
+    regression: reject_TIME_REGRESSION
+    skip_earlier_event: forbidden
+    beyond_end: transition_ENDED_without_dispatch
+    current_at: start_at_plus_elapsed_us_exactly
+  callback_clock_mutation: forbidden
+
+scheduler:
+  queue: bounded_and_versioned
+  canonical_key: [dispatch_at, priority, source_id_ASCII, source_sequence, causal_sequence, event_id]
+  priorities:
+    CONTROL: 0
+    HISTORICAL_RELEASE: 5
+    SESSION: 10
+    MARKET_QUALITY: 20
+    BROKER_TRADE: 30
+    BROKER_ORDER: 40
+    MARKET_DATA: 50
+    STRATEGY_CALLBACK: 60
+    TIMER: 70
+    CHECKPOINT: 80
+  rules:
+    - dto_priority_equals_event_type_priority
+    - dispatch_at_within_run_bounds
+    - same_idempotency_key_same_payload_is_IDEMPOTENT_REPLAY
+    - same_idempotency_key_different_payload_is_REJECTED_INVALID_EVENT
+    - repeated_exact_cancel_is_IDEMPOTENT_REPLAY_ALREADY_CANCELED
+    - cancel_unknown_event_is_REJECTED_EVENT_NOT_FOUND
+    - cancel_dispatched_event_is_REJECTED_EVENT_ALREADY_DISPATCHED
+    - newly_scheduled_same_time_event_must_sort_after_current_key
+    - causal_sequence_never_references_future_dispatch
+    - output_order_independent_of_process_thread_hash_locale_and_insertion_race
+  overflow: reject_QUEUE_CAPACITY_EXCEEDED_without_drop_or_reorder
+  misfire_policy: deterministic_fail_closed_no_wall_clock_catchup
+
+historical_market_port:
+  read_result: exhaustive_PAGE_WAIT_END_REJECTED
+  page:
+    every_item_available_at_lte_request_bound: true
+    every_item_available_at_lte_virtual_clock: true
+    canonical_order: [available_at, source_id, source_sequence, event_id]
+    next_cursor: opaque_stable_and_manifest_bound
+    next_available_at: null
+  wait:
+    reason: NOT_YET_AVAILABLE
+    items: empty
+    next_cursor: opaque_stable_and_manifest_bound
+    next_available_at: earliest_unreleased_recorded_available_at_strictly_after_virtual_clock
+    next_available_at_lte_run_end_at: mandatory
+    visibility: coordinator_only_never_Strategy_or_business_logic
+    only_allowed_use: schedule_HISTORICAL_RELEASE_wakeup_at_next_available_at
+    payload_price_volume_or_future_partition_content: forbidden
+    wakeup:
+      event_type: HISTORICAL_RELEASE
+      priority: 5
+      contract_id: CONTRACT-BACKTEST-PARITY-V1
+      source_id: HISTORICAL_MARKET
+      source_sequence: 0
+      dispatch_at: next_available_at
+      payload_projection: [run_id, manifest_checksum, next_cursor, next_available_at]
+      payload_checksum: SHA256(JCS(payload_projection))
+      idempotency_key: 'concat("history-release:",payload_checksum)'
+      duplicate_hint: exact_scheduler_IDEMPOTENT_REPLAY
+  end:
+    shape: empty_items_null_cursor_and_null_next_available_at
+    reasons: [END_OF_DATA, END_OF_RUN_RANGE]
+    earliest_unreleased_available_at_after_run_end: END_OF_RUN_RANGE
+  rejected: empty_items_and_null_cursor
+  routine_exception_escape: forbidden
+  checkout_spec_access: forbidden
+
+execution_simulation:
+  gateway_contract: CONTRACT-EXECUTION-BROKER-GATEWAY-V1
+  scenario_contract: CONTRACT-BROKER-SCENARIO-V1
+  output_contracts: [CONTRACT-BROKER-TRADE-V1, CONTRACT-BROKER-ORDER-REPORTED-V1]
+  oms_state_mutation: forbidden
+  broker_side_effect: simulated_only
+  accepted_order_cutoff: scheduler_key_of_confirmed_submit
+  scenario_profile:
+    gateway_lifecycle_and_fault_authority: CONTRACT-BROKER-SCENARIO-V1
+    market_fill_price_quantity_authority: execution_policy_and_released_market_fact_only
+    forbidden_scenario_fill_actions: [PARTIAL_FILL, FULL_FILL, CANCEL_RACE]
+    DUPLICATE_or_OUT_OF_ORDER: may_reference_only_already_generated_report_groups_without_changing_identity_or_payload
+    undeclared_or_exhausted_action: fail_closed_before_implicit_success
+  matching:
+    eligible_market_fact: scheduler_key_strictly_after_accepted_order_cutoff
+    eligible_business_time: candidate_trade_time_strictly_after_order_accepted_at
+    models:
+      NEXT_TICK_V1:
+        base_price: next_released_tradeable_tick_price
+        quantity_source: next_released_incremental_tick_quantity
+      NEXT_BAR_OPEN_V1:
+        base_price: next_final_bar_open
+        quantity_source: final_bar_volume_available_only_at_bar_release
+        trade_time: bar_open
+        received_at: final_bar_available_at_plus_fill_report_latency
+    session_state: OPEN_only
+    suspended_untradeable_gap_or_non_NORMAL_quality: no_fill_and_fail_visible
+    max_participation_rate: greater_than_zero_and_lte_one
+    fill_quantity: floor(released_incremental_volume*max_participation_rate)_bounded_by_leaves
+    partial_fill_disabled_and_liquidity_below_leaves: no_fill
+    competing_order_priority: [accepted_scheduler_key, order_id_ASCII]
+    released_incremental_volume_budget: decrement_once_in_competing_order_priority_and_never_reuse
+    limit_buy: adjusted_fill_price_lte_limit_price
+    limit_sell: adjusted_fill_price_gte_limit_price
+    market_order: accepted_only_when_capability_and_price_band_allow
+    time_in_force:
+      DAY: remain_eligible_until_terminal_or_session_close_then_emit_EXPIRED
+      IOC: evaluate_first_eligible_released_fact_once_fill_available_quantity_then_cancel_leaves
+      FOK: fill_full_leaves_on_first_eligible_released_fact_or_cancel_without_trade
+      unsupported_or_ambiguous: reject_before_side_effect
+    cancellation_race:
+      authority: admitted_canonical_scheduler_order
+      confirmed_cancel_prevents_new_match: true
+      already_admitted_trade_or_report_rewrite: forbidden
+      final_state_resolution: OMS_only_from_existing_Broker_reports
+  slippage:
+    NONE: value_must_equal_zero
+    FIXED_BPS: base_price_times_value_div_10000
+    FIXED_TICKS: tick_size_times_value
+    direction: BUY_adds_and_SELL_subtracts
+    tick_rounding: BUY_ceiling_and_SELL_floor
+    positive_and_inside_inclusive_price_band: mandatory
+    clamp_to_limit_or_price_band: forbidden
+  fees:
+    notional: exact_fill_price_times_integer_quantity
+    commission_accrual: PER_ORDER_CUMULATIVE_DELTA_V1
+    cumulative_required_commission: max(minimum_commission,cumulative_filled_notional_times_commission_rate)
+    fill_commission: cumulative_required_commission_minus_prior_commission_charged
+    transfer_fee: notional_times_transfer_fee_rate
+    tax: SELL_only_notional_times_sell_tax_rate
+    rounding: each_component_independently_to_currency_minor_unit_HALF_EVEN
+    negative_or_float: forbidden
+    trade_report_binding:
+      commission: rounded_commission
+      fee.amount: rounded_transfer_fee
+      fee.currency: policy_currency
+      fee.rounding_policy_version: CURRENCY_MINOR_UNIT_HALF_EVEN_V1
+      tax: rounded_tax
+  fill_emission_order: [broker_trade_reported, broker_order_reported]
+  latency:
+    source: immutable_nonnegative_integer_microseconds
+    randomness: forbidden
+    dispatch_order: scheduler_canonical_key
+    gateway_deadline_comparison: VirtualClock_only_never_host_clock
+    causal_report_after_run_end: fail_END_BOUNDARY_UNSETTLED_without_COMPLETED_claim
+  unknown_outcome:
+    source: explicit_scenario_action_only
+    action: preserve_same_identity_and_reconcile
+    blind_retry: forbidden
+
+shared_architecture:
+  shared_between_live_and_backtest:
+    - Domain_models_and_state_machines
+    - Application_use_cases
+    - Strategy_artifact_and_parameters
+    - TargetResolver
+    - Risk_rules
+    - OMS_registration_and_transition_chain
+    - Ledger_and_Portfolio_logic
+    - Message_and_internal_contract_bundle
+  replaceable_adapters_only:
+    - Clock
+    - Market
+    - Execution
+    - Scheduler
+    - Storage
+  forbidden_backtest_shortcuts:
+    - strategy_calls_Broker_or_Repository
+    - direct_OMS_state_mutation
+    - bypass_Risk
+    - direct_Ledger_or_Portfolio_overwrite
+    - special_backtest_only_strategy_branch
+    - implicit_successful_execution
+
+parity:
+  scopes:
+    SHARED_LOGIC:
+      compare:
+        - strategy_callback_input_fingerprints
+        - strategy_Target_or_OrderIntent_payloads
+        - TargetResolver_results
+        - Risk_decisions
+        - OMS_business_transitions
+      adapter_outcomes_equal: not_claimed
+    RECORDED_TRACE_REPLAY:
+      compare:
+        - normalized_accepted_inputs
+        - normalized_business_outputs
+        - causal_order
+        - final_Ledger_and_Portfolio_checksums
+      recorded_external_facts: replayed_at_their_recorded_available_at
+  normalization_excludes:
+    - host_process_identity
+    - wall_clock_duration
+    - transport_connection_identity
+    - adapter_telemetry
+  normalization_preserves:
+    - message_and_business_identity
+    - correlation_and_causation
+    - business_and_available_times
+    - Decimal_strings
+    - outcome_reason_and_error_codes
+    - state_versions_and_checksums
+  MATCH_requires:
+    - normalized_live_checksum_equals_normalized_backtest_checksum
+    - mismatch_count_equals_zero
+    - future_read_count_equals_zero
+    - shared_logic_checksum_matches
+  backtest_result_is_production_approval: false
+
+reproducibility:
+  evidence_projection:
+    - run_id
+    - input_fingerprint
+    - status
+    - reason_code
+    - started_at
+    - ended_at
+    - event_count
+    - last_scheduler_key
+    - event_journal_checksum
+    - strategy_output_checksum
+    - broker_report_checksum
+    - ledger_checksum
+    - portfolio_checksum
+    - metrics_checksum
+  completed_requires_all_artifact_checksums: true
+  append_only_event_journal: true
+  repeated_exact_input:
+    run_id: identical
+    event_order: identical
+    broker_reports: byte_identical
+    strategy_outputs: byte_identical
+    final_checksums: identical
+  failed_or_rejected_run:
+    evidence_still_persisted: true
+    claim_partial_result_as_completed: forbidden
+  run_end_boundary:
+    external_fact_admission: available_at_lte_end_at
+    required_causal_output_dispatch_after_end_at: FAILED_END_BOUNDARY_UNSETTLED
+    silent_truncation_or_COMPLETED_with_pending_order_timer_or_report: forbidden
+
+observability:
+  required_log_fields: [run_id, input_fingerprint, virtual_time, scheduler_key, event_type, outcome, reason_code, contract_version]
+  required_metrics: [events_total, virtual_time_advanced_us, scheduler_queue_depth, future_read_rejections_total, fills_total, rejected_matches_total, parity_mismatches_total]
+  forbidden_metric_labels: [run_id, event_id, order_id, trade_id, instrument_id, account_id, checksum]
+  wall_time_performance_measurement: telemetry_only_not_business_input
+
+rollback:
+  before_runtime_adoption: revert_additive_internal_contract_bundle
+  after_artifact_creation:
+    - stop_new_runs_before_readers
+    - preserve_run_specs_event_journals_and_evidence
+    - never_relabel_failed_or_mismatched_run_as_completed
+  storage_migration: none_in_TASK_021
+  release: prohibited

@@ -1,0 +1,201 @@
+{
+  "dtos": [
+    {
+      "dto_type": "HISTORICAL_DATASET_MANIFEST",
+      "schema_version": 1,
+      "dataset_id": "cn-equity-ticks",
+      "dataset_version": "2026-08-26-v1",
+      "provider": "SIM",
+      "calendar": {"artifact_id": "calendar-xshg", "version": "2026-v1", "content_checksum": "1111111111111111111111111111111111111111111111111111111111111111"},
+      "tzdb": {"artifact_id": "iana-tzdb", "version": "2026c", "content_checksum": "2222222222222222222222222222222222222222222222222222222222222222"},
+      "market_validation_policy": {"artifact_id": "market-policy", "version": "v1", "content_checksum": "3333333333333333333333333333333333333333333333333333333333333333"},
+      "adjustment_policy": {"mode": "RAW_AS_TRADED", "policy_version": "raw-v1", "content_checksum": "4444444444444444444444444444444444444444444444444444444444444444"},
+      "availability_policy": "AS_RECORDED_AVAILABLE_AT_V1",
+      "partitions": [
+        {
+          "partition_id": "600000-2026-01-05",
+          "source_id": "SIM-XSHG",
+          "first_source_sequence": 1,
+          "last_source_sequence": 100,
+          "min_event_time": "2026-01-05T01:30:00Z",
+          "max_event_time": "2026-01-05T07:00:00Z",
+          "min_available_at": "2026-01-05T01:30:00.001000Z",
+          "max_available_at": "2026-01-05T07:00:00.001000Z",
+          "row_count": 100,
+          "artifact_ref": "artifact/market/600000/2026-01-05",
+          "content_checksum": "5555555555555555555555555555555555555555555555555555555555555555"
+        }
+      ],
+      "content_checksum": "19ba0975c700fcbca607e7a67cafcfe6e763aee6774b87e978fc33d70da9ab8d"
+    },
+    {
+      "dto_type": "HISTORICAL_READ_REQUEST",
+      "schema_version": 1,
+      "request_id": "10101010-1010-4010-8010-101010101010",
+      "run_id": "8f9c36a7-fdf4-590f-a914-d3109ee76e37",
+      "manifest_checksum": "19ba0975c700fcbca607e7a67cafcfe6e763aee6774b87e978fc33d70da9ab8d",
+      "cursor": null,
+      "available_at_lte": "2026-01-05T01:30:00.001000Z",
+      "event_types": ["TICK", "SESSION"],
+      "max_items": 1000,
+      "deadline_at": "2026-01-05T01:30:01Z"
+    },
+    {
+      "dto_type": "HISTORICAL_READ_RESULT",
+      "schema_version": 1,
+      "request_id": "10101010-1010-4010-8010-101010101010",
+      "run_id": "8f9c36a7-fdf4-590f-a914-d3109ee76e37",
+      "manifest_checksum": "19ba0975c700fcbca607e7a67cafcfe6e763aee6774b87e978fc33d70da9ab8d",
+      "outcome": "PAGE",
+      "reason_code": "PAGE_AVAILABLE",
+      "items": [
+        {
+          "event_id": "30303030-3030-4030-8030-303030303030",
+          "source_id": "SIM-XSHG",
+          "source_sequence": 1,
+          "event_time": "2026-01-05T01:30:00Z",
+          "available_at": "2026-01-05T01:30:00.001000Z",
+          "message_type": "market.tick_received.v1",
+          "contract_id": "CONTRACT-MARKET-TICK-RECEIVED-V1",
+          "artifact_ref": "artifact/market/600000/2026-01-05/seq-1",
+          "envelope_checksum": "6666666666666666666666666666666666666666666666666666666666666666",
+          "payload_checksum": "7777777777777777777777777777777777777777777777777777777777777777"
+        }
+      ],
+      "next_cursor": "cursor-1",
+      "next_available_at": null
+    },
+    {
+      "dto_type": "VIRTUAL_CLOCK_STATE",
+      "schema_version": 1,
+      "run_id": "8f9c36a7-fdf4-590f-a914-d3109ee76e37",
+      "start_at": "2026-01-05T01:30:00Z",
+      "end_at": "2026-01-05T07:00:00Z",
+      "current_at": "2026-01-05T01:30:00.001000Z",
+      "elapsed_us": 1000,
+      "state": "RUNNING",
+      "next_event_at": "2026-01-05T01:30:00.001000Z"
+    },
+    {
+      "dto_type": "SCHEDULER_EVENT",
+      "schema_version": 1,
+      "run_id": "8f9c36a7-fdf4-590f-a914-d3109ee76e37",
+      "event_id": "41710a4d-2c4a-5786-bec3-602817da81b2",
+      "event_type": "MARKET_DATA",
+      "dispatch_at": "2026-01-05T01:30:00.001000Z",
+      "priority": 50,
+      "source_id": "SIM-XSHG",
+      "source_sequence": 1,
+      "causal_sequence": 0,
+      "contract_id": "CONTRACT-MARKET-TICK-RECEIVED-V1",
+      "payload_checksum": "7777777777777777777777777777777777777777777777777777777777777777",
+      "idempotency_key": "schedule-market-1"
+    },
+    {
+      "dto_type": "SCHEDULER_RESULT",
+      "schema_version": 1,
+      "run_id": "8f9c36a7-fdf4-590f-a914-d3109ee76e37",
+      "event_id": "41710a4d-2c4a-5786-bec3-602817da81b2",
+      "outcome": "SCHEDULED",
+      "reason_code": "SCHEDULED",
+      "effective_at": "2026-01-05T01:30:00Z"
+    },
+    {
+      "dto_type": "EXECUTION_SIMULATION_POLICY",
+      "schema_version": 1,
+      "policy_id": "cn-equity-next-tick",
+      "policy_version": "v1",
+      "execution_contract_id": "CONTRACT-EXECUTION-BROKER-GATEWAY-V1",
+      "broker_scenario_contract_id": "CONTRACT-BROKER-SCENARIO-V1",
+      "report_contract_ids": ["CONTRACT-BROKER-TRADE-V1", "CONTRACT-BROKER-ORDER-REPORTED-V1"],
+      "matching": {
+        "model": "NEXT_TICK_V1",
+        "decision_cutoff": "STRICTLY_AFTER_ACCEPTED_SCHEDULER_KEY",
+        "limit_crossing": "ADJUSTED_PRICE_MUST_SATISFY_LIMIT",
+        "liquidity_source": "RELEASED_INCREMENTAL_VOLUME_ONLY",
+        "max_participation_rate": "0.25",
+        "partial_fills": true
+      },
+      "slippage": {
+        "model": "FIXED_BPS",
+        "value": "5",
+        "tick_size": "0.01",
+        "direction": "BUY_ADDS_SELL_SUBTRACTS",
+        "rounding": "BUY_UP_SELL_DOWN_TO_TICK"
+      },
+      "fees": {
+        "currency": "CNY",
+        "currency_minor_unit": "0.01",
+        "commission_rate": "0.0003",
+        "minimum_commission": "5",
+        "commission_accrual": "PER_ORDER_CUMULATIVE_DELTA_V1",
+        "transfer_fee_rate": "0.00001",
+        "sell_tax_rate": "0.001",
+        "rounding_policy": "CURRENCY_MINOR_UNIT_HALF_EVEN_V1"
+      },
+      "latency": {"submit_ack_us": 1000, "fill_report_us": 2000, "cancel_ack_us": 1000, "query_result_us": 500},
+      "content_checksum": "b96d56382939276e961c163b2cf9678fb13d7dc898ca34b7d7f3ebbdd23f2487"
+    },
+    {
+      "dto_type": "BACKTEST_RUN_SPEC",
+      "schema_version": 1,
+      "run_id": "8f9c36a7-fdf4-590f-a914-d3109ee76e37",
+      "mode": "BACKTEST",
+      "start_at": "2026-01-05T01:30:00Z",
+      "end_at": "2026-01-05T07:00:00Z",
+      "seed": 7,
+      "contract_bundle": {"artifact_id": "quantiqmt-contracts", "version": "0.13.0", "content_checksum": "8888888888888888888888888888888888888888888888888888888888888888"},
+      "code_artifact": {"artifact_id": "quantiqmt-runtime", "version": "commit-abc", "content_checksum": "9999999999999999999999999999999999999999999999999999999999999999"},
+      "strategy_artifact": {"artifact_id": "buy-and-hold", "version": "v1", "content_checksum": "1010101010101010101010101010101010101010101010101010101010101010"},
+      "strategy_parameters": {"artifact_id": "buy-and-hold-params", "version": "v1", "content_checksum": "1111111111111111111111111111111111111111111111111111111111111111"},
+      "historical_dataset": {"artifact_id": "cn-equity-ticks", "version": "2026-08-26-v1", "content_checksum": "19ba0975c700fcbca607e7a67cafcfe6e763aee6774b87e978fc33d70da9ab8d"},
+      "calendar": {"artifact_id": "calendar-xshg", "version": "2026-v1", "content_checksum": "1111111111111111111111111111111111111111111111111111111111111111"},
+      "tzdb": {"artifact_id": "iana-tzdb", "version": "2026c", "content_checksum": "2222222222222222222222222222222222222222222222222222222222222222"},
+      "market_policy": {"artifact_id": "market-policy", "version": "v1", "content_checksum": "3333333333333333333333333333333333333333333333333333333333333333"},
+      "execution_policy": {"artifact_id": "cn-equity-next-tick", "version": "v1", "content_checksum": "b96d56382939276e961c163b2cf9678fb13d7dc898ca34b7d7f3ebbdd23f2487"},
+      "risk_rule_set": {"artifact_id": "risk-rules", "version": "v1", "content_checksum": "1212121212121212121212121212121212121212121212121212121212121212"},
+      "target_policy": {"artifact_id": "target-policy", "version": "v1", "content_checksum": "1313131313131313131313131313131313131313131313131313131313131313"},
+      "initial_state": {"artifact_id": "empty-genesis", "version": "v1", "content_checksum": "1414141414141414141414141414141414141414141414141414141414141414"},
+      "scheduler_policy": {"artifact_id": "canonical-scheduler", "version": "v1", "content_checksum": "1515151515151515151515151515151515151515151515151515151515151515"},
+      "storage_policy": {"artifact_id": "isolated-backtest-store", "version": "v1", "content_checksum": "1616161616161616161616161616161616161616161616161616161616161616"},
+      "no_lookahead": "AVAILABLE_AT_NOT_AFTER_VIRTUAL_CLOCK",
+      "ambient_randomness": "FORBIDDEN",
+      "wall_clock": "FORBIDDEN",
+      "input_fingerprint": "5f19980cb74a65891be02afe2e29ff285564ba33bbb732302f95081568d92461"
+    },
+    {
+      "dto_type": "BACKTEST_RUN_EVIDENCE",
+      "schema_version": 1,
+      "run_id": "8f9c36a7-fdf4-590f-a914-d3109ee76e37",
+      "input_fingerprint": "5f19980cb74a65891be02afe2e29ff285564ba33bbb732302f95081568d92461",
+      "status": "COMPLETED",
+      "reason_code": "COMPLETED",
+      "started_at": "2026-01-05T01:30:00Z",
+      "ended_at": "2026-01-05T07:00:00Z",
+      "event_count": 1000,
+      "last_scheduler_key": "2026-01-05T07:00:00Z/80/SIM-XSHG/100/1000/41710a4d-2c4a-5786-bec3-602817da81b2",
+      "event_journal_checksum": "1717171717171717171717171717171717171717171717171717171717171717",
+      "strategy_output_checksum": "1818181818181818181818181818181818181818181818181818181818181818",
+      "broker_report_checksum": "1919191919191919191919191919191919191919191919191919191919191919",
+      "ledger_checksum": "2020202020202020202020202020202020202020202020202020202020202020",
+      "portfolio_checksum": "2121212121212121212121212121212121212121212121212121212121212121",
+      "metrics_checksum": "2222222222222222222222222222222222222222222222222222222222222222",
+      "reproducibility_checksum": "b92050f7b91c0ae2b5c7493782876485b835b490bd379e56a0bef729c8113bdc"
+    },
+    {
+      "dto_type": "PARITY_COMPARISON",
+      "schema_version": 1,
+      "comparison_id": "50505050-5050-5050-8050-505050505050",
+      "scope": "RECORDED_TRACE_REPLAY",
+      "shared_logic_checksum": "2323232323232323232323232323232323232323232323232323232323232323",
+      "live_trace_checksum": "2424242424242424242424242424242424242424242424242424242424242424",
+      "backtest_trace_checksum": "2525252525252525252525252525252525252525252525252525252525252525",
+      "normalized_live_checksum": "2626262626262626262626262626262626262626262626262626262626262626",
+      "normalized_backtest_checksum": "2626262626262626262626262626262626262626262626262626262626262626",
+      "outcome": "MATCH",
+      "mismatch_count": 0,
+      "future_read_count": 0,
+      "comparison_checksum": "5a1d7ef9606472af4dad2525ea6e0b45272e7001e95cd49439c6fc6500075995"
+    }
+  ]
+}
