@@ -173,6 +173,24 @@ def test_callback_is_nonblocking_bounded_and_overflow_is_gap_visible() -> None:
     assert subject.queue_depth(request()["subscription_id"]) == 3
 
 
+def test_drain_delivers_bounded_backfill_to_the_quality_pipeline() -> None:
+    subject = gateway()
+    subscription_id = request()["subscription_id"]
+    subject.subscribe(request())
+
+    assert subject.on_tick(subscription_id, 1, 1, tick(5)).accepted is True
+    subject.drain(subscription_id)
+    assert subject.quality("600000.XSHG").contiguous_source_version == 0
+
+    for sequence in range(1, 5):
+        assert subject.on_tick(subscription_id, 1, 1, tick(sequence)).accepted is True
+        subject.drain(subscription_id)
+
+    state = subject.quality("600000.XSHG")
+    assert state.quality == "GAP"
+    assert (state.contiguous_source_version, state.highest_observed_sequence) == (5, 5)
+
+
 def test_snapshot_and_health_are_validated_before_every_return() -> None:
     subject = gateway()
     subject.subscribe(request())

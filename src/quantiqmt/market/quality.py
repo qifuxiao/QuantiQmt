@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import cast
 
 from quantiqmt.contracts.canonical import canonical_sha256
@@ -29,6 +29,13 @@ class QualityState:
     gap_start_sequence: int | None = None
     gap_end_sequence: int | None = None
     reason_code: str = "INITIAL_BASELINE_VERIFIED"
+    # Internal recovery state. `source_version` remains the monotonic public
+    # highest-observed version; it is deliberately not the contiguous watermark.
+    contiguous_source_version: int = 0
+    highest_observed_sequence: int = 0
+    pending_backfill_sequences: frozenset[int] = frozenset()
+    recovery_gap_start_sequence: int | None = None
+    recovery_gap_end_sequence: int | None = None
 
 
 class RecoveryEvidenceRegistry:
@@ -142,6 +149,8 @@ class MarketQuality:
                 "NORMAL",
                 quality_version,
                 source_version,
+                contiguous_source_version=source_version,
+                highest_observed_sequence=source_version,
             )
             self._states[instrument_id] = state
         return state
@@ -167,24 +176,24 @@ class MarketQuality:
             if previous != fingerprint:
                 raise IdentityCollisionError("market tick identity collision")
             return state
-        if sequence < state.source_version:
+        if state.quality == "GAP":
+            return self._observe_gap_backfill(state, sequence, identity, fingerprint)
+        if sequence <= state.contiguous_source_version:
             raise MarketContractError("source sequence regression")
         self._fingerprints[identity] = fingerprint
-        if sequence > state.source_version + 1:
-            return self._gap(state, state.source_version + 1, sequence - 1, sequence)
-        self._states[instrument] = QualityState(
-            state.provider,
-            state.instrument_id,
-            state.calendar_id,
-            state.calendar_version,
-            state.session_id,
-            state.quality,
-            state.quality_version,
-            max(state.source_version, sequence),
-            state.unresolved_gap_count,
-            state.gap_start_sequence,
-            state.gap_end_sequence,
-            state.reason_code,
+        if sequence > state.contiguous_source_version + 1:
+            return self._gap(
+                state,
+                state.contiguous_source_version + 1,
+                sequence - 1,
+                sequence,
+                observed_sequence=True,
+            )
+        self._states[instrument] = replace(
+            state,
+            source_version=sequence,
+            contiguous_source_version=sequence,
+            highest_observed_sequence=sequence,
         )
         return self._states[instrument]
 
@@ -196,34 +205,18 @@ class MarketQuality:
         if state.quality in {"GAP", "UNAVAILABLE", "RECOVERING"}:
             return state
         if state.quality == "NORMAL":
-            state = QualityState(
-                state.provider,
-                state.instrument_id,
-                state.calendar_id,
-                state.calendar_version,
-                state.session_id,
-                "DEGRADED",
-                state.quality_version + 1,
-                max(state.source_version, source_version),
-                state.unresolved_gap_count,
-                state.gap_start_sequence,
-                state.gap_end_sequence,
-                "SOURCE_LAG",
+            state = replace(
+                state,
+                quality="DEGRADED",
+                quality_version=state.quality_version + 1,
+                reason_code="SOURCE_LAG",
             )
         elif state.quality == "DEGRADED":
-            state = QualityState(
-                state.provider,
-                state.instrument_id,
-                state.calendar_id,
-                state.calendar_version,
-                state.session_id,
-                "STALE",
-                state.quality_version + 1,
-                max(state.source_version, source_version),
-                state.unresolved_gap_count,
-                state.gap_start_sequence,
-                state.gap_end_sequence,
-                "STALE_DEADLINE_EXCEEDED",
+            state = replace(
+                state,
+                quality="STALE",
+                quality_version=state.quality_version + 1,
+                reason_code="STALE_DEADLINE_EXCEEDED",
             )
         self._states[instrument_id] = state
         return state
@@ -239,21 +232,31 @@ class MarketQuality:
             ("STALE", "SNAPSHOT_VERIFYING"),
         }:
             raise MarketContractError("illegal recovery start transition")
+        if state.quality == "GAP":
+            if state.contiguous_source_version != state.highest_observed_sequence:
+                raise MarketContractError("gap backfill is incomplete")
+            if (
+                evidence.get("gap_start_sequence") != state.gap_start_sequence
+                or evidence.get("gap_end_sequence") != state.gap_end_sequence
+                or _evidence_int(evidence, "source_version") != state.source_version
+            ):
+                raise MarketContractError("recovery evidence does not bind the resolved gap")
         self._validate_recovery(state, evidence)
         self._verify_resolved_recovery(evidence, state)
-        current = QualityState(
-            state.provider,
-            state.instrument_id,
-            state.calendar_id,
-            state.calendar_version,
-            state.session_id,
-            "RECOVERING",
-            state.quality_version + 1,
-            _evidence_int(evidence, "source_version"),
-            state.unresolved_gap_count,
-            None,
-            None,
-            reason,
+        current = replace(
+            state,
+            quality="RECOVERING",
+            quality_version=state.quality_version + 1,
+            source_version=_evidence_int(evidence, "source_version"),
+            contiguous_source_version=_evidence_int(evidence, "source_version"),
+            highest_observed_sequence=_evidence_int(evidence, "source_version"),
+            unresolved_gap_count=0,
+            gap_start_sequence=None,
+            gap_end_sequence=None,
+            pending_backfill_sequences=frozenset(),
+            recovery_gap_start_sequence=state.gap_start_sequence,
+            recovery_gap_end_sequence=state.gap_end_sequence,
+            reason_code=reason,
         )
         self._states[instrument_id] = current
         return current
@@ -262,25 +265,32 @@ class MarketQuality:
         state = self.state(instrument_id)
         if state.quality != "RECOVERING":
             raise MarketContractError("only RECOVERING can enter NORMAL")
+        if (
+            state.contiguous_source_version != state.highest_observed_sequence
+            or evidence.get("gap_start_sequence") != state.recovery_gap_start_sequence
+            or evidence.get("gap_end_sequence") != state.recovery_gap_end_sequence
+            or _evidence_int(evidence, "source_version") != state.source_version
+        ):
+            raise MarketContractError("recovery evidence does not prove a fully resolved gap")
         self._validate_recovery(state, evidence, allow_previous_version=True)
         self._verify_resolved_recovery(evidence, state)
         if _evidence_int(evidence, "watermark_sequence") < _evidence_int(
             evidence, "source_version"
         ):
             raise MarketContractError("recovery watermark does not cover source version")
-        current = QualityState(
-            state.provider,
-            state.instrument_id,
-            state.calendar_id,
-            state.calendar_version,
-            state.session_id,
-            "NORMAL",
-            state.quality_version + 1,
-            _evidence_int(evidence, "source_version"),
-            0,
-            None,
-            None,
-            "RECOVERY_VERIFIED",
+        current = replace(
+            state,
+            quality="NORMAL",
+            quality_version=state.quality_version + 1,
+            source_version=_evidence_int(evidence, "source_version"),
+            contiguous_source_version=_evidence_int(evidence, "source_version"),
+            highest_observed_sequence=_evidence_int(evidence, "source_version"),
+            unresolved_gap_count=0,
+            gap_start_sequence=None,
+            gap_end_sequence=None,
+            recovery_gap_start_sequence=None,
+            recovery_gap_end_sequence=None,
+            reason_code="RECOVERY_VERIFIED",
         )
         self._states[instrument_id] = current
         return current
@@ -292,39 +302,72 @@ class MarketQuality:
             raise MarketContractError("immutable recovery evidence registry is unavailable")
         self._recovery_registry.verify(evidence, state)
 
-    def _gap(self, state: QualityState, start: int, end: int, source_version: int) -> QualityState:
+    def _observe_gap_backfill(
+        self,
+        state: QualityState,
+        sequence: int,
+        identity: tuple[str, str, int],
+        fingerprint: str,
+    ) -> QualityState:
+        if (
+            sequence <= state.contiguous_source_version
+            or sequence > state.highest_observed_sequence
+        ):
+            raise MarketContractError("backfill sequence is outside the unresolved gap")
+        self._fingerprints[identity] = fingerprint
+        pending = set(state.pending_backfill_sequences)
+        pending.add(sequence)
+        contiguous = state.contiguous_source_version
+        while contiguous + 1 in pending:
+            contiguous += 1
+            pending.remove(contiguous)
+        current = replace(
+            state,
+            contiguous_source_version=contiguous,
+            pending_backfill_sequences=frozenset(pending),
+        )
+        self._states[state.instrument_id] = current
+        return current
+
+    def _gap(
+        self,
+        state: QualityState,
+        start: int,
+        end: int,
+        source_version: int,
+        *,
+        observed_sequence: bool = False,
+    ) -> QualityState:
         if state.quality == "UNAVAILABLE":
             return state
+        highest = max(state.highest_observed_sequence, source_version)
+        pending = set(state.pending_backfill_sequences)
+        if observed_sequence:
+            pending.add(source_version)
         if state.quality == "GAP":
-            current = QualityState(
-                state.provider,
-                state.instrument_id,
-                state.calendar_id,
-                state.calendar_version,
-                state.session_id,
-                "GAP",
-                state.quality_version,
-                max(state.source_version, source_version),
-                state.unresolved_gap_count + 1,
-                min(cast(int, state.gap_start_sequence), start),
-                max(cast(int, state.gap_end_sequence), end),
-                "SOURCE_SEQUENCE_GAP",
+            current = replace(
+                state,
+                source_version=max(state.source_version, source_version),
+                highest_observed_sequence=highest,
+                unresolved_gap_count=state.unresolved_gap_count + 1,
+                gap_start_sequence=min(cast(int, state.gap_start_sequence), start),
+                gap_end_sequence=max(cast(int, state.gap_end_sequence), end),
+                pending_backfill_sequences=frozenset(pending),
+                reason_code="SOURCE_SEQUENCE_GAP",
             )
             self._states[state.instrument_id] = current
             return current
-        current = QualityState(
-            state.provider,
-            state.instrument_id,
-            state.calendar_id,
-            state.calendar_version,
-            state.session_id,
-            "GAP",
-            state.quality_version + 1,
-            max(state.source_version, source_version),
-            state.unresolved_gap_count + 1,
-            start,
-            end,
-            "SOURCE_SEQUENCE_GAP",
+        current = replace(
+            state,
+            quality="GAP",
+            quality_version=state.quality_version + 1,
+            source_version=max(state.source_version, source_version),
+            unresolved_gap_count=state.unresolved_gap_count + 1,
+            gap_start_sequence=start,
+            gap_end_sequence=end,
+            highest_observed_sequence=highest,
+            pending_backfill_sequences=frozenset(pending),
+            reason_code="SOURCE_SEQUENCE_GAP",
         )
         self._states[state.instrument_id] = current
         return current
