@@ -29,10 +29,12 @@ class QualityState:
     gap_start_sequence: int | None = None
     gap_end_sequence: int | None = None
     reason_code: str = "INITIAL_BASELINE_VERIFIED"
-    # Internal recovery state. `source_version` remains the monotonic public
-    # highest-observed version; it is deliberately not the contiguous watermark.
+    # Internal recovery state. `source_version` and `highest_observed_sequence`
+    # describe accepted facts; a rejected overflow is represented only by the
+    # expected gap boundary and never advances either value.
     contiguous_source_version: int = 0
     highest_observed_sequence: int = 0
+    expected_gap_end_sequence: int = 0
     pending_backfill_sequences: frozenset[int] = frozenset()
     recovery_gap_start_sequence: int | None = None
     recovery_gap_end_sequence: int | None = None
@@ -151,6 +153,7 @@ class MarketQuality:
                 source_version,
                 contiguous_source_version=source_version,
                 highest_observed_sequence=source_version,
+                expected_gap_end_sequence=source_version,
             )
             self._states[instrument_id] = state
         return state
@@ -194,6 +197,7 @@ class MarketQuality:
             source_version=sequence,
             contiguous_source_version=sequence,
             highest_observed_sequence=sequence,
+            expected_gap_end_sequence=sequence,
         )
         return self._states[instrument]
 
@@ -233,7 +237,10 @@ class MarketQuality:
         }:
             raise MarketContractError("illegal recovery start transition")
         if state.quality == "GAP":
-            if state.contiguous_source_version != state.highest_observed_sequence:
+            if (
+                state.contiguous_source_version != state.highest_observed_sequence
+                or state.contiguous_source_version < state.expected_gap_end_sequence
+            ):
                 raise MarketContractError("gap backfill is incomplete")
             if (
                 evidence.get("gap_start_sequence") != state.gap_start_sequence
@@ -250,6 +257,7 @@ class MarketQuality:
             source_version=_evidence_int(evidence, "source_version"),
             contiguous_source_version=_evidence_int(evidence, "source_version"),
             highest_observed_sequence=_evidence_int(evidence, "source_version"),
+            expected_gap_end_sequence=_evidence_int(evidence, "source_version"),
             unresolved_gap_count=0,
             gap_start_sequence=None,
             gap_end_sequence=None,
@@ -267,6 +275,7 @@ class MarketQuality:
             raise MarketContractError("only RECOVERING can enter NORMAL")
         if (
             state.contiguous_source_version != state.highest_observed_sequence
+            or state.contiguous_source_version < state.expected_gap_end_sequence
             or evidence.get("gap_start_sequence") != state.recovery_gap_start_sequence
             or evidence.get("gap_end_sequence") != state.recovery_gap_end_sequence
             or _evidence_int(evidence, "source_version") != state.source_version
@@ -285,6 +294,7 @@ class MarketQuality:
             source_version=_evidence_int(evidence, "source_version"),
             contiguous_source_version=_evidence_int(evidence, "source_version"),
             highest_observed_sequence=_evidence_int(evidence, "source_version"),
+            expected_gap_end_sequence=_evidence_int(evidence, "source_version"),
             unresolved_gap_count=0,
             gap_start_sequence=None,
             gap_end_sequence=None,
@@ -311,7 +321,7 @@ class MarketQuality:
     ) -> QualityState:
         if (
             sequence <= state.contiguous_source_version
-            or sequence > state.highest_observed_sequence
+            or sequence > state.expected_gap_end_sequence
         ):
             raise MarketContractError("backfill sequence is outside the unresolved gap")
         self._fingerprints[identity] = fingerprint
@@ -323,7 +333,9 @@ class MarketQuality:
             pending.remove(contiguous)
         current = replace(
             state,
+            source_version=max(state.source_version, sequence),
             contiguous_source_version=contiguous,
+            highest_observed_sequence=max(state.highest_observed_sequence, sequence),
             pending_backfill_sequences=frozenset(pending),
         )
         self._states[state.instrument_id] = current
@@ -340,15 +352,21 @@ class MarketQuality:
     ) -> QualityState:
         if state.quality == "UNAVAILABLE":
             return state
-        highest = max(state.highest_observed_sequence, source_version)
+        highest = state.highest_observed_sequence
         pending = set(state.pending_backfill_sequences)
         if observed_sequence:
+            highest = max(highest, source_version)
             pending.add(source_version)
         if state.quality == "GAP":
             current = replace(
                 state,
-                source_version=max(state.source_version, source_version),
+                source_version=(
+                    max(state.source_version, source_version)
+                    if observed_sequence
+                    else state.source_version
+                ),
                 highest_observed_sequence=highest,
+                expected_gap_end_sequence=max(state.expected_gap_end_sequence, end),
                 unresolved_gap_count=state.unresolved_gap_count + 1,
                 gap_start_sequence=min(cast(int, state.gap_start_sequence), start),
                 gap_end_sequence=max(cast(int, state.gap_end_sequence), end),
@@ -361,11 +379,16 @@ class MarketQuality:
             state,
             quality="GAP",
             quality_version=state.quality_version + 1,
-            source_version=max(state.source_version, source_version),
+            source_version=(
+                max(state.source_version, source_version)
+                if observed_sequence
+                else state.source_version
+            ),
             unresolved_gap_count=state.unresolved_gap_count + 1,
             gap_start_sequence=start,
             gap_end_sequence=end,
             highest_observed_sequence=highest,
+            expected_gap_end_sequence=max(state.expected_gap_end_sequence, end),
             pending_backfill_sequences=frozenset(pending),
             reason_code="SOURCE_SEQUENCE_GAP",
         )

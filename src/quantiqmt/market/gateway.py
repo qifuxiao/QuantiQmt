@@ -14,7 +14,7 @@ from quantiqmt.market.errors import MarketContractError
 from quantiqmt.market.normalization import TickNormalizer
 from quantiqmt.market.observability import MarketObserver, NullMarketObserver
 from quantiqmt.market.policy import AcceptedPolicyStore
-from quantiqmt.market.quality import MarketQuality, QualityState
+from quantiqmt.market.quality import MarketQuality, QualityState, RecoveryEvidenceRegistry
 from quantiqmt.market.validation import (
     format_utc,
     parse_utc,
@@ -73,13 +73,14 @@ class InMemoryMarketGateway:
         normalizer: TickNormalizer | None = None,
         observer: MarketObserver | None = None,
         registry: SchemaRegistry | None = None,
+        recovery_registry: RecoveryEvidenceRegistry | None = None,
     ) -> None:
         self._clock = clock
         self._policies = policies
         self._registry = registry or SchemaRegistry()
         self._normalizer = normalizer or TickNormalizer(self._registry)
         self._observer = observer or NullMarketObserver()
-        self._quality = MarketQuality()
+        self._quality = MarketQuality(recovery_registry)
         self._subscriptions: dict[str, _Subscription] = {}
         self._operation_history: dict[tuple[str, int, str], tuple[str, dict[str, object]]] = {}
         self._lifecycle_history: dict[tuple[int, str], tuple[str, dict[str, object]]] = {}

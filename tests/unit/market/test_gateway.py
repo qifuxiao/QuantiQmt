@@ -2,9 +2,17 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
+import pytest
+
+from quantiqmt.market.errors import IdentityCollisionError, MarketContractError
 from quantiqmt.market.gateway import InMemoryMarketGateway
 from quantiqmt.market.policy import AcceptedPolicyStore
-from quantiqmt.market.validation import SNAPSHOT_PROJECTION, projection_checksum
+from quantiqmt.market.quality import RecoveryEvidenceRegistry
+from quantiqmt.market.validation import (
+    CHECKPOINT_PROJECTION,
+    SNAPSHOT_PROJECTION,
+    projection_checksum,
+)
 
 NOW = datetime(2026, 8, 11, 1, 30, tzinfo=UTC)
 
@@ -90,12 +98,76 @@ def tick(sequence: int) -> dict[str, object]:
     }
 
 
-def gateway() -> InMemoryMarketGateway:
+def gateway(
+    recovery_registry: RecoveryEvidenceRegistry | None = None,
+) -> InMemoryMarketGateway:
     policy = dict(POLICY)
     AcceptedPolicyStore.refresh_checksum(policy)
     store = AcceptedPolicyStore()
     store.activate(policy)
-    return InMemoryMarketGateway(clock=Clock(), policies=store)
+    return InMemoryMarketGateway(clock=Clock(), policies=store, recovery_registry=recovery_registry)
+
+
+def overflow_recovery_evidence(
+    quality_version: int,
+) -> tuple[dict[str, object], dict[str, object], dict[str, object]]:
+    snapshot = {
+        "dto_type": "MARKET_SNAPSHOT",
+        "schema_version": 1,
+        "provider": "SIM",
+        "generation": 1,
+        "instrument_id": "600000.XSHG",
+        "calendar_id": "CN-A",
+        "calendar_version": "cal-v1",
+        "session_id": "am",
+        "as_of": "2026-08-11T01:30:00Z",
+        "source_version": 4,
+        "source_sequence": 4,
+        "quality_version": quality_version,
+        "aggregation_policy_version": "bar-v1",
+        "quality": "NORMAL",
+        "stale": False,
+        "unresolved_gap_count": 0,
+        "checksum_verified": True,
+    }
+    snapshot["content_checksum"] = projection_checksum(snapshot, SNAPSHOT_PROJECTION)
+    checkpoint = {
+        "dto_type": "BAR_AGGREGATION_CHECKPOINT",
+        "schema_version": 1,
+        "provider": "SIM",
+        "instrument_id": "600000.XSHG",
+        "calendar_id": "CN-A",
+        "calendar_version": "cal-v1",
+        "session_id": "am",
+        "source_version": 4,
+        "quality_version": quality_version,
+        "aggregation_policy_version": "bar-v1",
+        "watermark_sequence": 4,
+        "watermark_event_time": "2026-08-11T01:30:00Z",
+        "last_final_sequence": 4,
+    }
+    checkpoint["checkpoint_checksum"] = projection_checksum(checkpoint, CHECKPOINT_PROJECTION)
+    evidence = {
+        "provider": "SIM",
+        "instrument_id": "600000.XSHG",
+        "calendar_id": "CN-A",
+        "calendar_version": "cal-v1",
+        "session_id": "am",
+        "snapshot_identity": f"overflow-snapshot-{quality_version}",
+        "snapshot_checksum": snapshot["content_checksum"],
+        "checkpoint_identity": f"overflow-checkpoint-{quality_version}",
+        "checkpoint_checksum": checkpoint["checkpoint_checksum"],
+        "backfill_start_sequence": 4,
+        "backfill_end_sequence": 4,
+        "gap_start_sequence": 4,
+        "gap_end_sequence": 4,
+        "watermark_sequence": 4,
+        "previous_source_version": 3,
+        "source_version": 4,
+        "previous_quality_version": quality_version - 1,
+        "quality_version": quality_version,
+    }
+    return snapshot, checkpoint, evidence
 
 
 def snapshot_request() -> dict[str, object]:
@@ -171,6 +243,98 @@ def test_callback_is_nonblocking_bounded_and_overflow_is_gap_visible() -> None:
     subject.apply_gap_evidence("600000.XSHG", rejected)
     assert subject.quality("600000.XSHG").quality == "GAP"
     assert subject.queue_depth(request()["subscription_id"]) == 3
+
+
+def test_gateway_overflow_gap_awaits_the_rejected_sequence_as_bounded_backfill() -> None:
+    subject = gateway()
+    subscription_id = request()["subscription_id"]
+    subject.subscribe(request())
+
+    for sequence in range(1, 4):
+        assert subject.on_tick(subscription_id, 1, 1, tick(sequence)).accepted is True
+    rejected = subject.on_tick(subscription_id, 1, 1, tick(4))
+    subject.drain(subscription_id)
+    subject.drain(subscription_id)
+    gap = subject.apply_gap_evidence("600000.XSHG", rejected)
+
+    assert gap.source_version == gap.highest_observed_sequence == 3
+    assert gap.expected_gap_end_sequence == 4
+    assert gap.contiguous_source_version == 3
+    assert subject.on_tick(subscription_id, 1, 1, tick(4)).accepted is True
+    subject.drain(subscription_id)
+    recovered_gap = subject.quality("600000.XSHG")
+    assert recovered_gap.quality == "GAP"
+    assert (
+        recovered_gap.contiguous_source_version,
+        recovered_gap.highest_observed_sequence,
+        recovered_gap.source_version,
+    ) == (4, 4, 4)
+
+
+def test_gateway_overflow_backfill_requires_registered_recovery_evidence() -> None:
+    recovery = RecoveryEvidenceRegistry()
+    start_snapshot, start_checkpoint, start = overflow_recovery_evidence(3)
+    complete_snapshot, complete_checkpoint, complete = overflow_recovery_evidence(4)
+    recovery.register_snapshot(start["snapshot_identity"], start_snapshot)
+    recovery.register_checkpoint(start["checkpoint_identity"], start_checkpoint)
+    recovery.register_snapshot(complete["snapshot_identity"], complete_snapshot)
+    recovery.register_checkpoint(complete["checkpoint_identity"], complete_checkpoint)
+    subject = gateway(recovery)
+    subscription_id = request()["subscription_id"]
+    subject.subscribe(request())
+
+    for sequence in range(1, 4):
+        subject.on_tick(subscription_id, 1, 1, tick(sequence))
+    rejected = subject.on_tick(subscription_id, 1, 1, tick(4))
+    subject.drain(subscription_id)
+    subject.drain(subscription_id)
+    subject.apply_gap_evidence("600000.XSHG", rejected)
+    subject.on_tick(subscription_id, 1, 1, tick(4))
+    subject.drain(subscription_id)
+
+    assert subject.quality("600000.XSHG").quality == "GAP"
+    with pytest.raises(MarketContractError, match="only RECOVERING"):
+        subject._quality.complete_recovery("600000.XSHG", complete)
+    assert (
+        subject._quality.begin_recovery("600000.XSHG", start, reason="BACKFILL_STARTED").quality
+        == "RECOVERING"
+    )
+    assert subject._quality.complete_recovery("600000.XSHG", complete).quality == "NORMAL"
+
+
+def test_gateway_overflow_backfill_rejects_outside_range_and_conflicts() -> None:
+    subject = gateway()
+    subscription_id = request()["subscription_id"]
+    subject.subscribe(request())
+
+    for sequence in range(1, 4):
+        subject.on_tick(subscription_id, 1, 1, tick(sequence))
+    rejected = subject.on_tick(subscription_id, 1, 1, tick(4))
+    subject.drain(subscription_id)
+    subject.drain(subscription_id)
+    subject.apply_gap_evidence("600000.XSHG", rejected)
+
+    subject.on_tick(subscription_id, 1, 1, tick(5))
+    with pytest.raises(MarketContractError, match="outside the unresolved gap"):
+        subject.drain(subscription_id)
+
+    duplicate_subject = gateway()
+    duplicate_subject.subscribe(request())
+    for sequence in range(1, 4):
+        duplicate_subject.on_tick(subscription_id, 1, 1, tick(sequence))
+    rejected = duplicate_subject.on_tick(subscription_id, 1, 1, tick(4))
+    duplicate_subject.drain(subscription_id)
+    duplicate_subject.drain(subscription_id)
+    duplicate_subject.apply_gap_evidence("600000.XSHG", rejected)
+    duplicate_subject.on_tick(subscription_id, 1, 1, tick(4))
+    duplicate_subject.drain(subscription_id)
+    duplicate_subject.on_tick(subscription_id, 1, 1, tick(4))
+    duplicate_subject.drain(subscription_id)
+    conflicting = tick(4)
+    conflicting["last_price"] = "10.02"
+    duplicate_subject.on_tick(subscription_id, 1, 1, conflicting)
+    with pytest.raises(IdentityCollisionError):
+        duplicate_subject.drain(subscription_id)
 
 
 def test_drain_delivers_bounded_backfill_to_the_quality_pipeline() -> None:
