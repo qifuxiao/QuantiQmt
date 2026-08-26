@@ -209,22 +209,22 @@ catalogs:
 
 change:
   id: SPEC-0.13.0-BACKTEST-LIVE-PARITY-CONTRACTS
-  compatibility: additive_internal_BacktestLiveParity_contracts; all_existing_public_MessageEnvelope_Event_Command_and_Result_V1_schemas_unchanged; no_runtime_or_storage_migration; release_prohibited_pending_independent_review_and_implementation
+  compatibility: additive_internal_BacktestLiveParity_contracts_accepted_after_independent_review; all_existing_public_MessageEnvelope_Event_Command_and_Result_V1_schemas_unchanged; no_runtime_or_storage_migration; release_prohibited_pending_separately_authorized_runtime_implementation
   previous_version: 0.12.0
   public_message_schema_changes: none
   storage_schema_changes: none
   error_catalog_change: none
   runtime_code_change: none_in_TASK_021
-  review_change: none
+  review_change: "records independent APPROVE on exact TASK-021 Head, final 4/4 successful CI, merge commit and human-authorized active-to-completed closeout"
   contract_change: "adds internal Backtest run, immutable dataset, Historical read, VirtualClock, Scheduler, execution simulation policy, reproducibility evidence and two-level parity DTO/Port/workflow contracts"
   semantic_validation_change: "freezes recorded available_at no-lookahead with WAIT/HISTORICAL_RELEASE liveness, deterministic virtual time and content-derived total event order, one-use competing-order liquidity allocation, DAY/IOC/FOK and scenario fill authority, exact Decimal matching/slippage/cumulative fees/latency, end-boundary failure, existing ExecutionGateway and Broker report reuse, shared logic boundaries, RFC8785/SHA256/UUIDv5 identities, trace normalization and append-only failure/completion evidence"
   internal_contracts_added: [CONTRACT-BACKTEST-PARITY-V1, CONTRACT-BACKTEST-PARITY-SEMANTIC-V1, PORTS-BACKTEST, WF-BACKTEST-RUN]
   public_contracts_added: []
-  task_queue_change: "TASK-021 is the only active task under 2026-08-26 human authorization; TASK-010, TASK-024 and every other downstream task remain blocked and unactivated"
+  task_queue_change: "TASK-021 completed after independent Review, final CI, merge and 2026-08-26 human-authorized closeout; no task is active, and TASK-010, TASK-024 plus every other downstream task remain blocked and unactivated"
   affected_tasks: [TASK-021, TASK-010, TASK-024]
   deployment_order:
-    - independently_review_and_merge_TASK_021_contracts
-    - human_authorize_TASK_021_closeout_with_trusted_delivery_evidence
+    - retain_TASK_021_review_CI_merge_and_closeout_evidence
+    - separately_complete_and_activate_TASK_010_dependencies_before_reference_strategy_work
     - separately_authorize_Strategy_Market_Execution_and_Backtest_runtime_tasks
     - package_immutable_contract_calendar_tzdb_policy_and_dataset_manifests
     - verify_recorded_trace_replay_and_zero_future_reads
@@ -233,12 +233,12 @@ change:
     runtime_data: "not applicable because TASK-021 changes no runtime; future adapters must consume the immutable manifest-indexed contract bundle and preserve the shared OMS/Risk/Execution/Ledger chain"
     public_messages: "unchanged; Backtest Market and Broker facts use the same existing public V1 MessageEnvelope and payload contracts as Live"
     storage: "no table, physical artifact store or migration is created; future Backtest storage must be isolated, append-only for run/event/evidence facts and preserve shared UoW/Journal/Inbox/Outbox/Snapshot semantics"
-    task_queue: "TASK-021 is active; TASK-010 and TASK-024 remain blocked until all direct dependencies complete and a human separately activates them"
+    task_queue: "TASK-021 has trusted completed delivery; TASK-010 and TASK-024 remain blocked until all direct dependencies complete and a human separately activates them"
     destructive_backfill: forbidden
   rollback:
     runtime_data: not_applicable_no_runtime_change
     public_messages: unchanged
-    task_queue: "keep TASK-021 active until independent Review; keep TASK-010, TASK-024 and downstream tasks blocked"
+    task_queue: "if TASK-021 delivery evidence is invalidated restore it to active; keep TASK-010, TASK-024 and downstream tasks blocked unless every dependency and human-activation gate passes"
     contracts: "before runtime adoption revert only this additive internal bundle; after artifacts exist stop new runs before readers and preserve run specs, event journals, failures, checksums and parity evidence"
     storage: "no database rollback in TASK-021; never delete or relabel retained failed, mismatched or completed run evidence"
     release: prohibited

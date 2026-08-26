@@ -1,10 +1,10 @@
 ---
 id: TASK-021
 title: Complete Backtest and Live parity L4 contracts
-status: active
+status: completed
 depends_on: [TASK-046, TASK-016, TASK-017, TASK-020]
 spec_refs: [INV-TRADING, INV-CONSISTENCY, PORTS-CORE, PORTS-STRATEGY, PORTS-MARKET, PORTS-BROKER-SIMULATOR, CONTRACT-BACKTEST-PARITY-V1, CONTRACT-BACKTEST-PARITY-SEMANTIC-V1, PORTS-BACKTEST, WF-BACKTEST-RUN, NFR-PERFORMANCE, NFR-RELIABILITY]
-allowed_paths: [spec/manifest.yaml, spec/contracts/**, spec/interfaces/**, spec/workflows/**, spec/nfr/**, tests/contract/messages/**, tasks/backlog/TASK-010-reference-buy-hold.md, tasks/backlog/TASK-021-backtest-live-parity-contracts.md, tasks/active/TASK-021-backtest-live-parity-contracts.md, tasks/active/README.md, tasks/index.yaml]
+allowed_paths: [spec/manifest.yaml, spec/contracts/**, spec/interfaces/**, spec/workflows/**, spec/nfr/**, tests/contract/messages/**, tasks/backlog/TASK-010-reference-buy-hold.md, tasks/backlog/TASK-021-backtest-live-parity-contracts.md, tasks/active/TASK-021-backtest-live-parity-contracts.md, tasks/completed/TASK-021-backtest-live-parity-contracts.md, tasks/active/README.md, tasks/index.yaml]
 forbidden_paths: [src/**, tests/unit/**, tests/property/**, tests/integration/**, migrations/**]
 verification:
   commands:
@@ -12,11 +12,25 @@ verification:
     - poetry run pytest tests/spec tests/contract
 delivery:
   schema_version: 1
-  contract_status: draft
-  implementation_status: in_progress
-  acceptance_status: partial
-  review_status: pending
+  contract_status: accepted
+  implementation_status: merged
+  acceptance_status: passed
+  review_status: approved
   release_status: prohibited
+  completion_evidence:
+    mode: governance_closeout_after_independent_review
+    change_pr: https://github.com/qifuxiao/QuantiQmt/pull/82
+    reviewed_head_sha: cf71ff8a8238c07977f33ff7643a5d62ed242ac4
+    review_verdict: APPROVE
+    reviewer: qfxyyy
+    evidence_url: https://github.com/qifuxiao/QuantiQmt/pull/82#pullrequestreview-5027595585
+    merge_commit_sha: cd2e7a5e9528abe0e94d7f64dacbc30438873517
+    ci_evidence: reviewed_head_final_4_of_4_success_quality_x2_persistence_postgresql_x2
+    human_authorization_evidence: >-
+      2026-08-26 user confirmed PR #82 merged and explicitly approved execution of the
+      TASK-021 active-to-completed governance closeout. This authorization adds only the
+      exact completed TASK-021 path, activates no downstream task, and does not authorize
+      Backtest runtime, storage, migration, Live adapter, deployment, or release.
 ---
 
 # Objective
@@ -63,7 +77,7 @@ delivery:
 - `poetry run pytest tests/spec tests/contract -q`：`711 passed in 30.79s`。
 - `poetry run pytest tests/contract/messages/test_backtest_live_parity_contracts.py -q`：`48 passed`。
 - `poetry run ruff check` 与 `poetry run ruff format --check`：TASK-021 涉及的两个契约测试文件通过。
-- 以上为本地实现证据，不构成独立 Review、CI、merge 或 completed delivery evidence；delivery 继续保持 `draft/in_progress/partial/pending/prohibited`。
+- 以上为实现阶段的本地证据；独立 Review、CI、merge 与 completed delivery 由下方精确 closeout evidence 补足，release 仍保持 `prohibited`。
 
 ## Review focus
 
@@ -74,3 +88,11 @@ delivery:
 ## Risks and rollback
 
 - 错误 Backtest 会产生虚假信心；必须比普通功能更严格。
+
+## Final review and closeout evidence
+
+- PR #82 was formally approved by independent collaborator `qfxyyy` on exact reviewed Head `cf71ff8a8238c07977f33ff7643a5d62ed242ac4`: https://github.com/qifuxiao/QuantiQmt/pull/82#pullrequestreview-5027595585.
+- GitHub reports 4/4 successful checks on the reviewed Head: quality jobs `98087450030` and `98087369216`, plus persistence-postgresql jobs `98087449843` and `98087368944`.
+- PR #82 merged into `main` as `cd2e7a5e9528abe0e94d7f64dacbc30438873517`.
+- Closeout verification passed against merged `main`: `poetry run python scripts/validate_specs.py` passed and `poetry run pytest tests/spec tests/contract -q` recorded `711 passed in 32.36s` through Poetry 2.1.4 with the repository's locked dependencies.
+- The 2026-08-26 human closeout authorization is limited to this governance transition. TASK-010 remains blocked by TASK-008 and TASK-009; TASK-024 remains blocked by its runtime dependencies. Both require separate human activation, and runtime, physical storage, migration, deployment, and release remain prohibited.

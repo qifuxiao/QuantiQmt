@@ -1,5 +1,5 @@
 # Active Tasks
 
-- TASK-021 — the only active task; it freezes Backtest/Live parity L4 contracts and executable contract evidence.
+No task is currently active.
 
-Backtest runtime, migrations, Live adapters, release, TASK-010/TASK-024 activation, and every other downstream activation remain prohibited. The 2026-08-26 human authorization covers only TASK-021 activation and contract implementation; independent Review is required before closeout.
+TASK-021 completed its independently reviewed contract delivery and human-authorized governance closeout. Backtest runtime, migrations, Live adapters, release, TASK-010/TASK-024 activation, and every other downstream activation remain prohibited without separate human authorization.
