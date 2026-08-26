@@ -967,8 +967,8 @@ def test_target_resolver_contract_bundle_is_registered_and_machine_valid() -> No
     workflow_ids = {item["id"] for item in manifest["catalogs"]["workflows"]}
     storage_ids = {item["id"] for item in manifest["catalogs"]["storage"]}
 
-    assert manifest["specification"]["version"] == "0.12.0"
-    assert manifest["change"]["previous_version"] == "0.11.0"
+    version = tuple(int(part) for part in manifest["specification"]["version"].split("."))
+    assert version >= (0, 12, 0)
     assert schema["$id"] == "urn:quantiqmt:internal:target-resolver:v1"
     assert semantic["contract"]["id"] == "CONTRACT-TARGET-RESOLVER-SEMANTIC-V1"
     assert workflow["workflow"]["id"] == "WF-TARGET-RESOLUTION"

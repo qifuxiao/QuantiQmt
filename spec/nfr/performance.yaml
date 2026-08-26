@@ -54,3 +54,15 @@ nfr:
     late_pass_replacement: forbidden
     worker_pool: "bounded max_in_flight with zero unbounded queue growth"
     saturation_result: "QQ-RISK-4005 TIMEOUT_GUARD REJECT"
+  backtest:
+    scheduler_queue_capacity: finite_versioned_policy
+    historical_page_max_items: 10000
+    historical_pages_per_release_dispatch: finite_versioned_policy
+    event_batch_capacity: finite_versioned_policy
+    run_event_limit: finite_versioned_policy
+    artifact_size_limit: finite_versioned_policy
+    host_watchdog: finite_termination_only
+    throughput_measurement_is_business_input: false
+    deterministic_outcome_may_depend_on_host_speed: false
+    capacity_exhaustion: fail_visible_without_drop_reorder_or_completed_claim
+    report: [events_per_host_second, virtual_time_ratio, queue_high_watermark, artifact_bytes]

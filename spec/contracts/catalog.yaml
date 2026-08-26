@@ -1,6 +1,6 @@
 catalog:
   id: CONTRACT-CATALOG
-  version: 5
+  version: 6
   status: accepted
 messages:
   - {name: strategy.submit_order_intent.v1, kind: command, owner: OrderApplication, schema: commands/strategy.submit_order_intent.v1.schema.json, status: active}
@@ -43,6 +43,8 @@ rules:
   published_name_reuse: forbidden
   planned_message_must_be_activated_by_spec_change_task: true
 internal_contracts:
+  - {id: CONTRACT-BACKTEST-PARITY-V1, schema: simulation/backtest-parity.v1.schema.json, status: draft, owner: Backtest}
+  - {id: CONTRACT-BACKTEST-PARITY-SEMANTIC-V1, schema: simulation/backtest-parity.semantic-validation.v1.yaml, status: draft, owner: Backtest}
   - {id: CONTRACT-MARKET-DATA-V1, schema: market/market-data.v1.schema.json, status: draft, owner: MarketData}
   - {id: CONTRACT-MARKET-SEMANTIC-VALIDATION-V1, schema: market/market-data.semantic-validation.v1.yaml, status: draft, owner: MarketData}
   - {id: CONTRACT-LEDGER-ACCOUNTING-V1, schema: ledger/ledger-accounting.v1.schema.json, status: draft, owner: AccountLedger}

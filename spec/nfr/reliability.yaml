@@ -79,6 +79,31 @@ nfr:
     wall_clock: forbidden
     ambient_randomness: forbidden
     future_data: forbidden
+  backtest_live_parity:
+    contract: CONTRACT-BACKTEST-PARITY-V1
+    semantic_contract: CONTRACT-BACKTEST-PARITY-SEMANTIC-V1
+    workflow: WF-BACKTEST-RUN
+    business_clock: injected_VirtualClock
+    business_latency_clock: deterministic_elapsed_virtual_microseconds
+    wall_clock: forbidden
+    ambient_randomness: forbidden
+    future_data: forbidden
+    scheduler_order: [dispatch_at, priority, source_id_ASCII, source_sequence, causal_sequence, event_id]
+    historical_availability: recorded_available_at_not_after_virtual_now
+    empty_scheduler_with_future_data: WAIT_then_priority_5_HISTORICAL_RELEASE_never_early_complete
+    future_release_hint_visibility: coordinator_only_time_and_opaque_cursor
+    released_incremental_volume_reuse: forbidden
+    competing_order_priority: [accepted_scheduler_key, order_id_ASCII]
+    required_causal_output_after_end: FAILED_END_BOUNDARY_UNSETTLED_never_silent_truncation
+    same_input_same_output: byte_identical_business_trace_and_checksums
+    direct_state_shortcut: forbidden
+    oms_risk_execution_chain_bypass: forbidden
+    unknown_external_outcome_blind_retry: forbidden
+    queue_and_batch: bounded
+    overflow: fail_visible_without_drop_or_reorder
+    host_watchdog: termination_only_never_completed_business_outcome
+    failed_run_evidence: append_only
+    backtest_result_is_live_release_evidence: false
   control_plane:
     config_activation: atomic_active_version_event_outbox
     partial_silent_activation: forbidden

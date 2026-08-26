@@ -1,0 +1,125 @@
+workflow:
+  id: WF-BACKTEST-RUN
+  version: 1
+  authority: PORTS-BACKTEST
+  input: BACKTEST_RUN_SPEC
+  clocks:
+    business: VirtualClock
+    deterministic_latency: elapsed_virtual_microseconds
+    host_watchdog: termination_only_not_business_input
+  stages:
+    - name: validate_run
+      actions:
+        - schema_validate_run_spec
+        - verify_every_immutable_artifact_version_and_checksum
+        - recompute_input_fingerprint_and_run_id
+        - reject_existing_run_id_with_different_input
+      failure: persist_REJECTED_evidence_without_starting_adapters
+    - name: validate_dataset
+      actions:
+        - verify_manifest_and_partition_checksums
+        - verify_calendar_tzdb_market_policy_and_adjustment_policy
+        - verify_source_sequence_ranges_and_availability
+        - validate_public_market_envelopes_and_payloads
+      failure: persist_REJECTED_CHECKSUM_MISMATCH_or_DATA_GAP
+      forbidden: [future_partition_visibility, forward_fill, repair_in_place]
+    - name: initialize_adapters
+      actions:
+        - restore_explicit_initial_state
+        - initialize_VirtualClock_at_start
+        - initialize_bounded_DeterministicScheduler
+        - configure_HistoricalMarketPort
+        - configure_ExecutionSimulatorPort
+        - initialize_isolated_storage_with_shared_UoW_and_Journal_semantics
+      failure: persist_FAILED_DEPENDENCY_UNAVAILABLE
+    - name: run_event_loop
+      repeat: until_scheduler_empty_or_end_at
+      actions:
+        - when_no_visible_market_page_request_PAGE_WAIT_END_REJECTED
+        - on_WAIT_schedule_priority_5_HISTORICAL_RELEASE_at_next_available_at_without_exposing_future_payload
+        - peek_earliest_canonical_scheduler_key
+        - advance_VirtualClock_to_earliest_dispatch_at
+        - release_only_historical_events_with_available_at_lte_virtual_now
+        - pop_bounded_due_batch_in_canonical_order
+        - validate_and_append_each_input_before_dispatch
+        - dispatch_through_shared_application_boundary
+        - append_outputs_and_schedule_followups
+      forbidden:
+        - wall_clock_branch
+        - ambient_randomness
+        - future_read
+        - unbounded_batch_or_queue
+        - direct_final_state_assignment
+        - stop_on_empty_scheduler_while_HistoricalMarket_reports_WAIT
+    - name: dispatch_market
+      inputs: [HISTORICAL_RELEASE, SESSION, MARKET_QUALITY, MARKET_DATA]
+      actions:
+        - on_HISTORICAL_RELEASE_read_at_current_virtual_time_and_admit_only_now_visible_events
+        - use_same_Market_MessageEnvelope_and_semantic_validator_as_Live
+        - advance_shared_MarketQuality_and_BarAggregator
+        - construct_read_only_StrategyContext_from_visible_snapshots
+        - schedule_serial_Strategy_callback
+      failure: fail_visible_without_Strategy_delivery
+    - name: dispatch_strategy_output
+      inputs: [STRATEGY_CALLBACK, TIMER]
+      actions:
+        - run_same_Strategy_artifact_and_parameters
+        - validate_generation_scope_frequency_and_output
+        - route_Target_to_TargetResolver
+        - route_OrderIntent_to_OMS_registration
+      order_chain: OrderIntent_to_OMS_registration_to_Risk_to_OMS_transition_to_Execution
+      forbidden: [Broker_call, direct_OMS_mutation, Risk_bypass, backtest_only_strategy_branch]
+    - name: dispatch_execution
+      inputs: [confirmed_ExecutionGateway_request]
+      actions:
+        - enforce_persisted_capability_fencing_deadline_and_idempotency
+        - match_only_released_market_facts_after_submit_cutoff
+        - allocate_each_incremental_volume_budget_once_by_accepted_scheduler_key_then_order_id
+        - enforce_DAY_IOC_FOK_and_scenario_fill_authority_without_implicit_fill
+        - compute_Decimal_slippage_liquidity_fees_and_latency
+        - emit_existing_Broker_Trade_then_Order_reports_in_scheduler_order
+      unknown: preserve_identity_and_reconcile_without_blind_retry
+    - name: dispatch_broker_reports
+      inputs: [BROKER_TRADE, BROKER_ORDER]
+      actions:
+        - validate_existing_public_report_contract
+        - merge_through_OMS_only
+        - commit_Order_Journal_and_Outbox_atomically
+        - project_Ledger_and_Portfolio_from_committed_facts
+      forbidden: [simulator_mutates_OMS, overwrite_Ledger, bypass_Inbox_idempotency]
+    - name: finalize
+      actions:
+        - verify_scheduler_empty_or_exact_end_boundary
+        - fail_END_BOUNDARY_UNSETTLED_if_required_causal_output_would_dispatch_after_end
+        - verify_zero_future_reads
+        - verify_event_journal_and_output_checksums
+        - verify_Ledger_and_Portfolio_checksums
+        - commit_COMPLETED_reproducibility_evidence
+      guard: every_required_artifact_checksum_present
+      failure: commit_FAILED_evidence_never_partial_COMPLETED
+  parity:
+    shared_logic:
+      compare: [callback_inputs, Strategy_outputs, Target_results, Risk_decisions, OMS_transitions]
+      future_Live_adapter_outcome_equality: not_claimed
+    recorded_trace_replay:
+      compare: [normalized_inputs, normalized_outputs, causal_order, Ledger_checksum, Portfolio_checksum]
+      external_facts: replay_at_recorded_available_at
+    MATCH_requires: [same_shared_logic_checksum, same_normalized_checksum, zero_mismatch, zero_future_read]
+  failure_rules:
+    FUTURE_DATA_REQUESTED: reject_run_and_persist_evidence
+    CHECKSUM_MISMATCH: reject_before_affected_dispatch
+    DATA_GAP: remain_fail_visible_and_do_not_forward_fill
+    SCHEDULER_CONFLICT: fail_without_drop_or_reorder
+    EXECUTION_MODEL_FAILURE: fail_without_implicit_fill
+    END_BOUNDARY_UNSETTLED: fail_without_silent_truncation_or_COMPLETED_claim
+    UNKNOWN_OUTCOME: reconcile_same_execution_identity
+    host_watchdog: fail_run_without_completed_claim
+  observability:
+    logs: [run_id, input_fingerprint, virtual_time, scheduler_key, event_type, outcome, reason_code, contract_version]
+    metrics: [events_total, scheduler_queue_depth, future_read_rejections_total, fills_total, parity_mismatches_total]
+    forbidden_metric_labels: [run_id, event_id, order_id, trade_id, instrument_id, account_id, checksum]
+  rollback:
+    stop_new_runs_before_readers: true
+    preserve_run_specs_event_journals_failures_and_evidence: true
+    storage_migration: none_in_TASK_021
+    release: prohibited

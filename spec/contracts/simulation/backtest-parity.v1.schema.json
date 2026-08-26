@@ -1,0 +1,353 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:quantiqmt:internal:backtest-parity:v1",
+  "title": "BacktestLiveParityV1",
+  "oneOf": [
+    {"$ref": "#/$defs/backtestRunSpec"},
+    {"$ref": "#/$defs/historicalDatasetManifest"},
+    {"$ref": "#/$defs/historicalReadRequest"},
+    {"$ref": "#/$defs/historicalReadResult"},
+    {"$ref": "#/$defs/virtualClockState"},
+    {"$ref": "#/$defs/schedulerEvent"},
+    {"$ref": "#/$defs/schedulerResult"},
+    {"$ref": "#/$defs/executionSimulationPolicy"},
+    {"$ref": "#/$defs/backtestRunEvidence"},
+    {"$ref": "#/$defs/parityComparison"}
+  ],
+  "$defs": {
+    "time": {"type": "string", "format": "date-time", "pattern": "Z$"},
+    "date": {"type": "string", "format": "date"},
+    "hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "uuid": {"type": "string", "format": "uuid", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"},
+    "identifier": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$"},
+    "safeInteger": {"type": "integer", "minimum": 0, "maximum": 9007199254740991},
+    "positiveSafeInteger": {"type": "integer", "minimum": 1, "maximum": 9007199254740991},
+    "nonNegativeDecimal": {"type": "string", "pattern": "^(0|[1-9][0-9]{0,17})(\\.[0-9]{1,8})?$"},
+    "positiveDecimal": {"type": "string", "pattern": "^(?=.*[1-9])(0|[1-9][0-9]{0,17})(\\.[0-9]{1,8})?$"},
+    "artifactRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["artifact_id", "version", "content_checksum"],
+      "properties": {
+        "artifact_id": {"$ref": "#/$defs/identifier"},
+        "version": {"$ref": "#/$defs/identifier"},
+        "content_checksum": {"$ref": "#/$defs/hash"}
+      }
+    },
+    "datasetPartition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["partition_id", "source_id", "first_source_sequence", "last_source_sequence", "min_event_time", "max_event_time", "min_available_at", "max_available_at", "row_count", "artifact_ref", "content_checksum"],
+      "properties": {
+        "partition_id": {"$ref": "#/$defs/identifier"},
+        "source_id": {"$ref": "#/$defs/identifier"},
+        "first_source_sequence": {"$ref": "#/$defs/safeInteger"},
+        "last_source_sequence": {"$ref": "#/$defs/safeInteger"},
+        "min_event_time": {"$ref": "#/$defs/time"},
+        "max_event_time": {"$ref": "#/$defs/time"},
+        "min_available_at": {"$ref": "#/$defs/time"},
+        "max_available_at": {"$ref": "#/$defs/time"},
+        "row_count": {"$ref": "#/$defs/positiveSafeInteger"},
+        "artifact_ref": {"$ref": "#/$defs/identifier"},
+        "content_checksum": {"$ref": "#/$defs/hash"}
+      }
+    },
+    "historicalEventRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["event_id", "source_id", "source_sequence", "event_time", "available_at", "message_type", "contract_id", "artifact_ref", "envelope_checksum", "payload_checksum"],
+      "properties": {
+        "event_id": {"$ref": "#/$defs/uuid"},
+        "source_id": {"$ref": "#/$defs/identifier"},
+        "source_sequence": {"$ref": "#/$defs/safeInteger"},
+        "event_time": {"$ref": "#/$defs/time"},
+        "available_at": {"$ref": "#/$defs/time"},
+        "message_type": {"enum": ["market.tick_received.v1", "market.bar_closed.v1", "market.quality_changed.v1", "market.session_changed.v1"]},
+        "contract_id": {"enum": ["CONTRACT-MARKET-TICK-RECEIVED-V1", "CONTRACT-MARKET-BAR-CLOSED-V1", "CONTRACT-MARKET-QUALITY-CHANGED-V1", "CONTRACT-MARKET-SESSION-CHANGED-V1"]},
+        "artifact_ref": {"$ref": "#/$defs/identifier"},
+        "envelope_checksum": {"$ref": "#/$defs/hash"},
+        "payload_checksum": {"$ref": "#/$defs/hash"}
+      }
+    },
+    "historicalDatasetManifest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["dto_type", "schema_version", "dataset_id", "dataset_version", "provider", "calendar", "tzdb", "market_validation_policy", "adjustment_policy", "availability_policy", "partitions", "content_checksum"],
+      "properties": {
+        "dto_type": {"const": "HISTORICAL_DATASET_MANIFEST"},
+        "schema_version": {"const": 1},
+        "dataset_id": {"$ref": "#/$defs/identifier"},
+        "dataset_version": {"$ref": "#/$defs/identifier"},
+        "provider": {"$ref": "#/$defs/identifier"},
+        "calendar": {"$ref": "#/$defs/artifactRef"},
+        "tzdb": {"$ref": "#/$defs/artifactRef"},
+        "market_validation_policy": {"$ref": "#/$defs/artifactRef"},
+        "adjustment_policy": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["mode", "policy_version", "content_checksum"],
+          "properties": {
+            "mode": {"enum": ["RAW_AS_TRADED", "POINT_IN_TIME_ADJUSTED"]},
+            "policy_version": {"$ref": "#/$defs/identifier"},
+            "content_checksum": {"$ref": "#/$defs/hash"}
+          }
+        },
+        "availability_policy": {"const": "AS_RECORDED_AVAILABLE_AT_V1"},
+        "partitions": {"type": "array", "minItems": 1, "maxItems": 100000, "items": {"$ref": "#/$defs/datasetPartition"}},
+        "content_checksum": {"$ref": "#/$defs/hash"}
+      }
+    },
+    "historicalReadRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["dto_type", "schema_version", "request_id", "run_id", "manifest_checksum", "cursor", "available_at_lte", "event_types", "max_items", "deadline_at"],
+      "properties": {
+        "dto_type": {"const": "HISTORICAL_READ_REQUEST"},
+        "schema_version": {"const": 1},
+        "request_id": {"$ref": "#/$defs/uuid"},
+        "run_id": {"$ref": "#/$defs/uuid"},
+        "manifest_checksum": {"$ref": "#/$defs/hash"},
+        "cursor": {"type": ["string", "null"], "minLength": 1, "maxLength": 256},
+        "available_at_lte": {"$ref": "#/$defs/time"},
+        "event_types": {"type": "array", "minItems": 1, "maxItems": 4, "uniqueItems": true, "items": {"enum": ["TICK", "BAR", "QUALITY", "SESSION"]}},
+        "max_items": {"type": "integer", "minimum": 1, "maximum": 10000},
+        "deadline_at": {"$ref": "#/$defs/time"}
+      }
+    },
+    "historicalReadResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["dto_type", "schema_version", "request_id", "run_id", "manifest_checksum", "outcome", "reason_code", "items", "next_cursor", "next_available_at"],
+      "properties": {
+        "dto_type": {"const": "HISTORICAL_READ_RESULT"},
+        "schema_version": {"const": 1},
+        "request_id": {"$ref": "#/$defs/uuid"},
+        "run_id": {"$ref": "#/$defs/uuid"},
+        "manifest_checksum": {"$ref": "#/$defs/hash"},
+        "outcome": {"enum": ["PAGE", "WAIT", "END", "REJECTED"]},
+        "reason_code": {"enum": ["PAGE_AVAILABLE", "NOT_YET_AVAILABLE", "END_OF_DATA", "END_OF_RUN_RANGE", "INVALID_REQUEST", "DEADLINE_EXCEEDED", "DATASET_UNAVAILABLE", "CHECKSUM_MISMATCH", "FUTURE_DATA_REQUESTED"]},
+        "items": {"type": "array", "maxItems": 10000, "items": {"$ref": "#/$defs/historicalEventRef"}},
+        "next_cursor": {"type": ["string", "null"], "minLength": 1, "maxLength": 256},
+        "next_available_at": {"oneOf": [{"$ref": "#/$defs/time"}, {"type": "null"}]}
+      },
+      "oneOf": [
+        {"properties": {"outcome": {"const": "PAGE"}, "reason_code": {"const": "PAGE_AVAILABLE"}, "items": {"minItems": 1}, "next_cursor": {"type": "string"}, "next_available_at": {"type": "null"}}},
+        {"properties": {"outcome": {"const": "WAIT"}, "reason_code": {"const": "NOT_YET_AVAILABLE"}, "items": {"maxItems": 0}, "next_cursor": {"type": "string"}, "next_available_at": {"$ref": "#/$defs/time"}}},
+        {"properties": {"outcome": {"const": "END"}, "reason_code": {"enum": ["END_OF_DATA", "END_OF_RUN_RANGE"]}, "items": {"maxItems": 0}, "next_cursor": {"type": "null"}, "next_available_at": {"type": "null"}}},
+        {"properties": {"outcome": {"const": "REJECTED"}, "reason_code": {"enum": ["INVALID_REQUEST", "DEADLINE_EXCEEDED", "DATASET_UNAVAILABLE", "CHECKSUM_MISMATCH", "FUTURE_DATA_REQUESTED"]}, "items": {"maxItems": 0}, "next_cursor": {"type": "null"}, "next_available_at": {"type": "null"}}}
+      ]
+    },
+    "virtualClockState": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["dto_type", "schema_version", "run_id", "start_at", "end_at", "current_at", "elapsed_us", "state", "next_event_at"],
+      "properties": {
+        "dto_type": {"const": "VIRTUAL_CLOCK_STATE"},
+        "schema_version": {"const": 1},
+        "run_id": {"$ref": "#/$defs/uuid"},
+        "start_at": {"$ref": "#/$defs/time"},
+        "end_at": {"$ref": "#/$defs/time"},
+        "current_at": {"$ref": "#/$defs/time"},
+        "elapsed_us": {"$ref": "#/$defs/safeInteger"},
+        "state": {"enum": ["READY", "RUNNING", "ENDED"]},
+        "next_event_at": {"oneOf": [{"$ref": "#/$defs/time"}, {"type": "null"}]}
+      }
+    },
+    "schedulerEvent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["dto_type", "schema_version", "run_id", "event_id", "event_type", "dispatch_at", "priority", "source_id", "source_sequence", "causal_sequence", "contract_id", "payload_checksum", "idempotency_key"],
+      "properties": {
+        "dto_type": {"const": "SCHEDULER_EVENT"},
+        "schema_version": {"const": 1},
+        "run_id": {"$ref": "#/$defs/uuid"},
+        "event_id": {"$ref": "#/$defs/uuid"},
+        "event_type": {"enum": ["CONTROL", "HISTORICAL_RELEASE", "SESSION", "MARKET_QUALITY", "BROKER_TRADE", "BROKER_ORDER", "MARKET_DATA", "STRATEGY_CALLBACK", "TIMER", "CHECKPOINT"]},
+        "dispatch_at": {"$ref": "#/$defs/time"},
+        "priority": {"type": "integer", "enum": [0, 5, 10, 20, 30, 40, 50, 60, 70, 80]},
+        "source_id": {"$ref": "#/$defs/identifier"},
+        "source_sequence": {"$ref": "#/$defs/safeInteger"},
+        "causal_sequence": {"$ref": "#/$defs/safeInteger"},
+        "contract_id": {"$ref": "#/$defs/identifier"},
+        "payload_checksum": {"$ref": "#/$defs/hash"},
+        "idempotency_key": {"$ref": "#/$defs/identifier"}
+      }
+    },
+    "schedulerResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["dto_type", "schema_version", "run_id", "event_id", "outcome", "reason_code", "effective_at"],
+      "properties": {
+        "dto_type": {"const": "SCHEDULER_RESULT"},
+        "schema_version": {"const": 1},
+        "run_id": {"$ref": "#/$defs/uuid"},
+        "event_id": {"$ref": "#/$defs/uuid"},
+        "outcome": {"enum": ["SCHEDULED", "IDEMPOTENT_REPLAY", "CANCELED", "REJECTED"]},
+        "reason_code": {"enum": ["SCHEDULED", "ALREADY_SCHEDULED", "CANCELED", "ALREADY_CANCELED", "INVALID_EVENT", "EVENT_NOT_FOUND", "EVENT_ALREADY_DISPATCHED", "TIME_REGRESSION", "CAUSAL_RETROGRADE", "QUEUE_CAPACITY_EXCEEDED", "DEADLINE_EXCEEDED"]},
+        "effective_at": {"$ref": "#/$defs/time"}
+      },
+      "oneOf": [
+        {"properties": {"outcome": {"const": "SCHEDULED"}, "reason_code": {"const": "SCHEDULED"}}},
+        {"properties": {"outcome": {"const": "IDEMPOTENT_REPLAY"}, "reason_code": {"enum": ["ALREADY_SCHEDULED", "ALREADY_CANCELED"]}}},
+        {"properties": {"outcome": {"const": "CANCELED"}, "reason_code": {"const": "CANCELED"}}},
+        {"properties": {"outcome": {"const": "REJECTED"}, "reason_code": {"enum": ["INVALID_EVENT", "EVENT_NOT_FOUND", "EVENT_ALREADY_DISPATCHED", "TIME_REGRESSION", "CAUSAL_RETROGRADE", "QUEUE_CAPACITY_EXCEEDED", "DEADLINE_EXCEEDED"]}}}
+      ]
+    },
+    "executionSimulationPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["dto_type", "schema_version", "policy_id", "policy_version", "execution_contract_id", "broker_scenario_contract_id", "report_contract_ids", "matching", "slippage", "fees", "latency", "content_checksum"],
+      "properties": {
+        "dto_type": {"const": "EXECUTION_SIMULATION_POLICY"},
+        "schema_version": {"const": 1},
+        "policy_id": {"$ref": "#/$defs/identifier"},
+        "policy_version": {"$ref": "#/$defs/identifier"},
+        "execution_contract_id": {"const": "CONTRACT-EXECUTION-BROKER-GATEWAY-V1"},
+        "broker_scenario_contract_id": {"const": "CONTRACT-BROKER-SCENARIO-V1"},
+        "report_contract_ids": {
+          "type": "array",
+          "prefixItems": [{"const": "CONTRACT-BROKER-TRADE-V1"}, {"const": "CONTRACT-BROKER-ORDER-REPORTED-V1"}],
+          "minItems": 2,
+          "maxItems": 2
+        },
+        "matching": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["model", "decision_cutoff", "limit_crossing", "liquidity_source", "max_participation_rate", "partial_fills"],
+          "properties": {
+            "model": {"enum": ["NEXT_TICK_V1", "NEXT_BAR_OPEN_V1"]},
+            "decision_cutoff": {"const": "STRICTLY_AFTER_ACCEPTED_SCHEDULER_KEY"},
+            "limit_crossing": {"const": "ADJUSTED_PRICE_MUST_SATISFY_LIMIT"},
+            "liquidity_source": {"const": "RELEASED_INCREMENTAL_VOLUME_ONLY"},
+            "max_participation_rate": {"$ref": "#/$defs/positiveDecimal"},
+            "partial_fills": {"type": "boolean"}
+          }
+        },
+        "slippage": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["model", "value", "tick_size", "direction", "rounding"],
+          "properties": {
+            "model": {"enum": ["NONE", "FIXED_BPS", "FIXED_TICKS"]},
+            "value": {"$ref": "#/$defs/nonNegativeDecimal"},
+            "tick_size": {"$ref": "#/$defs/positiveDecimal"},
+            "direction": {"const": "BUY_ADDS_SELL_SUBTRACTS"},
+            "rounding": {"const": "BUY_UP_SELL_DOWN_TO_TICK"}
+          }
+        },
+        "fees": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["currency", "currency_minor_unit", "commission_rate", "minimum_commission", "commission_accrual", "transfer_fee_rate", "sell_tax_rate", "rounding_policy"],
+          "properties": {
+            "currency": {"type": "string", "pattern": "^[A-Z]{3}$"},
+            "currency_minor_unit": {"$ref": "#/$defs/positiveDecimal"},
+            "commission_rate": {"$ref": "#/$defs/nonNegativeDecimal"},
+            "minimum_commission": {"$ref": "#/$defs/nonNegativeDecimal"},
+            "commission_accrual": {"const": "PER_ORDER_CUMULATIVE_DELTA_V1"},
+            "transfer_fee_rate": {"$ref": "#/$defs/nonNegativeDecimal"},
+            "sell_tax_rate": {"$ref": "#/$defs/nonNegativeDecimal"},
+            "rounding_policy": {"const": "CURRENCY_MINOR_UNIT_HALF_EVEN_V1"}
+          }
+        },
+        "latency": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["submit_ack_us", "fill_report_us", "cancel_ack_us", "query_result_us"],
+          "properties": {
+            "submit_ack_us": {"$ref": "#/$defs/safeInteger"},
+            "fill_report_us": {"$ref": "#/$defs/safeInteger"},
+            "cancel_ack_us": {"$ref": "#/$defs/safeInteger"},
+            "query_result_us": {"$ref": "#/$defs/safeInteger"}
+          }
+        },
+        "content_checksum": {"$ref": "#/$defs/hash"}
+      }
+    },
+    "backtestRunSpec": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["dto_type", "schema_version", "run_id", "mode", "start_at", "end_at", "seed", "contract_bundle", "code_artifact", "strategy_artifact", "strategy_parameters", "historical_dataset", "calendar", "tzdb", "market_policy", "execution_policy", "risk_rule_set", "target_policy", "initial_state", "scheduler_policy", "storage_policy", "no_lookahead", "ambient_randomness", "wall_clock", "input_fingerprint"],
+      "properties": {
+        "dto_type": {"const": "BACKTEST_RUN_SPEC"},
+        "schema_version": {"const": 1},
+        "run_id": {"$ref": "#/$defs/uuid"},
+        "mode": {"const": "BACKTEST"},
+        "start_at": {"$ref": "#/$defs/time"},
+        "end_at": {"$ref": "#/$defs/time"},
+        "seed": {"$ref": "#/$defs/safeInteger"},
+        "contract_bundle": {"$ref": "#/$defs/artifactRef"},
+        "code_artifact": {"$ref": "#/$defs/artifactRef"},
+        "strategy_artifact": {"$ref": "#/$defs/artifactRef"},
+        "strategy_parameters": {"$ref": "#/$defs/artifactRef"},
+        "historical_dataset": {"$ref": "#/$defs/artifactRef"},
+        "calendar": {"$ref": "#/$defs/artifactRef"},
+        "tzdb": {"$ref": "#/$defs/artifactRef"},
+        "market_policy": {"$ref": "#/$defs/artifactRef"},
+        "execution_policy": {"$ref": "#/$defs/artifactRef"},
+        "risk_rule_set": {"$ref": "#/$defs/artifactRef"},
+        "target_policy": {"$ref": "#/$defs/artifactRef"},
+        "initial_state": {"$ref": "#/$defs/artifactRef"},
+        "scheduler_policy": {"$ref": "#/$defs/artifactRef"},
+        "storage_policy": {"$ref": "#/$defs/artifactRef"},
+        "no_lookahead": {"const": "AVAILABLE_AT_NOT_AFTER_VIRTUAL_CLOCK"},
+        "ambient_randomness": {"const": "FORBIDDEN"},
+        "wall_clock": {"const": "FORBIDDEN"},
+        "input_fingerprint": {"$ref": "#/$defs/hash"}
+      }
+    },
+    "backtestRunEvidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["dto_type", "schema_version", "run_id", "input_fingerprint", "status", "reason_code", "started_at", "ended_at", "event_count", "last_scheduler_key", "event_journal_checksum", "strategy_output_checksum", "broker_report_checksum", "ledger_checksum", "portfolio_checksum", "metrics_checksum", "reproducibility_checksum"],
+      "properties": {
+        "dto_type": {"const": "BACKTEST_RUN_EVIDENCE"},
+        "schema_version": {"const": 1},
+        "run_id": {"$ref": "#/$defs/uuid"},
+        "input_fingerprint": {"$ref": "#/$defs/hash"},
+        "status": {"enum": ["COMPLETED", "REJECTED", "FAILED"]},
+        "reason_code": {"enum": ["COMPLETED", "INVALID_SPEC", "CHECKSUM_MISMATCH", "FUTURE_DATA_REQUESTED", "DATA_GAP", "SCHEDULER_CONFLICT", "EXECUTION_MODEL_FAILURE", "DEPENDENCY_UNAVAILABLE", "DEADLINE_EXCEEDED", "END_BOUNDARY_UNSETTLED"]},
+        "started_at": {"$ref": "#/$defs/time"},
+        "ended_at": {"$ref": "#/$defs/time"},
+        "event_count": {"$ref": "#/$defs/safeInteger"},
+        "last_scheduler_key": {"type": ["string", "null"], "minLength": 1, "maxLength": 512},
+        "event_journal_checksum": {"oneOf": [{"$ref": "#/$defs/hash"}, {"type": "null"}]},
+        "strategy_output_checksum": {"oneOf": [{"$ref": "#/$defs/hash"}, {"type": "null"}]},
+        "broker_report_checksum": {"oneOf": [{"$ref": "#/$defs/hash"}, {"type": "null"}]},
+        "ledger_checksum": {"oneOf": [{"$ref": "#/$defs/hash"}, {"type": "null"}]},
+        "portfolio_checksum": {"oneOf": [{"$ref": "#/$defs/hash"}, {"type": "null"}]},
+        "metrics_checksum": {"oneOf": [{"$ref": "#/$defs/hash"}, {"type": "null"}]},
+        "reproducibility_checksum": {"$ref": "#/$defs/hash"}
+      },
+      "oneOf": [
+        {"properties": {"status": {"const": "COMPLETED"}, "reason_code": {"const": "COMPLETED"}, "last_scheduler_key": {"type": "string"}, "event_journal_checksum": {"$ref": "#/$defs/hash"}, "strategy_output_checksum": {"$ref": "#/$defs/hash"}, "broker_report_checksum": {"$ref": "#/$defs/hash"}, "ledger_checksum": {"$ref": "#/$defs/hash"}, "portfolio_checksum": {"$ref": "#/$defs/hash"}, "metrics_checksum": {"$ref": "#/$defs/hash"}}},
+        {"properties": {"status": {"const": "REJECTED"}, "reason_code": {"enum": ["INVALID_SPEC", "CHECKSUM_MISMATCH", "FUTURE_DATA_REQUESTED", "DATA_GAP"]}}},
+        {"properties": {"status": {"const": "FAILED"}, "reason_code": {"enum": ["SCHEDULER_CONFLICT", "EXECUTION_MODEL_FAILURE", "DEPENDENCY_UNAVAILABLE", "DEADLINE_EXCEEDED", "END_BOUNDARY_UNSETTLED"]}}}
+      ]
+    },
+    "parityComparison": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["dto_type", "schema_version", "comparison_id", "scope", "shared_logic_checksum", "live_trace_checksum", "backtest_trace_checksum", "normalized_live_checksum", "normalized_backtest_checksum", "outcome", "mismatch_count", "future_read_count", "comparison_checksum"],
+      "properties": {
+        "dto_type": {"const": "PARITY_COMPARISON"},
+        "schema_version": {"const": 1},
+        "comparison_id": {"$ref": "#/$defs/uuid"},
+        "scope": {"enum": ["SHARED_LOGIC", "RECORDED_TRACE_REPLAY"]},
+        "shared_logic_checksum": {"$ref": "#/$defs/hash"},
+        "live_trace_checksum": {"$ref": "#/$defs/hash"},
+        "backtest_trace_checksum": {"$ref": "#/$defs/hash"},
+        "normalized_live_checksum": {"$ref": "#/$defs/hash"},
+        "normalized_backtest_checksum": {"$ref": "#/$defs/hash"},
+        "outcome": {"enum": ["MATCH", "MISMATCH"]},
+        "mismatch_count": {"$ref": "#/$defs/safeInteger"},
+        "future_read_count": {"$ref": "#/$defs/safeInteger"},
+        "comparison_checksum": {"$ref": "#/$defs/hash"}
+      },
+      "oneOf": [
+        {"properties": {"outcome": {"const": "MATCH"}, "mismatch_count": {"const": 0}, "future_read_count": {"const": 0}}},
+        {"properties": {"outcome": {"const": "MISMATCH"}}}
+      ]
+    }
+  }
+}
