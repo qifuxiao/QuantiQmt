@@ -16,7 +16,7 @@ verification:
 
 ## Blocking reason
 
-等待全部直接依赖 TASK-007、TASK-008、TASK-019 分别通过独立 Review、合并并由人类以可信 delivery evidence 完成收尾。Target Resolver 契约缺口已由 TASK-019 草案消除，但本任务在全部依赖门禁完成且人类另行激活前保持 blocked。
+TASK-019 已通过独立 Review、合并并由人类以可信 delivery evidence 完成收尾；TASK-007 与 TASK-008 仍未完成。本任务在剩余直接依赖门禁完成且人类另行激活前保持 blocked，TASK-019 完成不会自动激活本任务。
 
 ## Frozen implementation boundary
 
