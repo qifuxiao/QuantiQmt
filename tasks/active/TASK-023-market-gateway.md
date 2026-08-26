@@ -1,10 +1,10 @@
 ---
 id: TASK-023
 title: Implement MarketGateway and market quality pipeline
-status: blocked
+status: active
 depends_on: [TASK-020, TASK-022]
 spec_refs: [PORTS-MARKET, CONTRACT-MARKET-TICK-RECEIVED-V1, CONTRACT-MARKET-BAR-CLOSED-V1, CONTRACT-MARKET-QUALITY-CHANGED-V1, CONTRACT-MARKET-SESSION-CHANGED-V1, CONTRACT-MARKET-DATA-V1, CONTRACT-MARKET-SEMANTIC-VALIDATION-V1, WF-MARKET-DATA, STORAGE-SOT, STORAGE-MARKET-DATA, NFR-PERFORMANCE, NFR-RELIABILITY, NFR-OBSERVABILITY]
-allowed_paths: [src/quantiqmt/market/**, src/quantiqmt/contracts/**, tests/unit/market/**, tests/unit/contracts/**, tests/contract/market/**, tests/contract/contracts/**, tests/integration/market/**, pyproject.toml]
+allowed_paths: [src/quantiqmt/market/**, src/quantiqmt/contracts/**, tests/unit/market/**, tests/unit/contracts/**, tests/contract/market/**, tests/contract/contracts/**, tests/integration/market/**, pyproject.toml, tasks/backlog/TASK-023-market-gateway.md, tasks/active/TASK-023-market-gateway.md, tasks/active/README.md, tasks/index.yaml]
 forbidden_paths: [src/quantiqmt/live/qmt/**, src/quantiqmt/strategy/**, src/quantiqmt/order/**]
 verification:
   commands:
@@ -14,11 +14,24 @@ verification:
     - poetry build
     - poetry run pytest tests/contract/contracts/test_installed_schema_bundle.py
     - poetry run mypy src/quantiqmt/market
+delivery:
+  schema_version: 1
+  contract_status: accepted
+  implementation_status: in_progress
+  acceptance_status: passed
+  review_status: pending
+  release_status: prohibited
 ---
 
 # Objective
 
 实现 MarketGateway 抽象、行情标准化、BarAggregator、MarketQuality 和有界 backpressure，不接 MiniQMT。
+
+## Activation evidence
+
+- 2026-08-26 人类明确批准激活并实施 TASK-023；该授权仅覆盖本任务 backlog → active 治理迁移及任务定义范围内的本地实现与验证。
+- 直接依赖 TASK-020 与 TASK-022 均已完成，且分别具有 accepted contract、passed acceptance、正式独立 APPROVE、精确 reviewed Head 与 merge commit 证据。
+- 本次激活不授权 MiniQMT/live adapter、Strategy/Order 修改、数据库迁移、部署、发布、推送 GitHub、创建/合并 PR 或 active → completed 收尾。
 
 ## Non-goals
 
@@ -28,10 +41,10 @@ verification:
 
 ## Acceptance criteria
 
-- [ ] Tick/Bar/Quality/Session 契约测试通过。
-- [ ] Subscribe/unsubscribe 幂等，callback 只做标准化和有界入队。
-- [ ] Gap/stale/quality 状态可观测并传播。
-- [ ] Replay 与 live 输入产生一致标准化事件。
+- [x] Tick/Bar/Quality/Session 契约测试通过。
+- [x] Subscribe/unsubscribe 幂等，callback 只做标准化和有界入队。
+- [x] Gap/stale/quality 状态可观测并传播。
+- [x] Replay 与 live 输入产生一致标准化事件。
 
 ## Frozen implementation deliverables
 
@@ -51,6 +64,24 @@ verification:
 - 背压是否有界。
 - 是否不会阻塞 MiniQMT callback。
 - 是否保留行情质量证据。
+
+## Implementation evidence
+
+- 2026-08-26 在隔离分支 `codex/task-023-market-gateway` 上完成本地实现；未接入 MiniQMT，未修改 Strategy、Order、live-qmt、数据库迁移、部署或发布路径。
+- `quantiqmt.contracts` 现在从 wheel 内不可变资源加载并校验 reviewed schema bundle 与冻结 tzdb；运行时不读取源码检出的 `spec/contracts/**`，缺失、篡改、摘要不一致、未知时区或策略校验和冲突均 fail closed。
+- `quantiqmt.market` 实现契约 DTO 语义校验、MarketGateway 生命周期与订阅幂等、有界入队、显式 overflow/gap 证据、质量状态机、Snapshot/Health 策略验证、确定性 Bar 聚合及 live/replay parity；callback 路径仅执行标准化和有界入队。
+- 测试遵循 RED → GREEN：初始测试因缺少 `quantiqmt.market` 与 schema bundle 模块产生 5 个 collection errors，随后通过最小实现满足任务契约。
+
+## Verification evidence
+
+- `poetry run pytest tests/unit/market tests/contract/market tests/integration/market`：18 passed。
+- `poetry run pytest tests/contract/messages/test_market_data_contracts.py`：157 passed。
+- `poetry run pytest tests/unit/contracts tests/contract/contracts -k "schema_bundle or registry"`：9 passed。
+- `poetry build`：sdist 与 wheel 均构建成功。
+- `poetry run pytest tests/contract/contracts/test_installed_schema_bundle.py`：4 passed；测试在无源码 checkout、清理 `PYTHONPATH` 的隔离环境安装 wheel，并覆盖 bundle 缺失/篡改失败路径。
+- `poetry run mypy src/quantiqmt/market`：9 个 source files 无问题。
+- 补充回归 `poetry run pytest tests/unit tests/contract`：855 passed；`poetry run ruff check ...`、`poetry run ruff format --check ...` 与 `poetry run python scripts/validate_specs.py` 全部通过。
+- 本证据仅表示本地实现与验收命令通过；尚无独立 Review、GitHub PR 或 merge 证据，因此 `implementation_status=in_progress`、`review_status=pending`、`release_status=prohibited` 保持不变。
 
 ## Risks and rollback
 
