@@ -89,9 +89,9 @@ delivery:
 
 ## Verification evidence
 
-- 五条原始 `poetry run ...` 命令均在测试启动前 exit 1：用户级 `poetry.exe` 为 0 bytes，Windows 无可执行文件关联；这不是测试结果，也未被声称为测试通过。
-- 按仓库既有故障处理，使用依赖完整的 `quantiqmt-pHxzv3NO-py3.12` 环境执行同一 Python/Ruff 入口：`scripts/validate_specs.py` exit 0；`tests/spec` exit 0，53 passed；`tests/contract` exit 0，678 passed、1 skipped（该用例明确要求前置 `poetry build` wheel）；Ruff lint/format check 均 exit 0。
-- 首次 `git commit` 的 pre-commit hooks exit 1：hook 内的 Poetry 为当前 worktree 新建了无依赖环境，Ruff 不可见且 PyYAML 缺失；hook 未运行验证或修改文件。对应 hook 语义已由上述依赖完整环境单独通过，因此提交使用 `--no-verify`，并保留此未验证的 hook-wrapper 范围。
+- 2026-08-27 复核确认用户级 `poetry.exe` 是有效的 Windows symbolic link；Poetry 2.4.1、Python 3.12.10 与项目环境 `quantiqmt-pHxzv3NO-py3.12` 均正常。最初五条 `poetry run ...` 尝试在测试启动前 exit 1，真实根因是 Codex sandbox 拒绝访问用户目录；早先将 0-byte link 显示解释为 launcher 损坏属于已更正的证据错误，不代表 Poetry 或依赖失败。
+- 在用户明确授权的 sandbox 外执行上下文中，将同一 Poetry 进程绑定到上述项目环境后，五条原始命令均实际通过：`poetry run python scripts/validate_specs.py` exit 0；`poetry run pytest tests/spec` exit 0，53 passed；`poetry run pytest tests/contract` exit 0，678 passed、1 skipped（该用例明确要求前置 `poetry build` wheel）；两条 `poetry run ruff ...` 均 exit 0。
+- 首次提交的 pre-commit hooks exit 1、随后使用 `--no-verify` 提交是保留的真实历史；根因同样是当时 Codex sandbox 无法使用用户目录中的已授权项目环境，而不是 Poetry 安装或项目依赖损坏。本次 `poetry run pre-commit run --all-files` 在 sandbox 外 exit 0，`ruff check`、`ruff format`、`validate specs and tasks` 三个 hook 全部 Passed；本次修正提交不得使用 `--no-verify`。
 - 测试先行证据：validator 新入口实现前，focused spec test collection exit 1，精确失败为无法导入 `validate_risk_scope_successor_dependencies`；最小实现后同一文件 53 passed。
 - `git diff --check` exit 0；changed-path audit 仅包含 TASK-051 `allowed_paths`。
 
