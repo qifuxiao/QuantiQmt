@@ -92,9 +92,9 @@ def write_governance_task_fixture(
 def trusted_delivery(
     *,
     change_pr: str = "https://github.com/qifuxiao/QuantiQmt/pull/87",
-    reviewed_head_sha: str = "8a49f8165e562a63e16206b903cc14a3c7a814a4",
+    reviewed_head_sha: str = "0123456789abcdef0123456789abcdef01234567",
     reviewer: str = "independent-reviewer",
-    evidence_url: str = ("https://github.com/qifuxiao/QuantiQmt/pull/87#pullrequestreview-12345"),
+    evidence_url: str = ("https://github.com/qifuxiao/QuantiQmt/pull/87#pullrequestreview-99999"),
 ) -> dict:
     return {
         "schema_version": 1,
@@ -110,7 +110,7 @@ def trusted_delivery(
             "review_verdict": "APPROVE",
             "reviewer": reviewer,
             "evidence_url": evidence_url,
-            "merge_commit_sha": "17fec4553a23f0f209f607c22bb0047590803605",
+            "merge_commit_sha": "89abcdef0123456789abcdef0123456789abcdef",
             "human_authorization_evidence": "human-authorized TASK-051 closeout",
         },
     }
@@ -133,12 +133,12 @@ def risk_scope_evidence_binding() -> dict:
             "required_review": {
                 "verdict": "APPROVE",
                 "reviewer": "independent-reviewer",
-                "reviewed_head_sha": "8a49f8165e562a63e16206b903cc14a3c7a814a4",
+                "reviewed_head_sha": "0123456789abcdef0123456789abcdef01234567",
                 "evidence_url": (
-                    "https://github.com/qifuxiao/QuantiQmt/pull/87#pullrequestreview-12345"
+                    "https://github.com/qifuxiao/QuantiQmt/pull/87#pullrequestreview-99999"
                 ),
             },
-            "required_merge": {"merge_commit_sha": "17fec4553a23f0f209f607c22bb0047590803605"},
+            "required_merge": {"merge_commit_sha": "89abcdef0123456789abcdef0123456789abcdef"},
             "human_authorization_evidence": "human-authorized TASK-051 closeout",
             "external_fact_status": "recorded_after_github_and_human_verification",
             "static_validator_boundary": {
@@ -182,6 +182,7 @@ def run_risk_scope_validate_tasks_fixture(
     task030_delivery_overrides: dict | None = None,
     include_task030: bool = True,
     governance_binding: dict | None = None,
+    external_fact_verifier=None,
 ) -> list[str]:
     task029_dependencies = task029_dependencies or ["TASK-015", "TASK-031", "TASK-051"]
     task051_delivery = task051_delivery or trusted_delivery()
@@ -270,7 +271,7 @@ def run_risk_scope_validate_tasks_fixture(
 
     monkeypatch.setattr(validator, "load_yaml", fake_load_yaml)
     errors: list[str] = []
-    validate_tasks({}, errors)
+    validate_tasks({}, errors, external_fact_verifier=external_fact_verifier)
     return errors
 
 
@@ -609,6 +610,78 @@ def test_task051_placeholder_reviewer_is_rejected_via_validate_tasks(
     )
 
 
+def test_task051_completed_delivery_is_denied_without_external_verifier(
+    monkeypatch: pytest.MonkeyPatch,
+    isolated_task_root: Path,
+) -> None:
+    errors = run_risk_scope_validate_tasks_fixture(monkeypatch, isolated_task_root)
+
+    assert any(
+        "TASK-029: dependency TASK-051 lacks trusted completed delivery" in error
+        for error in errors
+    )
+
+
+def test_task051_simultaneous_local_binding_forgery_is_denied(
+    monkeypatch: pytest.MonkeyPatch,
+    isolated_task_root: Path,
+) -> None:
+    delivery = trusted_delivery(reviewer="mallory-reviewer")
+    evidence = delivery["completion_evidence"]
+    evidence["reviewed_head_sha"] = "0123456789abcdef0123456789abcdef01234567"
+    evidence["evidence_url"] = (
+        "https://github.com/qifuxiao/QuantiQmt/pull/87#pullrequestreview-999999"
+    )
+    evidence["human_authorization_evidence"] = "forged local authorization"
+    binding = risk_scope_evidence_binding()
+    required_review = binding["successor_evidence_binding"]["required_review"]
+    required_review["reviewer"] = evidence["reviewer"]
+    required_review["reviewed_head_sha"] = evidence["reviewed_head_sha"]
+    required_review["evidence_url"] = evidence["evidence_url"]
+    binding["successor_evidence_binding"]["human_authorization_evidence"] = evidence[
+        "human_authorization_evidence"
+    ]
+
+    errors = run_risk_scope_validate_tasks_fixture(
+        monkeypatch,
+        isolated_task_root,
+        task051_delivery=delivery,
+        governance_binding=binding,
+    )
+
+    assert any(
+        "TASK-029: dependency TASK-051 lacks trusted completed delivery" in error
+        for error in errors
+    )
+
+
+def test_task051_completed_delivery_can_use_injected_external_verifier(
+    monkeypatch: pytest.MonkeyPatch,
+    isolated_task_root: Path,
+) -> None:
+    verifier_calls = []
+
+    def verifier(binding: dict, evidence: dict) -> bool:
+        verifier_calls.append((binding, evidence))
+        return (
+            binding["repository"] == "qifuxiao/QuantiQmt"
+            and binding["pull_request_number"] == 87
+            and evidence["change_pr"] == "https://github.com/qifuxiao/QuantiQmt/pull/87"
+        )
+
+    errors = run_risk_scope_validate_tasks_fixture(
+        monkeypatch,
+        isolated_task_root,
+        external_fact_verifier=verifier,
+    )
+
+    assert not any(
+        "TASK-029: dependency TASK-051 lacks trusted completed delivery" in error
+        for error in errors
+    )
+    assert verifier_calls
+
+
 def test_task051_boundary_must_explicitly_model_external_facts(
     monkeypatch: pytest.MonkeyPatch,
     isolated_task_root: Path,
@@ -697,6 +770,39 @@ def test_task030_historical_review_evidence_cannot_be_promoted_via_validate_task
     assert any("TASK-030 historical completion evidence" in error for error in errors)
 
 
+@pytest.mark.parametrize("field", ["change_pr", "reviewed_head_sha", "merge_commit_sha"])
+def test_task030_all_historical_completion_facts_are_frozen_via_validate_tasks(
+    monkeypatch: pytest.MonkeyPatch,
+    isolated_task_root: Path,
+    field: str,
+) -> None:
+    historical = {
+        "mode": "historical_git_verified_review_unavailable",
+        "change_pr": "https://github.com/qifuxiao/QuantiQmt/pull/44",
+        "reviewed_head_sha": "e7c087fc1292f1c57d8352112802ed60f99e9466",
+        "review_verdict": "reported_unverified",
+        "reviewer": "unverifiable",
+        "evidence_url": "unverifiable",
+        "merge_commit_sha": "238b0ac2c3c82de88c59a900feca8cbb71d38863",
+        "human_authorization_evidence": "unverifiable",
+    }
+    historical[field] = {
+        "change_pr": "https://github.com/example/repo/pull/999",
+        "reviewed_head_sha": "0123456789012345678901234567890123456789",
+        "merge_commit_sha": "abcdef0123456789abcdef0123456789abcdef01",
+    }[field]
+
+    errors = run_risk_scope_validate_tasks_fixture(
+        monkeypatch,
+        isolated_task_root,
+        task030_delivery_overrides={"completion_evidence": historical},
+    )
+
+    assert any(
+        f"TASK-030 historical completion evidence {field} must remain" in error for error in errors
+    )
+
+
 def test_task029_must_remain_blocked_via_validate_tasks(
     monkeypatch: pytest.MonkeyPatch,
     isolated_task_root: Path,
@@ -746,12 +852,12 @@ def test_task051_risk_scope_gate_requires_trusted_completed_delivery(
         "  completion_evidence:\n"
         "    mode: governance_closeout_after_independent_review\n"
         "    change_pr: https://github.com/qifuxiao/QuantiQmt/pull/87\n"
-        "    reviewed_head_sha: 8a49f8165e562a63e16206b903cc14a3c7a814a4\n"
+        "    reviewed_head_sha: 0123456789abcdef0123456789abcdef01234567\n"
         "    review_verdict: APPROVE\n"
         "    reviewer: independent-reviewer\n"
         "    evidence_url: https://github.com/qifuxiao/QuantiQmt/pull/87"
-        "#pullrequestreview-12345\n"
-        "    merge_commit_sha: 17fec4553a23f0f209f607c22bb0047590803605\n"
+        "#pullrequestreview-99999\n"
+        "    merge_commit_sha: 89abcdef0123456789abcdef0123456789abcdef\n"
         "    human_authorization_evidence: human-authorized TASK-051 closeout\n"
     )
     if successor_state == "active":
@@ -847,7 +953,13 @@ def test_task051_risk_scope_gate_requires_trusted_completed_delivery(
 
         monkeypatch.setattr(validator, "load_yaml", fake_load_yaml)
         errors: list[str] = []
-        validate_tasks({}, errors)
+        validate_tasks(
+            {},
+            errors,
+            external_fact_verifier=(
+                (lambda binding, evidence: True) if successor_state == "trusted_completed" else None
+            ),
+        )
         denied = any(
             "TASK-029: dependency TASK-051 lacks trusted completed delivery" in error
             for error in errors

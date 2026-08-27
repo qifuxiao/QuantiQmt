@@ -24,8 +24,8 @@ class OrderRegistration(Protocol):
     order_id: Identifier
     intent_id: Identifier
     client_order_id: str
-    broker: str
-    broker_capability_version: str
+    broker: str | None
+    broker_capability_version: str | None
     account_id: str
     instrument_id: InstrumentId
     side: str
@@ -222,6 +222,14 @@ The factory is an Application Port. It receives `OrderRegistrationDraft`, which 
 the validated `ClientOrderIdCandidate` in the same registration commit and are
 immutable. Execution submit/cancel requests MUST use this persisted version;
 the adapter's current capability snapshot is not a substitute.
+
+### Broker binding compatibility
+
+`OrderRegistration` has exactly two broker-binding states. `BOUND` requires both fields to be non-null, non-empty, trimmed strings. `UNBOUND` requires both fields to be null. A partial binding is invalid and MUST fail before a Repository write, Journal append, Snapshot write, Outbox insert, or Broker side effect.
+
+Every new registration MUST be `BOUND` before `OrderRepository.register` begins its transaction. `OrderRepository.register` MUST reject an `UNBOUND` registration without a partial write. Nullable fields exist only so a new reader can faithfully represent legacy rows and legacy Journal/Snapshot registration payloads created before the binding contract. Missing legacy JSON fields and an explicit null pair both decode to `UNBOUND`; readers MUST NOT inject null fields into the stored payload before checksum verification.
+
+An `UNBOUND` registration remains readable for recovery, projection audit, and reconciliation evidence, but is never eligible for submit or cancel dispatch. No current adapter, capability lookup, configuration default, Broker observation, or process memory may supply either missing value. TASK-048 MUST NOT bind a legacy `UNBOUND` registration. A future binding operation requires a separate reviewed repair contract with authoritative evidence, human authorization semantics, append-only audit facts, idempotency, CAS, and rollback rules.
 
 ## SnapshotStore
 

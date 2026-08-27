@@ -5,10 +5,16 @@ workflow:
   registration:
     input: validated_order_intent
     idempotency_key: intent_id
+    preconditions:
+      broker_binding: BOUND
+      binding_source: validated_ClientOrderIdCandidate
+      partial_or_unbound: reject_before_transaction
+    legacy_unbound_write: forbidden
     steps:
       - {id: lookup_intent, owner: OrderRepository, result: existing_or_absent}
       - {id: compare_existing_fingerprint, owner: OrderApplication, when: existing}
       - {id: allocate_order_and_client_ids, owner: OrderApplication, when: absent}
+      - {id: bind_broker_capability, owner: OrderApplication, source: validated_ClientOrderIdCandidate, when: absent}
       - {id: construct_initial_order, owner: OrderApplication, aggregate_version: 1}
       - {id: construct_registration_journal, owner: OrderApplication, event_type: ORDER_REGISTERED}
       - {id: construct_order_registered_message, owner: OrderApplication, message_type: oms.order_registered.v1}

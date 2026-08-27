@@ -21,7 +21,7 @@ def test_installed_schema_bundle_matches_reviewed_manifest() -> None:
     installed = SchemaBundle.installed()
     generated = build_schema_bundle(ROOT / "spec")
 
-    assert installed.manifest_version == "0.13.0"
+    assert installed.manifest_version == "0.14.0"
     assert installed.to_bytes() == generated.to_bytes()
     assert {
         "CONTRACT-MARKET-TICK-RECEIVED-V1",

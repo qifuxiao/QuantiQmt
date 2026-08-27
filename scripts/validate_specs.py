@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import re
 import sys
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from datetime import date
 from pathlib import Path
 from typing import Any
@@ -95,6 +95,17 @@ RISK_HISTORICAL_DELIVERY = {
     "release_status": "prohibited",
     "remediation_task": "TASK-031",
 }
+RISK_HISTORICAL_COMPLETION_EVIDENCE = {
+    "mode": "historical_git_verified_review_unavailable",
+    "change_pr": "https://github.com/qifuxiao/QuantiQmt/pull/44",
+    "reviewed_head_sha": "e7c087fc1292f1c57d8352112802ed60f99e9466",
+    "review_verdict": "reported_unverified",
+    "reviewer": "unverifiable",
+    "evidence_url": "unverifiable",
+    "merge_commit_sha": "238b0ac2c3c82de88c59a900feca8cbb71d38863",
+    "human_authorization_evidence": "unverifiable",
+}
+RiskScopeExternalFactVerifier = Callable[[dict[str, Any], dict[str, Any]], bool]
 
 
 def load_yaml(path: Path) -> Any:
@@ -447,6 +458,7 @@ def delivery_is_unlockable(
     *,
     task_id: str | None = None,
     evidence_binding: dict[str, Any] | None = None,
+    external_fact_verifier: RiskScopeExternalFactVerifier | None = None,
 ) -> bool:
     delivery = task.get("delivery")
     resolved_task_id = task_id or task.get("id")
@@ -461,6 +473,7 @@ def delivery_is_unlockable(
             delivery,
             task_id=resolved_task_id,
             evidence_binding=evidence_binding,
+            external_fact_verifier=external_fact_verifier,
         )
     )
     if not generally_unlockable:
@@ -468,7 +481,9 @@ def delivery_is_unlockable(
     if resolved_task_id == RISK_SCOPE_SUCCESSOR:
         if not isinstance(delivery, dict):
             return False
-        return task051_completion_evidence_is_bound(delivery, evidence_binding)
+        return task051_completion_evidence_is_bound(
+            delivery, evidence_binding, external_fact_verifier
+        )
     return True
 
 
@@ -477,6 +492,7 @@ def completion_evidence_is_trusted(
     *,
     task_id: str | None = None,
     evidence_binding: dict[str, Any] | None = None,
+    external_fact_verifier: RiskScopeExternalFactVerifier | None = None,
 ) -> bool:
     evidence = delivery.get("completion_evidence")
     if not isinstance(evidence, dict) or not COMPLETION_FIELDS.issubset(evidence):
@@ -498,7 +514,9 @@ def completion_evidence_is_trusted(
     if not generally_trusted:
         return False
     if task_id == RISK_SCOPE_SUCCESSOR:
-        return task051_completion_evidence_is_bound(delivery, evidence_binding)
+        return task051_completion_evidence_is_bound(
+            delivery, evidence_binding, external_fact_verifier
+        )
     return True
 
 
@@ -668,7 +686,9 @@ def load_risk_scope_evidence_binding(errors: list[str]) -> dict[str, Any] | None
 
 
 def task051_completion_evidence_is_bound(
-    delivery: dict[str, Any], evidence_binding: dict[str, Any] | None
+    delivery: dict[str, Any],
+    evidence_binding: dict[str, Any] | None,
+    external_fact_verifier: RiskScopeExternalFactVerifier | None = None,
 ) -> bool:
     """Check TASK-051's recorded evidence against its immutable local PR/review binding."""
     if (
@@ -739,7 +759,14 @@ def task051_completion_evidence_is_bound(
         "merge_commit_sha": merge_commit_sha,
         "human_authorization_evidence": human_authorization,
     }
-    return all(evidence.get(field) == value for field, value in expected_evidence.items())
+    if not all(evidence.get(field) == value for field, value in expected_evidence.items()):
+        return False
+    if external_fact_verifier is None:
+        return False
+    try:
+        return external_fact_verifier(evidence_binding, evidence) is True
+    except Exception:
+        return False
 
 
 def plausible_evidence_sha(value: Any) -> bool:
@@ -839,6 +866,7 @@ def validate_risk_scope_successor_dependencies(
     tasks: dict[str, dict[str, Any]],
     errors: list[str],
     evidence_binding: dict[str, Any] | None = None,
+    external_fact_verifier: RiskScopeExternalFactVerifier | None = None,
 ) -> None:
     """Require the fresh Risk scope gate without rewriting its historical predecessor."""
     task029 = tasks.get("TASK-029")
@@ -882,17 +910,10 @@ def validate_risk_scope_successor_dependencies(
                         f"{expected}"
                     )
             evidence = delivery.get("completion_evidence")
-            historical_evidence = {
-                "mode": "historical_git_verified_review_unavailable",
-                "review_verdict": "reported_unverified",
-                "reviewer": "unverifiable",
-                "evidence_url": "unverifiable",
-                "human_authorization_evidence": "unverifiable",
-            }
             if not isinstance(evidence, dict):
                 errors.append("TASK-030 historical completion evidence must remain present")
             else:
-                for field, expected in historical_evidence.items():
+                for field, expected in RISK_HISTORICAL_COMPLETION_EVIDENCE.items():
                     if evidence.get(field) != expected:
                         errors.append(
                             "TASK-030 historical completion evidence "
@@ -909,7 +930,9 @@ def validate_risk_scope_successor_dependencies(
         if (
             isinstance(delivery, dict)
             and delivery.get("review_status") in {"approved", "not_required"}
-            and not task051_completion_evidence_is_bound(delivery, evidence_binding)
+            and not task051_completion_evidence_is_bound(
+                delivery, evidence_binding, external_fact_verifier
+            )
         ):
             errors.append("TASK-051 evidence does not match its governance binding")
 
@@ -946,7 +969,13 @@ def validate_manifest(errors: list[str]) -> dict[str, Path]:
     return entries
 
 
-def validate_tasks(specs: dict[str, Path], errors: list[str], *, today: date | None = None) -> None:
+def validate_tasks(
+    specs: dict[str, Path],
+    errors: list[str],
+    *,
+    today: date | None = None,
+    external_fact_verifier: RiskScopeExternalFactVerifier | None = None,
+) -> None:
     evaluation_date = today or date.today()
     tasks: dict[str, dict[str, Any]] = {}
     task_paths: dict[str, Path] = {}
@@ -1009,7 +1038,9 @@ def validate_tasks(specs: dict[str, Path], errors: list[str], *, today: date | N
     risk_scope_binding = None
     if "TASK-029" in tasks or RISK_SCOPE_SUCCESSOR in tasks:
         risk_scope_binding = load_risk_scope_evidence_binding(errors)
-    validate_risk_scope_successor_dependencies(tasks, errors, risk_scope_binding)
+    validate_risk_scope_successor_dependencies(
+        tasks, errors, risk_scope_binding, external_fact_verifier
+    )
 
     bootstrap_entries = [
         waiver
@@ -1068,6 +1099,7 @@ def validate_tasks(specs: dict[str, Path], errors: list[str], *, today: date | N
                         dependency_task,
                         task_id=dependency,
                         evidence_binding=risk_scope_binding,
+                        external_fact_verifier=external_fact_verifier,
                     )
                     and not bootstrap_allows_dependency(
                         dependency,

@@ -13,7 +13,7 @@ from types import MappingProxyType
 from typing import Any, cast
 
 BUNDLE_SCHEMA_VERSION = 1
-EXPECTED_MANIFEST_VERSION = "0.13.0"
+EXPECTED_MANIFEST_VERSION = "0.14.0"
 _MANIFEST_VERSION = re.compile(r"(?m)^  version:\s*([^\s#]+)\s*$")
 _CONTRACT_ID = re.compile(r"^    - id:\s*([^\s#]+)\s*$")
 _CONTRACT_PATH = re.compile(r"^      path:\s*([^\s#]+)\s*$")

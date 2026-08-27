@@ -114,6 +114,13 @@ lookup, or side channel may supply or overwrite any identity for an existing
 order. Implementations MUST run the schema validator and this complete semantic
 validator; validating only the two capability-version fields is non-conforming.
 
+A legacy registration whose persisted `broker` and
+`broker_capability_version` are both null is explicitly `UNBOUND`. A partial
+null/non-null pair is invalid persisted data. `UNBOUND` and invalid bindings
+MUST fail closed before dispatch and remain available only for recovery and
+reconciliation evidence. TASK-048 cannot repair or infer them; any future
+binding requires a separately reviewed, append-only repair contract.
+
 Gateway DTO schema validation MUST run before a capability semantic validator.
 That validator MUST compile the declared regular expression before activation
 and reject invalid syntax, `min_length > max_length`, a registered ID whose
