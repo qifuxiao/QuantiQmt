@@ -690,7 +690,7 @@ def task051_completion_evidence_is_bound(
     evidence_binding: dict[str, Any] | None,
     external_fact_verifier: RiskScopeExternalFactVerifier | None = None,
 ) -> bool:
-    """Check TASK-051's recorded evidence against its immutable local PR/review binding."""
+    """Check local binding and require independently supplied external facts."""
     if (
         delivery.get("contract_status") != "not_applicable"
         or delivery.get("implementation_status") != "merged"
@@ -761,6 +761,8 @@ def task051_completion_evidence_is_bound(
     }
     if not all(evidence.get(field) == value for field, value in expected_evidence.items()):
         return False
+    # The CLI intentionally supplies no verifier.  A caller may inject a trusted adapter
+    # that checks GitHub review/merge ancestry and human authorization outside this repo.
     if external_fact_verifier is None:
         return False
     try:
@@ -976,6 +978,7 @@ def validate_tasks(
     today: date | None = None,
     external_fact_verifier: RiskScopeExternalFactVerifier | None = None,
 ) -> None:
+    """Validate task metadata; TASK-051 unlocks require an out-of-repository verifier."""
     evaluation_date = today or date.today()
     tasks: dict[str, dict[str, Any]] = {}
     task_paths: dict[str, Path] = {}
