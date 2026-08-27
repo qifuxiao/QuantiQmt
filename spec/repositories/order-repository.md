@@ -9,6 +9,7 @@ PersistedOrder
 ├── order: Order
 ├── intent_id: canonical lower-case UUID
 ├── client_order_id: non-empty opaque string, max 128
+├── broker_binding: BOUND(broker, broker_capability_version) | legacy UNBOUND(null, null)
 ├── registration: immutable OrderRegistered fields
 └── created_at / updated_at: UTC Z
 ```
@@ -48,6 +49,15 @@ rebuild_projection_from_journal(order_id, expected_journal_head_checksum)
 - `client_order_id` 唯一约束冲突且 `intent_id` 不存在时，Application MAY 调用 `ClientOrderIdFactory.create` 生成新候选并重试；bounded retry 用尽返回 `QQ-STORAGE-7006`。不得在已产生 Broker 副作用后更换 `client_order_id`。
 - `order_id` 或 `client_order_id` 冲突但重读发现相同 `intent_id` 与相同 fingerprint 时，按幂等重放返回已有订单；发现不同 fingerprint 时返回 `QQ-STORAGE-7001`。
 - registration fingerprint 是验证后 OrderIntent payload（不含 Message Envelope、received_at 和传输元数据）的 canonical JSON SHA-256；tags 按 key 排序，Decimal string 不重写 scale。
+- 新 registration 必须在进入事务前具有完整 `BOUND` broker binding；`UNBOUND` 或半绑定输入必须无写入失败，不能产生 Journal/Outbox。
+
+## Broker binding compatibility
+
+Legacy `UNBOUND` registrations remain readable for recovery, projection comparison and reconciliation evidence, but MUST NOT become eligible for submit or cancel dispatch. 两字段同时为 null 是唯一 UNBOUND 表示；缺失 legacy JSON 字段按该状态读取，半绑定属于损坏数据并 fail closed。禁止使用当前 adapter、ambient capability、配置默认值或 Broker observation 推断任一字段。
+
+Journal 的原始 payload 与 checksum 是权威事实。旧记录校验时不得注入 null 或重写 canonical JSON；校验成功后才可把缺失字段解释为 runtime `UNBOUND`。Snapshot 同样先对原始 stored payload 校验，再进行兼容解析。projection 的 binding 必须与权威 registration Journal 事实相同；full Journal replay MUST preserve `UNBOUND` and MUST NOT copy a binding from the current `orders` row, Snapshot, adapter, or capability cache.
+
+TASK-048 不得提供 legacy rebinding 方法。未来若要绑定历史记录，必须先冻结独立 repair Command/Port、证据来源、人工授权、幂等/CAS、追加式 Journal/审计事实和 UNKNOWN 处理；在此之前 UNBOUND 保持不可变。
 
 ## 乐观并发与事务提交
 

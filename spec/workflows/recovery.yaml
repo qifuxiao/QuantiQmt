@@ -69,6 +69,7 @@ workflow:
     journal_gap_or_corruption: "QQ-RECOVERY-8002 + HALTED; never open barrier"
     orders_projection_mismatch: "call OrderRepository.rebuild_projection_from_journal with expected journal head checksum, preserve evidence, open case"
     outbox_publish_uncertain: "retain same message_id and allow duplicate publication"
+    unbound_registration: "preserve UNBOUND, prohibit Broker dispatch, keep SAFE and require reconciliation evidence"
   portfolio_failure_rules:
     invalid_or_incompatible_snapshot: "diagnose QQ-STORAGE-7003, discard snapshot for this attempt, and replay full AccountLedger"
     lower_snapshot_after_invalid: forbidden_in_same_recovery_attempt

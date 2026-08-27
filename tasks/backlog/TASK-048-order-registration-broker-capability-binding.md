@@ -2,7 +2,7 @@
 id: TASK-048
 title: Bind OrderRegistration persistence to broker capability versions
 status: blocked
-depends_on: [TASK-004, TASK-017]
+depends_on: [TASK-004, TASK-017, TASK-050]
 spec_refs: [INV-TRADING, INV-CONSISTENCY, PORTS-CORE, PORTS-ORDER-PERSISTENCE, REPO-ORDER, STORAGE-SOT, STORAGE-ORDER-PERSISTENCE, WF-ORDER-COMMIT, WF-RECOVERY, WF-SUBMIT-ORDER, WF-CANCEL-ORDER, NFR-RELIABILITY, CONTRACT-EXECUTION-BROKER-GATEWAY-V1]
 allowed_paths:
   - src/quantiqmt/order/application/persistence/model.py
@@ -39,7 +39,7 @@ verification:
 
 ## Blocking reason
 
-TASK-048 必须保持 blocked，直到 TASK-017 完成独立 Review、合并及可信 closeout。TASK-017 只负责冻结契约与交付计划；TASK-048 才能在该冻结版本上实施 persistence/runtime compatibility。TASK-004 提供既有 Order persistence、Journal、Snapshot、Recovery 与 migration 基线。
+TASK-048 必须保持 blocked，直到 TASK-017 与 TASK-050 均完成独立 Review、合并及可信 closeout。TASK-017 冻结 Execution/Broker 契约；TASK-050 冻结 legacy unbound、storage/migration 与 Journal/Snapshot 兼容语义；TASK-048 才能在该冻结版本上实施 persistence/runtime compatibility。TASK-004 提供既有 Order persistence、Journal、Snapshot、Recovery 与 migration 基线。
 
 在激活前必须确认 TASK-017 已冻结历史 unbound 表示、审计来源或人类授权绑定语义，以及 submit/cancel 的 fail-closed 边界。若这些契约仍不完整，必须先创建并评审独立 spec-change task；TASK-048 不得自行发明 Repository、Workflow、Event、DTO、错误码或状态迁移契约。
 
