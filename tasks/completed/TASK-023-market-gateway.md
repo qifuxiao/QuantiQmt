@@ -1,10 +1,10 @@
 ---
 id: TASK-023
 title: Implement MarketGateway and market quality pipeline
-status: active
+status: completed
 depends_on: [TASK-020, TASK-022]
 spec_refs: [PORTS-MARKET, CONTRACT-MARKET-TICK-RECEIVED-V1, CONTRACT-MARKET-BAR-CLOSED-V1, CONTRACT-MARKET-QUALITY-CHANGED-V1, CONTRACT-MARKET-SESSION-CHANGED-V1, CONTRACT-MARKET-DATA-V1, CONTRACT-MARKET-SEMANTIC-VALIDATION-V1, WF-MARKET-DATA, STORAGE-SOT, STORAGE-MARKET-DATA, NFR-PERFORMANCE, NFR-RELIABILITY, NFR-OBSERVABILITY]
-allowed_paths: [src/quantiqmt/market/**, src/quantiqmt/contracts/**, tests/unit/market/**, tests/unit/contracts/**, tests/contract/market/**, tests/contract/contracts/**, tests/integration/market/**, pyproject.toml, tasks/backlog/TASK-023-market-gateway.md, tasks/active/TASK-023-market-gateway.md, tasks/active/README.md, tasks/index.yaml]
+allowed_paths: [src/quantiqmt/market/**, src/quantiqmt/contracts/**, tests/unit/market/**, tests/unit/contracts/**, tests/contract/market/**, tests/contract/contracts/**, tests/integration/market/**, pyproject.toml, tasks/backlog/TASK-023-market-gateway.md, tasks/completed/TASK-023-market-gateway.md, tasks/active/README.md, tasks/index.yaml]
 forbidden_paths: [src/quantiqmt/live/qmt/**, src/quantiqmt/strategy/**, src/quantiqmt/order/**]
 verification:
   commands:
@@ -17,10 +17,31 @@ verification:
 delivery:
   schema_version: 1
   contract_status: accepted
-  implementation_status: in_progress
+  implementation_status: merged
   acceptance_status: passed
-  review_status: pending
+  review_status: approved
   release_status: prohibited
+  completion_evidence:
+    mode: governance_closeout_after_independent_review
+    change_pr: https://github.com/qifuxiao/QuantiQmt/pull/84
+    reviewed_head_sha: b51d81af7a530739ee1617012bd1b6bb156ecb84
+    review_verdict: APPROVE
+    reviewer: qfxyyy
+    evidence_url: https://github.com/qifuxiao/QuantiQmt/pull/84#pullrequestreview-5038800008
+    merge_commit_sha: 9b17126de6949632128d6bd3841267350c3da231
+    review_submitted_at: '2026-08-27T08:35:33Z'
+    reviewed_commit_sha: b51d81af7a530739ee1617012bd1b6bb156ecb84
+    reviewer_association: COLLABORATOR
+    review_api_evidence: https://api.github.com/repos/qifuxiao/QuantiQmt/pulls/84/reviews
+    merge_completed_at: '2026-08-27T08:35:52Z'
+    ci_evidence: >-
+      4/4 GitHub checks succeeded: quality run 33054382531/job 98457401082;
+      quality run 33054380144/job 98457392767; persistence-postgresql run
+      33054382531/job 98457400750; persistence-postgresql run 33054380144/job
+      98457393062.
+    human_authorization_evidence: >-
+      2026-08-27 user explicitly authorized this TASK-023 active-to-completed
+      governance closeout after PR #84 merged.
 ---
 
 # Objective
@@ -81,8 +102,23 @@ delivery:
 - `poetry run pytest tests/contract/contracts/test_installed_schema_bundle.py`：4 passed；测试在无源码 checkout、清理 `PYTHONPATH` 的隔离环境安装 wheel，并覆盖 bundle 缺失/篡改失败路径。
 - `poetry run mypy src/quantiqmt/market`：9 个 source files 无问题。
 - 补充回归 `poetry run pytest tests/unit tests/contract`：855 passed；`poetry run ruff check ...`、`poetry run ruff format --check ...` 与 `poetry run python scripts/validate_specs.py` 全部通过。
-- 本证据仅表示本地实现与验收命令通过；尚无独立 Review、GitHub PR 或 merge 证据，因此 `implementation_status=in_progress`、`review_status=pending`、`release_status=prohibited` 保持不变。
+- 上述为实现阶段的本地证据；正式独立 Review、GitHub PR、merge 与 completed delivery 的精确证据记录在下方。`release_status` 仍保持 `prohibited`。
 
 ## Risks and rollback
 
 - 行情延迟和质量错误必须 fail-visible，不得静默。
+
+## Final review and closeout evidence
+
+- PR #84 was formally approved by independent collaborator `qfxyyy` at
+  `2026-08-27T08:35:33Z`, with state `APPROVED` bound to exact reviewed Head
+  `b51d81af7a530739ee1617012bd1b6bb156ecb84`:
+  https://github.com/qifuxiao/QuantiQmt/pull/84#pullrequestreview-5038800008
+  (auditable API record: https://api.github.com/repos/qifuxiao/QuantiQmt/pulls/84/reviews).
+- PR #84 merged into `main` as `9b17126de6949632128d6bd3841267350c3da231` at
+  `2026-08-27T08:35:52Z`.
+- GitHub reports 4/4 successful checks: [quality run 33054382531/job 98457401082](https://github.com/qifuxiao/QuantiQmt/actions/runs/33054382531/job/98457401082), [quality run 33054380144/job 98457392767](https://github.com/qifuxiao/QuantiQmt/actions/runs/33054380144/job/98457392767), [persistence-postgresql run 33054382531/job 98457400750](https://github.com/qifuxiao/QuantiQmt/actions/runs/33054382531/job/98457400750), and [persistence-postgresql run 33054380144/job 98457393062](https://github.com/qifuxiao/QuantiQmt/actions/runs/33054380144/job/98457393062).
+- The 2026-08-27 human closeout authorization accepts only TASK-023's merged
+  delivery. `release_status` remains `prohibited`; this closeout does not
+  authorize MiniQMT/live adapters, deployment, publication, release, or
+  activation of TASK-024 or any downstream business task.
