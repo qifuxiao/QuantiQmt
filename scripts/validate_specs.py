@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from jsonschema.validators import Draft202012Validator  # type: ignore[import-untyped]
+from jsonschema.validators import Draft202012Validator
 
 ROOT = Path(__file__).resolve().parents[1]
 SPEC_ROOT = ROOT / "spec"
@@ -466,6 +466,8 @@ def delivery_is_unlockable(
     if not generally_unlockable:
         return False
     if resolved_task_id == RISK_SCOPE_SUCCESSOR:
+        if not isinstance(delivery, dict):
+            return False
         return task051_completion_evidence_is_bound(delivery, evidence_binding)
     return True
 
@@ -649,9 +651,8 @@ def load_risk_scope_evidence_binding(errors: list[str]) -> dict[str, Any] | None
         review_url_re = re.compile(
             rf"^{re.escape(RISK_SCOPE_PR_URL)}#pullrequestreview-[1-9][0-9]*$"
         )
-        if not isinstance(review.get("evidence_url"), str) or not review_url_re.fullmatch(
-            review.get("evidence_url")
-        ):
+        evidence_url = review.get("evidence_url")
+        if not isinstance(evidence_url, str) or not review_url_re.fullmatch(evidence_url):
             errors.append(
                 "ai/governance/risk-validator-integration-scope-task-051.yaml: "
                 "recorded evidence_url must identify a PR 87 review"
