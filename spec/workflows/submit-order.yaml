@@ -14,7 +14,7 @@ workflow:
       idempotency_key: intent_id
       failure: no_broker_side_effect
       contract: WF-ORDER-COMMIT.registration
-      persisted_identity: [order_id, intent_id, client_order_id]
+      persisted_identity: [order_id, intent_id, client_order_id, broker, broker_capability_version]
     - id: build_risk_snapshot
       owner: OrderApplication
       failure: fail_closed
@@ -51,8 +51,9 @@ workflow:
       timeout: SUBMIT_UNKNOWN
       input_contract: CONTRACT-EXECUTION-BROKER-GATEWAY-V1.SubmitOrderRequest
       output_contract: CONTRACT-EXECUTION-BROKER-GATEWAY-V1.OperationResult
-      pre_dispatch_guards: [deadline, fencing_token, persisted_capability_version_match, client_order_id, rate_limit]
+      pre_dispatch_guards: [deadline, persisted_broker_binding_BOUND, fencing_token, persisted_capability_version_match, client_order_id, rate_limit]
       capability_version_source: OrderRegistration.broker_capability_version
+      unbound_registration: reject_before_dispatch
     - id: merge_report
       owner: OMS
       duplicate_safe: true

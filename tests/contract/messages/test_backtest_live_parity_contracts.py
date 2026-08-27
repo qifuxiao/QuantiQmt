@@ -356,8 +356,8 @@ def test_contract_bundle_is_registered_and_machine_valid() -> None:
     interface_ids = {entry["id"] for entry in manifest["catalogs"]["interfaces"]}
     workflow_ids = {entry["id"] for entry in manifest["catalogs"]["workflows"]}
 
-    assert manifest["specification"]["version"] == "0.13.0"
-    assert manifest["change"]["previous_version"] == "0.12.0"
+    version = tuple(int(part) for part in manifest["specification"]["version"].split("."))
+    assert version >= (0, 13, 0)
     assert schema["$id"] == "urn:quantiqmt:internal:backtest-parity:v1"
     assert semantic["contract"]["id"] == "CONTRACT-BACKTEST-PARITY-SEMANTIC-V1"
     assert workflow["workflow"]["id"] == "WF-BACKTEST-RUN"

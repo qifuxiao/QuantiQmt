@@ -29,6 +29,48 @@ storage:
     input: validated_strategy_submit_order_intent_payload
     excludes: [message_envelope, received_at, transport_metadata]
     tags: sorted_by_key
+  registration_binding:
+    states:
+      BOUND:
+        broker: non_empty_trimmed_string
+        broker_capability_version: non_empty_trimmed_string
+      UNBOUND:
+        broker: null
+        broker_capability_version: null
+    partial_binding: forbidden
+    new_registration: BOUND_required_before_repository_write
+    legacy:
+      missing_fields: read_as_UNBOUND
+      null_pair: read_as_UNBOUND
+      ambient_or_current_capability_inference: forbidden
+      task_048_rebinding: forbidden
+      future_rebinding: requires_separate_reviewed_repair_contract
+    persistence:
+      new_journal_and_snapshot: write_complete_BOUND_fields
+      legacy_missing_fields: parse_as_UNBOUND_without_payload_rewrite
+      legacy_checksum_input: exact_stored_payload
+      checksum_recanonicalization_with_injected_nulls: forbidden
+      projection_binding: must_equal_authoritative_registration_fact
+      rebuild_binding_source: journal_never_projection_or_adapter
+    migration:
+      id: 002_order_registration_broker_capability
+      kind: expand_only_idempotent
+      columns: [broker, broker_capability_version]
+      historical_backfill: forbidden
+      existing_rows: preserve_as_UNBOUND
+      partial_binding: reject
+      destructive_rollback: forbidden
+      rollout:
+        - enter_SAFE_and_quiesce_registration_writers
+        - add_nullable_columns_and_complete_or_unbound_checks
+        - deploy_compatible_reader_before_BOUND_writer
+        - deploy_writer_requiring_BOUND_for_every_new_registration
+        - verify_projection_journal_snapshot_and_full_replay_parity
+        - enable_dispatch_only_after_TASK_048_trusted_closeout
+      rollback:
+        - stop_new_writer_and_dispatch
+        - restore_previous_compatible_reader_if_required
+        - preserve_columns_bindings_journal_snapshot_and_audit_evidence
   tables:
     orders:
       primary_key: [order_id]
@@ -36,6 +78,8 @@ storage:
         order_id: {type: uuid, nullable: false}
         intent_id: {type: uuid, nullable: false}
         client_order_id: {type: varchar, max_length: 128, nullable: false}
+        broker: {type: varchar, max_length: 64, nullable: true}
+        broker_capability_version: {type: varchar, max_length: 128, nullable: true}
         registration_fingerprint: {type: char, length: 64, nullable: false}
         account_id: {type: varchar, max_length: 128, nullable: false}
         instrument_id: {type: varchar, max_length: 64, nullable: false}
@@ -60,12 +104,16 @@ storage:
         - cumulative_quantity_lte_quantity
         - limit_requires_positive_limit_price
         - state_payload_version_equals_aggregate_version
+        - broker_binding_complete_or_unbound
+        - broker_binding_non_empty_trimmed_when_bound
       references:
         state: SM-ORDER.states
       immutable_after_insert:
         - order_id
         - intent_id
         - client_order_id
+        - broker
+        - broker_capability_version
         - registration_fingerprint
         - account_id
         - instrument_id
