@@ -542,7 +542,13 @@ def test_risk_scope_successor_policy_preserves_task030_history(
 
 @pytest.mark.parametrize(
     "forgery",
-    ["wrong_pr", "fabricated_shas", "implementing_reviewer", "invalid_review_url"],
+    [
+        "wrong_pr",
+        "fabricated_shas",
+        "implementing_reviewer",
+        "pr_author_reviewer",
+        "invalid_review_url",
+    ],
 )
 def test_task051_forged_evidence_is_rejected_via_validate_tasks(
     monkeypatch: pytest.MonkeyPatch,
@@ -564,6 +570,9 @@ def test_task051_forged_evidence_is_rejected_via_validate_tasks(
     elif forgery == "implementing_reviewer":
         evidence["reviewer"] = "codex-task-051-implementing-agent"
         bound_evidence["required_review"]["reviewer"] = "codex-task-051-implementing-agent"
+    elif forgery == "pr_author_reviewer":
+        evidence["reviewer"] = "qifuxiao"
+        bound_evidence["required_review"]["reviewer"] = "qifuxiao"
     else:
         evidence["evidence_url"] = "https://github.com/example/review/87"
         bound_evidence["required_review"]["evidence_url"] = "https://github.com/example/review/87"
