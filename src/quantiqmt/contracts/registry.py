@@ -1,34 +1,40 @@
-"""Approved message schema registry."""
+"""Approved message schema registry backed only by installed package resources."""
 
 from __future__ import annotations
 
-import json
-import re
 from collections.abc import Mapping
 from pathlib import Path
 from types import MappingProxyType
 from typing import Any, cast
 
+from quantiqmt.contracts.bundle import SchemaBundle
 from quantiqmt.contracts.errors import UnknownMessageTypeError, UnsupportedSchemaVersionError
-
-_CATALOG_ENTRY = re.compile(r"name:\s*([^,}]+).*?schema:\s*([^,}]+).*?status:\s*active")
 
 
 class SchemaRegistry:
     """Immutable registry loading the accepted schema snapshot once."""
 
-    def __init__(self, schema_root: Path) -> None:
-        routes = _active_routes(schema_root / "catalog.yaml")
+    def __init__(self, schema_root: Path | None = None) -> None:
+        # ``schema_root`` remains accepted for compatibility with existing callers, but is
+        # deliberately ignored. Runtime contract authority is the verified installed bundle.
+        del schema_root
+        bundle = SchemaBundle.installed()
+        routes = {
+            cast(str, route["message_type"]): cast(str, route["path"]) for route in bundle.routes
+        }
         self._schemas = MappingProxyType(
-            {name: _load_schema(schema_root / relative) for name, relative in routes.items()}
+            {
+                name: cast(Mapping[str, Any], bundle.contract_by_path(relative))
+                for name, relative in routes.items()
+            }
         )
-        self._envelope = _load_schema(schema_root / "common/message-envelope.v1.schema.json")
+        self._envelope = cast(Mapping[str, Any], bundle.contract("CONTRACT-MESSAGE-ENVELOPE-V1"))
+        self._bundle = bundle
 
     @classmethod
     def project_default(cls) -> SchemaRegistry:
-        """Load schemas from this source checkout; deployments should pass an explicit root."""
-        root = Path(__file__).resolve().parents[3] / "spec" / "contracts"
-        return cls(root)
+        """Load the immutable installed resource (the name is retained for compatibility)."""
+        return cls()
 
     @property
     def envelope(self) -> Mapping[str, Any]:
@@ -55,29 +61,6 @@ class SchemaRegistry:
     def message_types(self) -> tuple[str, ...]:
         return tuple(self._schemas)
 
-
-def _load_schema(path: Path) -> Mapping[str, Any]:
-    with path.open(encoding="utf-8") as stream:
-        document = json.load(stream)
-    if not isinstance(document, dict):
-        raise ValueError(f"schema root must be an object: {path}")
-    return cast(Mapping[str, Any], _deep_freeze(document))
-
-
-def _active_routes(path: Path) -> dict[str, str]:
-    routes: dict[str, str] = {}
-    for line in path.read_text(encoding="utf-8").splitlines():
-        match = _CATALOG_ENTRY.search(line)
-        if match is not None:
-            routes[match.group(1).strip()] = match.group(2).strip()
-    if not routes:
-        raise ValueError(f"catalog contains no active schema routes: {path}")
-    return routes
-
-
-def _deep_freeze(value: Any) -> Any:
-    if isinstance(value, dict):
-        return MappingProxyType({key: _deep_freeze(item) for key, item in value.items()})
-    if isinstance(value, list):
-        return tuple(_deep_freeze(item) for item in value)
-    return value
+    def contract(self, contract_id: str) -> Any:
+        """Return one canonical contract document from the verified bundle."""
+        return self._bundle.contract(contract_id)

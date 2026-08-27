@@ -34,6 +34,7 @@ live-qmt = [
 
 [tool.poetry]
 packages = [{include = "quantiqmt", from = "src"}]
+include = [{path = "src/quantiqmt/contracts/resources/**", format = ["sdist", "wheel"]}]
 
 [tool.poetry.group.dev.dependencies]
 pytest = ">=8,<10"
