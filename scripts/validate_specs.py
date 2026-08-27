@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from jsonschema.validators import Draft202012Validator
+from jsonschema.validators import Draft202012Validator  # type: ignore[import-untyped]
 
 ROOT = Path(__file__).resolve().parents[1]
 SPEC_ROOT = ROOT / "spec"
