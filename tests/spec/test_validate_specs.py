@@ -142,9 +142,32 @@ def risk_scope_evidence_binding() -> dict:
             "human_authorization_evidence": "human-authorized TASK-051 closeout",
             "external_fact_status": "recorded_after_github_and_human_verification",
             "static_validator_boundary": {
-                "verifies": ["local evidence binding"],
-                "does_not_verify": ["external GitHub facts"],
-                "external_confirmation_required": ["independent review and human closeout"],
+                "verifies": [
+                    "completion evidence exactly matches this TASK-051 binding",
+                    "repository and change PR are qifuxiao/QuantiQmt PR 87",
+                    "Review evidence URL is a PR 87 pullrequestreview URL",
+                    (
+                        "reviewer is a valid bound GitHub login distinct from implementation "
+                        "agent and PR author"
+                    ),
+                    (
+                        "reviewed Head and merge commit are non-placeholder 40-character "
+                        "hexadecimal SHAs"
+                    ),
+                    "external facts have been recorded as verified before dependency unlock",
+                ],
+                "does_not_verify": [
+                    (
+                        "GitHub Review existence, verdict, reviewer identity or reviewed Head "
+                        "via network"
+                    ),
+                    "GitHub merge existence or merge commit ancestry via network",
+                    "human closeout authorization authenticity outside the repository",
+                ],
+                "external_confirmation_required": [
+                    "independent reviewer verifies APPROVE on the exact current PR Head in GitHub",
+                    "human verifies merge and authorizes active-to-completed closeout",
+                ],
             },
         },
     }
@@ -533,10 +556,10 @@ def test_task051_forged_evidence_is_rejected_via_validate_tasks(
         evidence["change_pr"] = "https://github.com/example/repo/pull/999"
         bound_evidence["change_pr"] = "https://github.com/example/repo/pull/999"
     elif forgery == "fabricated_shas":
-        evidence["reviewed_head_sha"] = "a" * 40
-        evidence["merge_commit_sha"] = "b" * 40
-        bound_evidence["required_review"]["reviewed_head_sha"] = "a" * 40
-        bound_evidence["required_merge"]["merge_commit_sha"] = "b" * 40
+        evidence["reviewed_head_sha"] = "deadbeef" * 5
+        evidence["merge_commit_sha"] = "0123456789" * 4
+        bound_evidence["required_review"]["reviewed_head_sha"] = "deadbeef" * 5
+        bound_evidence["required_merge"]["merge_commit_sha"] = "0123456789" * 4
     elif forgery == "implementing_reviewer":
         evidence["reviewer"] = "codex-task-051-implementing-agent"
         bound_evidence["required_review"]["reviewer"] = "codex-task-051-implementing-agent"
@@ -563,6 +586,44 @@ def test_task051_forged_evidence_is_rejected_via_validate_tasks(
         task_id="TASK-051",
         evidence_binding=binding["successor_evidence_binding"],
     )
+
+
+def test_task051_placeholder_reviewer_is_rejected_via_validate_tasks(
+    monkeypatch: pytest.MonkeyPatch,
+    isolated_task_root: Path,
+) -> None:
+    delivery = trusted_delivery(reviewer="pending-reviewer")
+    binding = risk_scope_evidence_binding()
+    binding["successor_evidence_binding"]["required_review"]["reviewer"] = "pending-reviewer"
+
+    errors = run_risk_scope_validate_tasks_fixture(
+        monkeypatch,
+        isolated_task_root,
+        task051_delivery=delivery,
+        governance_binding=binding,
+    )
+
+    assert any(
+        "TASK-029: dependency TASK-051 lacks trusted completed delivery" in error
+        for error in errors
+    )
+
+
+def test_task051_boundary_must_explicitly_model_external_facts(
+    monkeypatch: pytest.MonkeyPatch,
+    isolated_task_root: Path,
+) -> None:
+    binding = risk_scope_evidence_binding()
+    boundary = binding["successor_evidence_binding"]["static_validator_boundary"]
+    boundary["does_not_verify"] = ["external facts"]
+
+    errors = run_risk_scope_validate_tasks_fixture(
+        monkeypatch,
+        isolated_task_root,
+        governance_binding=binding,
+    )
+
+    assert any("static validator boundary" in error for error in errors)
 
 
 @pytest.mark.parametrize("removed_dependency", ["TASK-015", "TASK-031"])
@@ -610,6 +671,42 @@ def test_task030_acceptance_cannot_be_promoted_via_validate_tasks(
     )
 
     assert any("TASK-030 historical acceptance must remain unverified" in error for error in errors)
+
+
+def test_task030_historical_review_evidence_cannot_be_promoted_via_validate_tasks(
+    monkeypatch: pytest.MonkeyPatch,
+    isolated_task_root: Path,
+) -> None:
+    errors = run_risk_scope_validate_tasks_fixture(
+        monkeypatch,
+        isolated_task_root,
+        task030_delivery_overrides={
+            "completion_evidence": {
+                "mode": "historical_git_verified_review_unavailable",
+                "change_pr": "https://github.com/qifuxiao/QuantiQmt/pull/44",
+                "reviewed_head_sha": "e7c087fc1292f1c57d8352112802ed60f99e9466",
+                "review_verdict": "APPROVE",
+                "reviewer": "independent-reviewer",
+                "evidence_url": "https://github.com/qifuxiao/QuantiQmt/pull/44#pullrequestreview-1",
+                "merge_commit_sha": "238b0ac2c3c82de88c59a900feca8cbb71d38863",
+                "human_authorization_evidence": "human-authorized",
+            }
+        },
+    )
+
+    assert any("TASK-030 historical completion evidence" in error for error in errors)
+
+
+def test_task029_must_remain_blocked_via_validate_tasks(
+    monkeypatch: pytest.MonkeyPatch,
+    isolated_task_root: Path,
+) -> None:
+    errors = run_risk_scope_validate_tasks_fixture(
+        monkeypatch,
+        isolated_task_root,
+        task029_dependencies=["TASK-015", "TASK-031", "TASK-051"],
+    )
+    assert any("TASK-029 queue status must remain blocked" in error for error in errors)
 
 
 @pytest.mark.parametrize("replacement", ["TASK-030", "TASK-046"])

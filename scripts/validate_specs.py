@@ -62,6 +62,30 @@ RISK_SCOPE_IMPLEMENTING_AGENT = "codex-task-051-implementing-agent"
 RISK_SCOPE_PR_AUTHOR = "qifuxiao"
 RISK_SCOPE_EXTERNAL_FACT_STATUS = "recorded_after_github_and_human_verification"
 RISK_SCOPE_COMPLETION_MODE = "governance_closeout_after_independent_review"
+RISK_SCOPE_PENDING_REVIEWER = "pending_independent_github_reviewer"
+RISK_SCOPE_PENDING_REVIEWED_HEAD = "pending_exact_reviewed_head"
+RISK_SCOPE_PENDING_REVIEW_URL = "pending_github_pull_request_review_url"
+RISK_SCOPE_PENDING_MERGE = "pending_merge_commit"
+RISK_SCOPE_PENDING_HUMAN_AUTHORIZATION = "pending_human_closeout_authorization"
+RISK_SCOPE_BOUNDARY_REQUIREMENTS = {
+    "verifies": {
+        "completion evidence exactly matches this TASK-051 binding",
+        "repository and change PR are qifuxiao/QuantiQmt PR 87",
+        "Review evidence URL is a PR 87 pullrequestreview URL",
+        "reviewer is a valid bound GitHub login distinct from implementation agent and PR author",
+        "reviewed Head and merge commit are non-placeholder 40-character hexadecimal SHAs",
+        "external facts have been recorded as verified before dependency unlock",
+    },
+    "does_not_verify": {
+        "GitHub Review existence, verdict, reviewer identity or reviewed Head via network",
+        "GitHub merge existence or merge commit ancestry via network",
+        "human closeout authorization authenticity outside the repository",
+    },
+    "external_confirmation_required": {
+        "independent reviewer verifies APPROVE on the exact current PR Head in GitHub",
+        "human verifies merge and authorizes active-to-completed closeout",
+    },
+}
 RISK_HISTORICAL_DELIVERY = {
     "schema_version": 1,
     "contract_status": "accepted",
@@ -530,12 +554,24 @@ def load_risk_scope_evidence_binding(errors: list[str]) -> dict[str, Any] | None
             "ai/governance/risk-validator-integration-scope-task-051.yaml: "
             "pull request author identity is not bound"
         )
-    if not isinstance(binding.get("required_review"), dict) or not isinstance(
-        binding.get("required_merge"), dict
-    ):
+    review = binding.get("required_review")
+    merge = binding.get("required_merge")
+    if not isinstance(review, dict) or not isinstance(merge, dict):
         errors.append(
             "ai/governance/risk-validator-integration-scope-task-051.yaml: "
             "required_review and required_merge bindings must be present"
+        )
+        return binding
+    for field in ("verdict", "reviewer", "reviewed_head_sha", "evidence_url"):
+        if field not in review:
+            errors.append(
+                "ai/governance/risk-validator-integration-scope-task-051.yaml: "
+                f"required_review.{field} must be present"
+            )
+    if "merge_commit_sha" not in merge:
+        errors.append(
+            "ai/governance/risk-validator-integration-scope-task-051.yaml: "
+            "required_merge.merge_commit_sha must be present"
         )
     if binding.get("external_fact_status") not in {
         "pending_github_and_human_verification",
@@ -546,14 +582,87 @@ def load_risk_scope_evidence_binding(errors: list[str]) -> dict[str, Any] | None
             "external_fact_status must remain pending or recorded-after-verification"
         )
     boundary = binding.get("static_validator_boundary")
-    if not isinstance(boundary, dict) or any(
-        not isinstance(boundary.get(field), list) or not boundary[field]
-        for field in ("verifies", "does_not_verify", "external_confirmation_required")
-    ):
+    if not isinstance(boundary, dict):
         errors.append(
             "ai/governance/risk-validator-integration-scope-task-051.yaml: "
             "static validator boundary must declare verifies and external facts"
         )
+    else:
+        for field, required_values in RISK_SCOPE_BOUNDARY_REQUIREMENTS.items():
+            values = boundary.get(field)
+            if not isinstance(values, list) or not required_values.issubset(values):
+                errors.append(
+                    "ai/governance/risk-validator-integration-scope-task-051.yaml: "
+                    f"static validator boundary {field} is incomplete"
+                )
+    external_status = binding.get("external_fact_status")
+    if external_status == "pending_github_and_human_verification":
+        pending_values = {
+            "reviewer": RISK_SCOPE_PENDING_REVIEWER,
+            "reviewed_head_sha": RISK_SCOPE_PENDING_REVIEWED_HEAD,
+            "evidence_url": RISK_SCOPE_PENDING_REVIEW_URL,
+        }
+        for field, expected_value in pending_values.items():
+            if review.get(field) != expected_value:
+                errors.append(
+                    "ai/governance/risk-validator-integration-scope-task-051.yaml: "
+                    f"pending required_review.{field} must remain {expected_value}"
+                )
+        if review.get("verdict") != "APPROVE":
+            errors.append(
+                "ai/governance/risk-validator-integration-scope-task-051.yaml: "
+                "required_review.verdict must remain APPROVE"
+            )
+        if merge.get("merge_commit_sha") != RISK_SCOPE_PENDING_MERGE:
+            errors.append(
+                "ai/governance/risk-validator-integration-scope-task-051.yaml: "
+                f"pending required_merge.merge_commit_sha must remain {RISK_SCOPE_PENDING_MERGE}"
+            )
+        if binding.get("human_authorization_evidence") != RISK_SCOPE_PENDING_HUMAN_AUTHORIZATION:
+            errors.append(
+                "ai/governance/risk-validator-integration-scope-task-051.yaml: "
+                "pending human authorization evidence must remain the explicit placeholder"
+            )
+    elif external_status == RISK_SCOPE_EXTERNAL_FACT_STATUS:
+        if review.get("verdict") != "APPROVE":
+            errors.append(
+                "ai/governance/risk-validator-integration-scope-task-051.yaml: "
+                "recorded required_review.verdict must be APPROVE"
+            )
+        if not isinstance(review.get("reviewer"), str) or not github_reviewer_is_independent(
+            review.get("reviewer"), identity
+        ):
+            errors.append(
+                "ai/governance/risk-validator-integration-scope-task-051.yaml: "
+                "recorded reviewer must be a non-placeholder independent GitHub login"
+            )
+        if not plausible_evidence_sha(review.get("reviewed_head_sha")):
+            errors.append(
+                "ai/governance/risk-validator-integration-scope-task-051.yaml: "
+                "recorded reviewed_head_sha must be a non-placeholder SHA"
+            )
+        if not plausible_evidence_sha(merge.get("merge_commit_sha")):
+            errors.append(
+                "ai/governance/risk-validator-integration-scope-task-051.yaml: "
+                "recorded merge_commit_sha must be a non-placeholder SHA"
+            )
+        review_url_re = re.compile(
+            rf"^{re.escape(RISK_SCOPE_PR_URL)}#pullrequestreview-[1-9][0-9]*$"
+        )
+        if not isinstance(review.get("evidence_url"), str) or not review_url_re.fullmatch(
+            review.get("evidence_url")
+        ):
+            errors.append(
+                "ai/governance/risk-validator-integration-scope-task-051.yaml: "
+                "recorded evidence_url must identify a PR 87 review"
+            )
+        if not isinstance(binding.get("human_authorization_evidence"), str) or is_placeholder_text(
+            binding.get("human_authorization_evidence")
+        ):
+            errors.append(
+                "ai/governance/risk-validator-integration-scope-task-051.yaml: "
+                "recorded human authorization evidence must not be a placeholder"
+            )
     return binding
 
 
@@ -608,9 +717,7 @@ def task051_completion_evidence_is_bound(
     merge_commit_sha = merge.get("merge_commit_sha")
     evidence_url = review.get("evidence_url")
     human_authorization = evidence_binding.get("human_authorization_evidence")
-    if not isinstance(reviewer, str) or GITHUB_LOGIN_RE.fullmatch(reviewer) is None:
-        return False
-    if reviewer in {identity.get("agent"), identity.get("pull_request_author")}:
+    if not github_reviewer_is_independent(reviewer, identity):
         return False
     if not plausible_evidence_sha(reviewed_head_sha) or not plausible_evidence_sha(
         merge_commit_sha
@@ -619,11 +726,7 @@ def task051_completion_evidence_is_bound(
     review_url_re = re.compile(rf"^{re.escape(RISK_SCOPE_PR_URL)}#pullrequestreview-[1-9][0-9]*$")
     if not isinstance(evidence_url, str) or review_url_re.fullmatch(evidence_url) is None:
         return False
-    if (
-        not isinstance(human_authorization, str)
-        or not human_authorization.strip()
-        or human_authorization.startswith("pending_")
-    ):
+    if not isinstance(human_authorization, str) or is_placeholder_text(human_authorization):
         return False
     expected_evidence = {
         "mode": RISK_SCOPE_COMPLETION_MODE,
@@ -639,8 +742,41 @@ def task051_completion_evidence_is_bound(
 
 
 def plausible_evidence_sha(value: Any) -> bool:
-    """Reject malformed and obvious repeated-character placeholder SHAs."""
-    return isinstance(value, str) and SHA_RE.fullmatch(value) is not None and len(set(value)) > 1
+    """Reject malformed and obvious repeated-pattern placeholder SHAs."""
+    if not isinstance(value, str) or SHA_RE.fullmatch(value) is None:
+        return False
+    return not any(value == value[:size] * (40 // size) for size in range(1, 21) if 40 % size == 0)
+
+
+def is_placeholder_text(value: Any) -> bool:
+    """Return whether governance text still carries an unresolved placeholder."""
+    return (
+        not isinstance(value, str)
+        or not value.strip()
+        or value
+        in {
+            "unverifiable",
+            "reported_unverified",
+            RISK_SCOPE_PENDING_REVIEWER,
+            RISK_SCOPE_PENDING_REVIEWED_HEAD,
+            RISK_SCOPE_PENDING_REVIEW_URL,
+            RISK_SCOPE_PENDING_MERGE,
+            RISK_SCOPE_PENDING_HUMAN_AUTHORIZATION,
+        }
+        or value.startswith("pending_")
+        or value.startswith("pending-")
+    )
+
+
+def github_reviewer_is_independent(value: Any, identity: Any) -> bool:
+    """Validate reviewer syntax and keep implementation identities out of review evidence."""
+    return (
+        isinstance(value, str)
+        and GITHUB_LOGIN_RE.fullmatch(value) is not None
+        and not is_placeholder_text(value)
+        and isinstance(identity, dict)
+        and value not in {identity.get("agent"), identity.get("pull_request_author")}
+    )
 
 
 def bootstrap_allows_dependency(
@@ -706,6 +842,8 @@ def validate_risk_scope_successor_dependencies(
     """Require the fresh Risk scope gate without rewriting its historical predecessor."""
     task029 = tasks.get("TASK-029")
     if isinstance(task029, dict):
+        if task029.get("status") != "blocked":
+            errors.append("TASK-029 queue status must remain blocked")
         if RISK_SCOPE_SUCCESSOR not in tasks:
             errors.append(f"tasks: {RISK_SCOPE_SUCCESSOR} successor gate missing for TASK-029")
         dependencies = task029.get("depends_on")
@@ -742,6 +880,27 @@ def validate_risk_scope_successor_dependencies(
                         f"TASK-030 historical {field.removesuffix('_status')} must remain "
                         f"{expected}"
                     )
+            evidence = delivery.get("completion_evidence")
+            historical_evidence = {
+                "mode": "historical_git_verified_review_unavailable",
+                "review_verdict": "reported_unverified",
+                "reviewer": "unverifiable",
+                "evidence_url": "unverifiable",
+                "human_authorization_evidence": "unverifiable",
+            }
+            if not isinstance(evidence, dict):
+                errors.append("TASK-030 historical completion evidence must remain present")
+            else:
+                for field, expected in historical_evidence.items():
+                    if evidence.get(field) != expected:
+                        errors.append(
+                            "TASK-030 historical completion evidence "
+                            f"{field} must remain {expected}"
+                        )
+
+    task005 = tasks.get("TASK-005")
+    if isinstance(task005, dict) and task005.get("status") != "blocked":
+        errors.append("TASK-005 queue status must remain blocked")
 
     task051 = tasks.get(RISK_SCOPE_SUCCESSOR)
     if isinstance(task051, dict) and task051.get("status") == "completed":
