@@ -130,13 +130,20 @@ verification:
       summary: 53_passed
     - command: poetry run pytest tests/contract
       exit_code: 0
-      summary: 678_passed_1_skipped_wheel_build_precondition
+      summary: initial_run_678_passed_1_skipped_wheel_build_precondition
     - command: poetry run ruff check scripts/validate_specs.py tests/spec/test_validate_specs.py
       exit_code: 0
       summary: All_checks_passed
     - command: poetry run ruff format --check scripts/validate_specs.py tests/spec/test_validate_specs.py
       exit_code: 0
       summary: 2_files_already_formatted
+  wheel_precondition:
+    command: poetry build
+    exit_code: 0
+    artifact: quantiqmt-0.1.0-py3-none-any.whl
+    post_build_contract_command: poetry run pytest tests/contract
+    post_build_exit_code: 0
+    summary: 679_passed_0_skipped
   pre_commit:
     command: poetry run pre-commit run --all-files
     exit_code: 0
