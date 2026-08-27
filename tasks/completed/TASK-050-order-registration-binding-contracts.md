@@ -1,7 +1,7 @@
 ---
 id: TASK-050
 title: Freeze OrderRegistration broker binding persistence compatibility contracts
-status: active
+status: completed
 depends_on: [TASK-017]
 spec_refs: [INV-TRADING, INV-CONSISTENCY, PORTS-CORE, PORTS-ORDER-PERSISTENCE, REPO-ORDER, STORAGE-SOT, STORAGE-ORDER-PERSISTENCE, WF-ORDER-COMMIT, WF-RECOVERY, WF-SUBMIT-ORDER, WF-CANCEL-ORDER, NFR-RELIABILITY, CONTRACT-EXECUTION-BROKER-GATEWAY-V1]
 allowed_paths:
@@ -36,11 +36,34 @@ verification:
     - poetry run ruff format --check tests/spec/test_order_registration_binding_contracts.py
 delivery:
   schema_version: 1
-  contract_status: draft
-  implementation_status: in_progress
+  contract_status: accepted
+  implementation_status: merged
   acceptance_status: passed
-  review_status: pending
+  review_status: approved
   release_status: prohibited
+  completion_evidence:
+    mode: governance_closeout_after_independent_review
+    change_pr: https://github.com/qifuxiao/QuantiQmt/pull/86
+    reviewed_head_sha: b27f941a3f6fcca46349aa36a208d97fbc5d1281
+    review_verdict: APPROVE
+    reviewer: qifuxiao
+    evidence_url: https://github.com/qifuxiao/QuantiQmt/pull/86#pullrequestreview-5042458351
+    merge_commit_sha: 5650c3738dceff61862b41e672a96a5cce6fe8e5
+    review_submitted_at: '2026-08-27T15:13:51Z'
+    reviewed_commit_sha: b27f941a3f6fcca46349aa36a208d97fbc5d1281
+    reviewer_association: OWNER
+    review_api_evidence: https://api.github.com/repos/qifuxiao/QuantiQmt/pulls/86/reviews/5042458351
+    merge_completed_at: '2026-08-27T15:16:51Z'
+    ci_evidence: >-
+      4/4 GitHub checks succeeded on the reviewed Head: quality run
+      33079795190/job 98543566950; quality run 33079798581/job 98543578367;
+      persistence-postgresql run 33079795190/job 98543567243; and
+      persistence-postgresql run 33079798581/job 98543578211.
+    human_authorization_evidence: >-
+      2026-08-28 user explicitly authorized this TASK-050 active-to-completed
+      governance closeout after PR #86 merged, then precisely authorized updating
+      tests/spec/test_order_registration_binding_contracts.py to assert the
+      completed path and status without weakening any binding or successor guard.
 ---
 
 # Objective
@@ -95,10 +118,11 @@ delivery:
 - `poetry check`、`poetry run ruff check .`、`poetry run ruff format --check .` 与 `poetry run mypy src scripts`：全部通过；两个变更 Python 测试文件的 focused Ruff check/format-check 亦通过。
 - `git diff --check`：通过。
 
-## Handoff boundary
+## Handoff and closeout boundary
 
-- 本地 acceptance 已通过；contract 仍为 draft、implementation 仍为 in_progress、Review 为 pending，等待另一位成员对精确 Head 独立 Review。
-- 未实现 runtime、SQL migration、PostgreSQL/Docker 验证、Broker dispatch、deployment 或 release；这些仍属于 Review/closeout 后另行激活的 TASK-048。
+- 实现交接时，本地 acceptance 已通过，contract、implementation 与 Review 仍等待精确 Head 的独立 Review 和 merge；该历史边界现由下方正式 closeout 证据闭合。
+- PR #86 的规范与实现 acceptance、精确 Head 独立 APPROVE、4/4 CI 及 merge 证据均已核验，因此 delivery 更新为 accepted/merged/passed/approved。
+- 未实现 runtime、SQL migration、PostgreSQL/Docker 服务、Broker dispatch、deployment 或 release；`release_status` 保持 `prohibited`，TASK-048 仍为 backlog/blocked 且未激活。
 
 ## Review focus
 
@@ -111,3 +135,38 @@ delivery:
 
 - 绑定语义错误会使订单被错误路由到 Broker；任何缺失、矛盾或无法验证的绑定必须保持 UNBOUND/SAFE。
 - 规范尚未被 runtime 采用前，可只回退本任务新增的规范与测试；采用后必须先停止 writer/dispatch，并永久保留已写入绑定、Journal、Snapshot 与审计证据。
+
+## Final review and closeout evidence
+
+- PR #86 author was `qfxyyy`. Independent reviewer `qifuxiao` submitted formal
+  `APPROVED` review ID `5042458351` at `2026-08-27T15:13:51Z`
+  (`2026-08-27 23:13:51 Asia/Shanghai`), bound to exact reviewed Head
+  `b27f941a3f6fcca46349aa36a208d97fbc5d1281`:
+  https://github.com/qifuxiao/QuantiQmt/pull/86#pullrequestreview-5042458351
+- PR #86 merged into `main` as
+  `5650c3738dceff61862b41e672a96a5cce6fe8e5` at
+  `2026-08-27T15:16:51Z` (`2026-08-27 23:16:51 Asia/Shanghai`). The closeout
+  started from an `origin/main` that resolved to that merge commit.
+- GitHub reports 4/4 successful checks on the exact reviewed Head:
+  [quality run 33079795190/job 98543566950](https://github.com/qifuxiao/QuantiQmt/actions/runs/33079795190/job/98543566950),
+  [quality run 33079798581/job 98543578367](https://github.com/qifuxiao/QuantiQmt/actions/runs/33079798581/job/98543578367),
+  [persistence-postgresql run 33079795190/job 98543567243](https://github.com/qifuxiao/QuantiQmt/actions/runs/33079795190/job/98543567243),
+  and [persistence-postgresql run 33079798581/job 98543578211](https://github.com/qifuxiao/QuantiQmt/actions/runs/33079798581/job/98543578211).
+- All eight acceptance criteria remain checked and are backed by the
+  implementation/spec evidence and verification evidence above. The independent
+  Review found the exact Head acceptable, and the merged implementation/spec PR
+  is the delivery recorded by this governance closeout.
+- Closeout verification on 2026-08-28 passed `scripts/validate_specs.py`, all 51
+  spec tests, focused Ruff check/format, and the contract suite with 678 passed
+  and the existing installed-wheel case skipped because its prescribed build
+  step is outside this task's verification command. Exact path and diff audits
+  confirmed only the authorized governance files plus the precisely authorized
+  lifecycle assertion changed.
+- The 2026-08-28 human authorization covers only this TASK-050 governance
+  closeout and the precise lifecycle assertion update in
+  `tests/spec/test_order_registration_binding_contracts.py`: require the
+  completed task path and `status: completed` while preserving every binding,
+  legacy `UNBOUND`, and blocked-successor assertion. Release remains prohibited.
+  Runtime Order behavior, SQL migration, PostgreSQL/Docker services, Broker
+  behavior, deployment and publication remain unimplemented or unauthorized;
+  TASK-048 remains backlog/blocked and was not activated or modified.
