@@ -13,6 +13,7 @@ from scripts.validate_specs import (
     manifest_entries,
     validate_delivery,
     validate_l4_successor_dependencies,
+    validate_risk_scope_successor_dependencies,
     validate_tasks,
     validate_waiver_entries,
 )
@@ -204,7 +205,7 @@ def test_reported_unverified_or_missing_delivery_cannot_unlock() -> None:
     )
 
 
-def test_l4_queue_uses_task046_successor_without_rewriting_task029_gate() -> None:
+def test_l4_queue_and_risk_scope_use_independent_successor_gates() -> None:
     successor_task_ids = (
         "TASK-017",
         "TASK-018",
@@ -219,8 +220,23 @@ def test_l4_queue_uses_task046_successor_without_rewriting_task029_gate() -> Non
         assert "TASK-014" not in task["depends_on"]
 
     task029 = extract_front_matter(indexed_task_path("TASK-029"))
-    assert "TASK-030" in task029["depends_on"]
+    assert "TASK-051" in task029["depends_on"]
+    assert "TASK-030" not in task029["depends_on"]
     assert "TASK-046" not in task029["depends_on"]
+
+    task030 = extract_front_matter(indexed_task_path("TASK-030"))
+    assert task030["delivery"]["review_status"] == "reported_unverified"
+    assert task030["delivery"]["release_status"] == "prohibited"
+
+    task051 = extract_front_matter(indexed_task_path("TASK-051"))
+    assert task051["delivery"]["schema_version"] == 1
+    assert task051["delivery"]["release_status"] == "prohibited"
+    if task051["status"] == "active":
+        assert task051["delivery"]["review_status"] == "pending"
+        assert not delivery_is_unlockable(task051)
+    else:
+        assert task051["status"] == "completed"
+        assert delivery_is_unlockable(task051)
 
 
 def test_indexed_task_path_supports_active_successor(tmp_path: Path) -> None:
@@ -249,14 +265,198 @@ def test_l4_successor_policy_rejects_historical_and_risk_substitution_edges() ->
         {
             "TASK-046": {"depends_on": []},
             "TASK-017": {"depends_on": ["TASK-014"]},
-            "TASK-029": {"depends_on": ["TASK-015", "TASK-046", "TASK-031"]},
         },
         errors,
     )
     assert any("TASK-017: historical TASK-014" in error for error in errors)
     assert any("TASK-017: missing TASK-046" in error for error in errors)
-    assert any("TASK-029: TASK-030 evidence dependency" in error for error in errors)
-    assert any("TASK-029: TASK-046 cannot replace" in error for error in errors)
+
+
+@pytest.mark.parametrize("replacement", ["TASK-030", "TASK-046"])
+def test_risk_scope_successor_policy_rejects_historical_or_unrelated_gate(
+    replacement: str,
+) -> None:
+    errors: list[str] = []
+    validate_risk_scope_successor_dependencies(
+        {
+            "TASK-029": {"depends_on": ["TASK-015", replacement, "TASK-031"]},
+            "TASK-030": {
+                "status": "completed",
+                "delivery": {
+                    "review_status": "reported_unverified",
+                    "release_status": "prohibited",
+                },
+            },
+        },
+        errors,
+    )
+    assert any("TASK-029: missing TASK-051" in error for error in errors)
+    assert any(
+        f"TASK-029: {replacement} cannot replace or bypass TASK-051" in error for error in errors
+    )
+
+
+@pytest.mark.parametrize(
+    "review_status,release_status",
+    [("approved", "prohibited"), ("reported_unverified", "eligible")],
+)
+def test_risk_scope_successor_policy_preserves_task030_history(
+    review_status: str, release_status: str
+) -> None:
+    errors: list[str] = []
+    validate_risk_scope_successor_dependencies(
+        {
+            "TASK-029": {"depends_on": ["TASK-015", "TASK-031", "TASK-051"]},
+            "TASK-030": {
+                "status": "completed",
+                "delivery": {
+                    "review_status": review_status,
+                    "release_status": release_status,
+                },
+            },
+            "TASK-051": {"depends_on": ["TASK-015", "TASK-031", "TASK-044"]},
+        },
+        errors,
+    )
+    review_history_changed = any(
+        "TASK-030 historical review must remain reported_unverified" in error for error in errors
+    )
+    release_history_changed = any(
+        "TASK-030 historical release must remain prohibited" in error for error in errors
+    )
+    assert review_history_changed is (review_status != "reported_unverified")
+    assert release_history_changed is (release_status != "prohibited")
+
+
+@pytest.mark.parametrize(
+    "successor_state,activation_allowed",
+    [
+        ("active", False),
+        ("reported_unverified", False),
+        ("missing_evidence", False),
+        ("trusted_completed", True),
+    ],
+)
+def test_task051_risk_scope_gate_requires_trusted_completed_delivery(
+    monkeypatch, isolated_task_root, successor_state, activation_allowed
+) -> None:
+    fixture_root = isolated_task_root
+    successor = fixture_root / "TASK-051.md"
+    dependent = fixture_root / "TASK-029.md"
+    historical = fixture_root / "TASK-030.md"
+    trusted_evidence = (
+        "  completion_evidence:\n"
+        "    mode: fixture\n"
+        "    change_pr: https://github.com/example/repo/pull/51\n"
+        "    reviewed_head_sha: " + "a" * 40 + "\n"
+        "    review_verdict: APPROVE\n"
+        "    reviewer: independent-reviewer\n"
+        "    evidence_url: https://github.com/example/review/51\n"
+        "    merge_commit_sha: " + "b" * 40 + "\n"
+        "    human_authorization_evidence: fixture authorization\n"
+    )
+    if successor_state == "active":
+        successor_status = "active"
+        successor_delivery = (
+            "  implementation_status: in_progress\n"
+            "  acceptance_status: not_run\n"
+            "  review_status: pending\n"
+        )
+        successor_evidence = ""
+    elif successor_state == "reported_unverified":
+        successor_status = "completed"
+        successor_delivery = (
+            "  implementation_status: merged\n"
+            "  acceptance_status: unverified\n"
+            "  review_status: reported_unverified\n"
+            "  remediation_task: TASK-051\n"
+        )
+        successor_evidence = (
+            "  completion_evidence:\n"
+            "    mode: historical\n"
+            "    change_pr: unverifiable\n"
+            "    reviewed_head_sha: unverifiable\n"
+            "    review_verdict: reported_unverified\n"
+            "    reviewer: unverifiable\n"
+            "    evidence_url: unverifiable\n"
+            "    merge_commit_sha: unverifiable\n"
+            "    human_authorization_evidence: unverifiable\n"
+        )
+    else:
+        successor_status = "completed"
+        successor_delivery = (
+            "  implementation_status: merged\n"
+            "  acceptance_status: passed\n"
+            "  review_status: approved\n"
+        )
+        successor_evidence = trusted_evidence if successor_state == "trusted_completed" else ""
+    try:
+        successor.write_text(
+            f"---\nid: TASK-051\nstatus: {successor_status}\ndepends_on: []\n"
+            "spec_refs: []\nallowed_paths: []\nforbidden_paths: []\n"
+            "verification: {commands: [check]}\ndelivery:\n"
+            "  schema_version: 1\n  contract_status: not_applicable\n"
+            + successor_delivery
+            + "  release_status: prohibited\n"
+            + successor_evidence
+            + "---\n\n## Acceptance criteria\n- [x] fixture\n",
+            encoding="utf-8",
+        )
+        dependent.write_text(
+            "---\nid: TASK-029\nstatus: active\ndepends_on: [TASK-051]\n"
+            "spec_refs: []\nallowed_paths: []\nforbidden_paths: []\n"
+            "verification: {commands: [check]}\ndelivery:\n"
+            "  schema_version: 1\n  contract_status: accepted\n"
+            "  implementation_status: in_progress\n  acceptance_status: not_run\n"
+            "  review_status: pending\n  release_status: prohibited\n---\n",
+            encoding="utf-8",
+        )
+        historical.write_text(
+            "---\nid: TASK-030\nstatus: completed\ndepends_on: []\n"
+            "spec_refs: []\nallowed_paths: []\nforbidden_paths: []\n"
+            "verification: {commands: [check]}\ndelivery:\n"
+            "  schema_version: 1\n  contract_status: accepted\n"
+            "  implementation_status: merged\n  acceptance_status: unverified\n"
+            "  review_status: reported_unverified\n  release_status: prohibited\n"
+            "  remediation_task: TASK-051\n  completion_evidence:\n"
+            "    mode: historical\n    change_pr: unverifiable\n"
+            "    reviewed_head_sha: unverifiable\n"
+            "    review_verdict: reported_unverified\n    reviewer: unverifiable\n"
+            "    evidence_url: unverifiable\n    merge_commit_sha: unverifiable\n"
+            "    human_authorization_evidence: unverifiable\n"
+            "---\n\n## Acceptance criteria\n- [ ] historical\n",
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(validator, "task_files", lambda: [successor, dependent, historical])
+        monkeypatch.setattr(validator, "validate_active_readme", lambda tasks, errors: None)
+        original_load_yaml = validator.load_yaml
+
+        def fake_load_yaml(path):
+            if path == validator.TASK_ROOT / "governance-waivers.yaml":
+                return {"schema_version": 1, "waivers": []}
+            if path == validator.TASK_ROOT / "index.yaml":
+                return {
+                    "tasks": [
+                        {"id": "TASK-051", "path": "TASK-051.md", "status": successor_status},
+                        {"id": "TASK-029", "path": "TASK-029.md", "status": "active"},
+                        {"id": "TASK-030", "path": "TASK-030.md", "status": "completed"},
+                    ]
+                }
+            return original_load_yaml(path)
+
+        monkeypatch.setattr(validator, "load_yaml", fake_load_yaml)
+        errors: list[str] = []
+        validate_tasks({}, errors)
+        denied = any(
+            "TASK-029: dependency TASK-051 lacks trusted completed delivery" in error
+            for error in errors
+        )
+        assert denied is not activation_allowed
+    finally:
+        successor.unlink(missing_ok=True)
+        dependent.unlink(missing_ok=True)
+        historical.unlink(missing_ok=True)
+        fixture_root.rmdir()
 
 
 @pytest.mark.parametrize(

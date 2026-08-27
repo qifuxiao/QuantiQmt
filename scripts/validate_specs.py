@@ -48,6 +48,8 @@ L4_READINESS_SUCCESSOR = "TASK-046"
 L4_SUCCESSOR_TASKS = frozenset(
     {"TASK-017", "TASK-018", "TASK-019", "TASK-020", "TASK-021", "TASK-022"}
 )
+RISK_SCOPE_SUCCESSOR = "TASK-051"
+RISK_HISTORICAL_SCOPE_TASK = "TASK-030"
 
 
 def load_yaml(path: Path) -> Any:
@@ -462,7 +464,7 @@ def bootstrap_allows_dependency(
 
 
 def validate_l4_successor_dependencies(tasks: dict[str, dict[str, Any]], errors: list[str]) -> None:
-    """Keep the L4 queue on the fresh readiness gate without rewriting Risk history."""
+    """Keep the general L4 queue on its fresh readiness gate."""
     present_successors = L4_SUCCESSOR_TASKS.intersection(tasks)
     if present_successors and L4_READINESS_SUCCESSOR not in tasks:
         errors.append(
@@ -482,16 +484,39 @@ def validate_l4_successor_dependencies(tasks: dict[str, dict[str, Any]], errors:
                 f"{task_id}: missing {L4_READINESS_SUCCESSOR} readiness successor dependency"
             )
 
+
+def validate_risk_scope_successor_dependencies(
+    tasks: dict[str, dict[str, Any]], errors: list[str]
+) -> None:
+    """Require the fresh Risk scope gate without rewriting its historical predecessor."""
     task029 = tasks.get("TASK-029")
     if isinstance(task029, dict):
+        if RISK_SCOPE_SUCCESSOR not in tasks:
+            errors.append(f"tasks: {RISK_SCOPE_SUCCESSOR} successor gate missing for TASK-029")
         dependencies = task029.get("depends_on")
         if isinstance(dependencies, list):
-            if "TASK-030" not in dependencies:
-                errors.append("TASK-029: TASK-030 evidence dependency must remain explicit")
-            if L4_READINESS_SUCCESSOR in dependencies:
+            if RISK_SCOPE_SUCCESSOR not in dependencies:
                 errors.append(
-                    "TASK-029: TASK-046 cannot replace or bypass TASK-030 evidence remediation"
+                    f"TASK-029: missing {RISK_SCOPE_SUCCESSOR} scope successor dependency"
                 )
+            for rejected in (RISK_HISTORICAL_SCOPE_TASK, L4_READINESS_SUCCESSOR):
+                if rejected in dependencies:
+                    errors.append(
+                        f"TASK-029: {rejected} cannot replace or bypass {RISK_SCOPE_SUCCESSOR}"
+                    )
+
+    task030 = tasks.get(RISK_HISTORICAL_SCOPE_TASK)
+    if isinstance(task030, dict):
+        if task030.get("status") != "completed":
+            errors.append("TASK-030 historical queue status must remain completed")
+        delivery = task030.get("delivery")
+        if not isinstance(delivery, dict):
+            errors.append("TASK-030 historical delivery metadata must remain present")
+        else:
+            if delivery.get("review_status") != "reported_unverified":
+                errors.append("TASK-030 historical review must remain reported_unverified")
+            if delivery.get("release_status") != "prohibited":
+                errors.append("TASK-030 historical release must remain prohibited")
 
 
 def validate_json_schemas(errors: list[str]) -> None:
@@ -586,6 +611,7 @@ def validate_tasks(specs: dict[str, Path], errors: list[str], *, today: date | N
     if has_cycle(graph):
         errors.append("tasks: dependency graph contains a cycle")
     validate_l4_successor_dependencies(tasks, errors)
+    validate_risk_scope_successor_dependencies(tasks, errors)
 
     bootstrap_entries = [
         waiver

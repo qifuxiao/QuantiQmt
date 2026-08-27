@@ -28,7 +28,7 @@ tasks:
   - {id: TASK-026, path: backlog/TASK-026-miniqmt-live-adapter.md, status: blocked, depends_on: [TASK-006, TASK-023, TASK-025]}
   - {id: TASK-027, path: backlog/TASK-027-reconciliation-engine.md, status: blocked, depends_on: [TASK-004, TASK-006, TASK-007, TASK-018, TASK-022]}
   - {id: TASK-028, path: completed/TASK-028-documentation-authority-local-workflow.md, status: completed, depends_on: [TASK-014]}
-  - {id: TASK-029, path: backlog/TASK-029-risk-runtime-schema-contract.md, status: blocked, depends_on: [TASK-015, TASK-030, TASK-031]}
+  - {id: TASK-029, path: backlog/TASK-029-risk-runtime-schema-contract.md, status: blocked, depends_on: [TASK-015, TASK-031, TASK-051]}
   - {id: TASK-030, path: completed/TASK-030-risk-validator-integration-scope.md, status: completed, depends_on: [TASK-015]}
   - {id: TASK-031, path: completed/TASK-031-governance-recovery-baseline.md, status: completed, depends_on: [TASK-014]}
   - {id: TASK-043, path: completed/TASK-043-governance-trust-and-waiver-lifecycle.md, status: completed, depends_on: []}
@@ -38,3 +38,4 @@ tasks:
   - {id: TASK-047, path: completed/TASK-047-l4-successor-test-location-awareness.md, status: completed, depends_on: [TASK-046]}
   - {id: TASK-048, path: backlog/TASK-048-order-registration-broker-capability-binding.md, status: blocked, depends_on: [TASK-004, TASK-017]}
   - {id: TASK-049, path: completed/TASK-049-governance-validator-test-determinism.md, status: completed, depends_on: [TASK-043]}
+  - {id: TASK-051, path: active/TASK-051-risk-validator-integration-scope-successor.md, status: active, depends_on: [TASK-015, TASK-031, TASK-044]}

@@ -2,7 +2,7 @@
 id: TASK-029
 title: Define deployable Risk output Schema and runtime validation contract
 status: blocked
-depends_on: [TASK-015, TASK-030, TASK-031]
+depends_on: [TASK-015, TASK-031, TASK-051]
 spec_refs: [CONTRACT-RISK-DECISION-V1, CONTRACT-RISK-AUDIT-OUTPUT-V1, CONTRACT-RISK-ORDER-EVALUATED-V2, PORTS-RISK, CONTRACT-CATALOG]
 allowed_paths:
   - spec/manifest.yaml
@@ -28,8 +28,14 @@ allowed_paths:
   - tasks/index.yaml
 forbidden_paths:
   - migrations/**
+  - docs/**
   - src/quantiqmt/order/**
   - src/quantiqmt/broker/**
+  - src/quantiqmt/execution/**
+  - src/quantiqmt/market/**
+  - src/quantiqmt/messaging/**
+  - src/quantiqmt/adapters/**
+  - src/quantiqmt/redis/**
 verification:
   commands:
     - poetry run python scripts/validate_specs.py
@@ -104,5 +110,13 @@ delivery:
 ## Governance freeze evidence
 
 - PR #46 was closed; its branch and commits must not be reused as implementation or review evidence.
-- TASK-029 is moved to `backlog/blocked` pending TASK-031 governance recovery and independent Review.
-- TASK-029 MUST NOT be reactivated until TASK-031 is completed and independently reviewed; this freeze does not alter TASK-029 allowed_paths or acceptance criteria.
+- TASK-030 remains historical `reported_unverified` / `prohibited`; TASK-051 replaces it only as TASK-029's future scope-authorization dependency and does not alter, infer or promote TASK-030 Review facts.
+- TASK-029 remains `backlog/blocked`. TASK-051 is currently active/in-progress and therefore cannot unlock this task.
+- TASK-029 MUST NOT be reactivated until TASK-051 is independently reviewed APPROVE, merged, human-authorized as completed, and carries schema-v1/passed/approved/merged delivery with complete trusted evidence. Human activation remains a separate action after that gate passes.
+
+## TASK-051 successor scope authorization
+
+- The fresh authorization reaffirms the existing allowed paths for the formal Risk Schema/manifest, deployable `src/quantiqmt/contracts/**` bundle/registry/validator, exact Risk `model.py`/`audit.py`/`runner.py`/`evaluator.py` integration points, and their contract/unit/property tests.
+- The production order remains formal Schema validation → `RiskAuditSemanticValidator` validation → immutable freeze/projection/persistence handoff. Invalid or unavailable Schema/semantic validation must fail closed without fallback, repair, reordering, guessing or side effects.
+- The scope does not authorize new or changed Event/Command/DTO/public Schema/error code/Risk rule/state-machine/Repository/Workflow semantics. Order, Persistence, Broker, Execution, Market, Messaging, adapters, Redis/external I/O, migrations and docs remain outside the implementation scope.
+- TASK-005 remains blocked until TASK-029 itself later completes with an independent APPROVE; TASK-051 completion alone never unlocks TASK-005 or releases Risk capability.

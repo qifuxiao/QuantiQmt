@@ -1,0 +1,127 @@
+schema_version: 1
+audit_task: TASK-051
+record_status: implementation_complete_pending_independent_review
+authorized_on: "2026-08-27"
+repository:
+  base_branch: origin/main
+  base_sha: 17fec4553a23f0f209f607c22bb0047590803605
+  implementation_branch: codex/task-051-risk-validator-scope-successor
+  review_binding: exact_head_sha_required_at_handoff
+concurrent_work:
+  observed_branch: origin/codex/task-050-registration-binding-contracts
+  observed_head_sha: eece2db86d5bb5fd4ae36ac390399094ff755da1
+  domain_overlap: none
+  shared_projection_paths: [tasks/active/README.md, tasks/index.yaml]
+  merge_requirement: preserve_both_active_projections_if_TASK_050_merges_first
+authority:
+  human_authorization: >-
+    2026-08-27 explicit authorization to create, activate and implement TASK-051 as a
+    fresh independently reviewed successor authorization for TASK-029.
+  accepted_spec:
+    version: 0.13.0
+    status: accepted
+    refs:
+      - CONTRACT-RISK-DECISION-V1
+      - CONTRACT-RISK-AUDIT-OUTPUT-V1
+      - CONTRACT-RISK-ORDER-EVALUATED-V2
+      - PORTS-RISK
+      - CONTRACT-CATALOG
+  trusted_dependencies:
+    - {task_id: TASK-015, schema_version: 1, acceptance: passed, review: approved, implementation: merged}
+    - {task_id: TASK-031, schema_version: 1, acceptance: passed, review: approved, implementation: merged}
+    - {task_id: TASK-044, schema_version: 1, acceptance: passed, review: approved, implementation: merged}
+historical_boundary:
+  predecessor_task: TASK-030
+  queue_status: completed
+  review_status: reported_unverified
+  release_status: prohibited
+  historical_scope_pr: https://github.com/qifuxiao/QuantiQmt/pull/42
+  historical_closeout_pr: https://github.com/qifuxiao/QuantiQmt/pull/44
+  approved_review_evidence: unavailable
+  changed_by_TASK_051: false
+  promoted_by_TASK_051: false
+  usable_as_dependency_unlock: false
+successor_decision:
+  beneficiary_task: TASK-029
+  dependency_before: [TASK-015, TASK-030, TASK-031]
+  dependency_after: [TASK-015, TASK-031, TASK-051]
+  successor_task: TASK-051
+  waiver: false
+  automatic_activation: forbidden
+  activation_requires:
+    - TASK-051 queue status completed
+    - delivery schema version 1
+    - acceptance passed
+    - independent Review approved
+    - implementation merged
+    - complete trusted completion evidence
+    - separate human activation of TASK-029
+task029_scope:
+  schema_and_contract_paths:
+    - spec/manifest.yaml
+    - spec/contracts/risk/**
+    - spec/contracts/events/risk.order_evaluated.v2.schema.json
+    - spec/interfaces/risk-ports.md
+    - src/quantiqmt/contracts/**
+  risk_integration_paths:
+    - src/quantiqmt/risk/model.py
+    - src/quantiqmt/risk/audit.py
+    - src/quantiqmt/risk/runner.py
+    - src/quantiqmt/risk/evaluator.py
+  test_paths:
+    - tests/spec/**
+    - tests/contract/messages/**
+    - tests/unit/contracts/**
+    - tests/unit/risk/**
+    - tests/property/risk/**
+  required_order:
+    - formal_schema_validation
+    - semantic_validation
+    - immutable_freeze
+    - validated_projection_and_persistence_handoff
+  exclusions:
+    - new_or_changed_public_Event_Command_DTO_Schema_or_error_code
+    - changed_Risk_rule_or_state_transition_semantics
+    - Order_Persistence_Broker_Execution_Market_or_Messaging_business_code
+    - Redis_external_IO_adapters_migrations_or_docs
+activation_matrix:
+  TASK051_active_in_progress: denied
+  TASK051_completed_reported_unverified: denied
+  TASK051_completed_missing_trusted_evidence: denied
+  TASK051_completed_trusted_delivery: dependency_gate_satisfied_only
+  TASK029_auto_activation: forbidden
+  TASK005_unlock_from_TASK051: forbidden
+scope_effects:
+  task029_activated: false
+  task005_activated: false
+  runtime_code_change: none
+  normative_spec_change: none
+  public_schema_change: none
+  error_catalog_change: none
+  release_status_change: none
+verification:
+  original_poetry_launcher:
+    path: C:/Users/Administrator/AppData/Roaming/Python/Scripts/poetry.exe
+    length_bytes: 0
+    result: failed_before_test_execution
+  dependency_complete_environment:
+    python: C:/Users/Administrator/AppData/Local/pypoetry/Cache/virtualenvs/quantiqmt-pHxzv3NO-py3.12/Scripts/python.exe
+  original_commands:
+    validate_specs: {exit_code: 1, result: poetry_launcher_failed_before_execution}
+    tests_spec: {exit_code: 1, result: poetry_launcher_failed_before_collection}
+    tests_contract: {exit_code: 1, result: poetry_launcher_failed_before_collection}
+    ruff_check: {exit_code: 1, result: poetry_launcher_failed_before_execution}
+    ruff_format_check: {exit_code: 1, result: poetry_launcher_failed_before_execution}
+    pre_commit_hooks: {exit_code: 1, result: poetry_created_dependency_incomplete_worktree_environment}
+  dependency_complete_equivalents:
+    validate_specs: {exit_code: 0, result: passed}
+    tests_spec: {exit_code: 0, passed: 53}
+    tests_contract: {exit_code: 0, passed: 678, skipped: 1}
+    ruff_check: {exit_code: 0, result: passed}
+    ruff_format_check: {exit_code: 0, result: passed}
+    git_diff_check: {exit_code: 0, result: passed}
+independent_review:
+  required: true
+  implementing_agent_may_approve: false
+  implementing_agent_may_merge: false
+  implementing_agent_may_move_task_to_completed: false
