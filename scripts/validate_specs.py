@@ -33,6 +33,7 @@ DELIVERY_AXES = {
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 URL_RE = re.compile(r"^https?://[^\s]+$")
 PR_RE = re.compile(r"^https://github\.com/[^/]+/[^/]+/pull/\d+$")
+GITHUB_LOGIN_RE = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$")
 COMPLETION_FIELDS = {
     "mode",
     "change_pr",
@@ -50,6 +51,26 @@ L4_SUCCESSOR_TASKS = frozenset(
 )
 RISK_SCOPE_SUCCESSOR = "TASK-051"
 RISK_HISTORICAL_SCOPE_TASK = "TASK-030"
+RISK_SCOPE_REQUIRED_DEPENDENCIES = frozenset({"TASK-015", "TASK-031", "TASK-051"})
+RISK_SCOPE_GOVERNANCE_PATH = (
+    ROOT / "ai" / "governance" / "risk-validator-integration-scope-task-051.yaml"
+)
+RISK_SCOPE_REPOSITORY = "qifuxiao/QuantiQmt"
+RISK_SCOPE_PR_NUMBER = 87
+RISK_SCOPE_PR_URL = "https://github.com/qifuxiao/QuantiQmt/pull/87"
+RISK_SCOPE_IMPLEMENTING_AGENT = "codex-task-051-implementing-agent"
+RISK_SCOPE_PR_AUTHOR = "qifuxiao"
+RISK_SCOPE_EXTERNAL_FACT_STATUS = "recorded_after_github_and_human_verification"
+RISK_SCOPE_COMPLETION_MODE = "governance_closeout_after_independent_review"
+RISK_HISTORICAL_DELIVERY = {
+    "schema_version": 1,
+    "contract_status": "accepted",
+    "implementation_status": "merged",
+    "acceptance_status": "unverified",
+    "review_status": "reported_unverified",
+    "release_status": "prohibited",
+    "remediation_task": "TASK-031",
+}
 
 
 def load_yaml(path: Path) -> Any:
@@ -397,20 +418,40 @@ def validate_active_readme(tasks: dict[str, dict[str, Any]], errors: list[str]) 
         )
 
 
-def delivery_is_unlockable(task: dict[str, Any]) -> bool:
+def delivery_is_unlockable(
+    task: dict[str, Any],
+    *,
+    task_id: str | None = None,
+    evidence_binding: dict[str, Any] | None = None,
+) -> bool:
     delivery = task.get("delivery")
-    return (
+    resolved_task_id = task_id or task.get("id")
+    generally_unlockable = (
         isinstance(delivery, dict)
         and delivery.get("schema_version") == 1
         and delivery.get("implementation_status") in {"merged", "not_applicable"}
         and delivery.get("acceptance_status") == "passed"
         and delivery.get("review_status") in {"approved", "not_required"}
         and delivery.get("release_status") in {"prohibited", "eligible", "released"}
-        and completion_evidence_is_trusted(delivery)
+        and completion_evidence_is_trusted(
+            delivery,
+            task_id=resolved_task_id,
+            evidence_binding=evidence_binding,
+        )
     )
+    if not generally_unlockable:
+        return False
+    if resolved_task_id == RISK_SCOPE_SUCCESSOR:
+        return task051_completion_evidence_is_bound(delivery, evidence_binding)
+    return True
 
 
-def completion_evidence_is_trusted(delivery: dict[str, Any]) -> bool:
+def completion_evidence_is_trusted(
+    delivery: dict[str, Any],
+    *,
+    task_id: str | None = None,
+    evidence_binding: dict[str, Any] | None = None,
+) -> bool:
     evidence = delivery.get("completion_evidence")
     if not isinstance(evidence, dict) or not COMPLETION_FIELDS.issubset(evidence):
         return False
@@ -421,13 +462,185 @@ def completion_evidence_is_trusted(delivery: dict[str, Any]) -> bool:
         return False
     if evidence.get("review_verdict") not in {"APPROVE", "NOT_REQUIRED"}:
         return False
-    return (
+    generally_trusted = (
         SHA_RE.fullmatch(str(evidence.get("reviewed_head_sha"))) is not None
         and SHA_RE.fullmatch(str(evidence.get("merge_commit_sha"))) is not None
         and PR_RE.fullmatch(str(evidence.get("change_pr"))) is not None
         and URL_RE.fullmatch(str(evidence.get("evidence_url"))) is not None
         and evidence.get("reviewer") not in {"unverifiable", "reported_unverified"}
     )
+    if not generally_trusted:
+        return False
+    if task_id == RISK_SCOPE_SUCCESSOR:
+        return task051_completion_evidence_is_bound(delivery, evidence_binding)
+    return True
+
+
+def load_risk_scope_evidence_binding(errors: list[str]) -> dict[str, Any] | None:
+    """Load the static TASK-051 evidence binding without claiming external verification."""
+    try:
+        document = load_yaml(RISK_SCOPE_GOVERNANCE_PATH)
+    except Exception as exc:
+        errors.append(
+            "ai/governance/risk-validator-integration-scope-task-051.yaml: "
+            f"required TASK-051 evidence binding is unavailable: {exc}"
+        )
+        return None
+    if not isinstance(document, dict) or document.get("schema_version") != 1:
+        errors.append(
+            "ai/governance/risk-validator-integration-scope-task-051.yaml: schema_version must be 1"
+        )
+        return None
+    if document.get("audit_task") != RISK_SCOPE_SUCCESSOR:
+        errors.append(
+            "ai/governance/risk-validator-integration-scope-task-051.yaml: "
+            "audit_task must be TASK-051"
+        )
+        return None
+    binding = document.get("successor_evidence_binding")
+    if not isinstance(binding, dict):
+        errors.append(
+            "ai/governance/risk-validator-integration-scope-task-051.yaml: "
+            "successor_evidence_binding must be present"
+        )
+        return None
+    expected = {
+        "task_id": RISK_SCOPE_SUCCESSOR,
+        "beneficiary_task": "TASK-029",
+        "repository": RISK_SCOPE_REPOSITORY,
+        "pull_request_number": RISK_SCOPE_PR_NUMBER,
+        "change_pr": RISK_SCOPE_PR_URL,
+    }
+    for field, value in expected.items():
+        if binding.get(field) != value:
+            errors.append(
+                "ai/governance/risk-validator-integration-scope-task-051.yaml: "
+                f"successor evidence binding {field} must equal {value}"
+            )
+    identity = binding.get("implementation_identity")
+    if not isinstance(identity, dict) or identity.get("agent") != RISK_SCOPE_IMPLEMENTING_AGENT:
+        errors.append(
+            "ai/governance/risk-validator-integration-scope-task-051.yaml: "
+            "implementation agent identity is not bound"
+        )
+    if not isinstance(identity, dict) or identity.get("pull_request_author") != (
+        RISK_SCOPE_PR_AUTHOR
+    ):
+        errors.append(
+            "ai/governance/risk-validator-integration-scope-task-051.yaml: "
+            "pull request author identity is not bound"
+        )
+    if not isinstance(binding.get("required_review"), dict) or not isinstance(
+        binding.get("required_merge"), dict
+    ):
+        errors.append(
+            "ai/governance/risk-validator-integration-scope-task-051.yaml: "
+            "required_review and required_merge bindings must be present"
+        )
+    if binding.get("external_fact_status") not in {
+        "pending_github_and_human_verification",
+        RISK_SCOPE_EXTERNAL_FACT_STATUS,
+    }:
+        errors.append(
+            "ai/governance/risk-validator-integration-scope-task-051.yaml: "
+            "external_fact_status must remain pending or recorded-after-verification"
+        )
+    boundary = binding.get("static_validator_boundary")
+    if not isinstance(boundary, dict) or any(
+        not isinstance(boundary.get(field), list) or not boundary[field]
+        for field in ("verifies", "does_not_verify", "external_confirmation_required")
+    ):
+        errors.append(
+            "ai/governance/risk-validator-integration-scope-task-051.yaml: "
+            "static validator boundary must declare verifies and external facts"
+        )
+    return binding
+
+
+def task051_completion_evidence_is_bound(
+    delivery: dict[str, Any], evidence_binding: dict[str, Any] | None
+) -> bool:
+    """Check TASK-051's recorded evidence against its immutable local PR/review binding."""
+    if (
+        delivery.get("contract_status") != "not_applicable"
+        or delivery.get("implementation_status") != "merged"
+        or delivery.get("acceptance_status") != "passed"
+        or delivery.get("review_status") != "approved"
+        or delivery.get("release_status") != "prohibited"
+    ):
+        return False
+    if not isinstance(evidence_binding, dict):
+        return False
+    if any(
+        evidence_binding.get(field) != expected
+        for field, expected in {
+            "task_id": RISK_SCOPE_SUCCESSOR,
+            "beneficiary_task": "TASK-029",
+            "repository": RISK_SCOPE_REPOSITORY,
+            "pull_request_number": RISK_SCOPE_PR_NUMBER,
+            "change_pr": RISK_SCOPE_PR_URL,
+        }.items()
+    ):
+        return False
+    if not completion_evidence_is_trusted(delivery):
+        return False
+    evidence = delivery.get("completion_evidence")
+    review = evidence_binding.get("required_review")
+    merge = evidence_binding.get("required_merge")
+    identity = evidence_binding.get("implementation_identity")
+    if not all(isinstance(value, dict) for value in (evidence, review, merge, identity)):
+        return False
+    assert isinstance(evidence, dict)
+    assert isinstance(review, dict)
+    assert isinstance(merge, dict)
+    assert isinstance(identity, dict)
+    if (
+        identity.get("agent") != RISK_SCOPE_IMPLEMENTING_AGENT
+        or identity.get("pull_request_author") != RISK_SCOPE_PR_AUTHOR
+    ):
+        return False
+    if review.get("verdict") != "APPROVE":
+        return False
+    if evidence_binding.get("external_fact_status") != RISK_SCOPE_EXTERNAL_FACT_STATUS:
+        return False
+    reviewer = review.get("reviewer")
+    reviewed_head_sha = review.get("reviewed_head_sha")
+    merge_commit_sha = merge.get("merge_commit_sha")
+    evidence_url = review.get("evidence_url")
+    human_authorization = evidence_binding.get("human_authorization_evidence")
+    if not isinstance(reviewer, str) or GITHUB_LOGIN_RE.fullmatch(reviewer) is None:
+        return False
+    if reviewer in {identity.get("agent"), identity.get("pull_request_author")}:
+        return False
+    if not plausible_evidence_sha(reviewed_head_sha) or not plausible_evidence_sha(
+        merge_commit_sha
+    ):
+        return False
+    review_url_re = re.compile(rf"^{re.escape(RISK_SCOPE_PR_URL)}#pullrequestreview-[1-9][0-9]*$")
+    if not isinstance(evidence_url, str) or review_url_re.fullmatch(evidence_url) is None:
+        return False
+    if (
+        not isinstance(human_authorization, str)
+        or not human_authorization.strip()
+        or human_authorization.startswith("pending_")
+    ):
+        return False
+    expected_evidence = {
+        "mode": RISK_SCOPE_COMPLETION_MODE,
+        "change_pr": RISK_SCOPE_PR_URL,
+        "reviewed_head_sha": reviewed_head_sha,
+        "review_verdict": "APPROVE",
+        "reviewer": reviewer,
+        "evidence_url": evidence_url,
+        "merge_commit_sha": merge_commit_sha,
+        "human_authorization_evidence": human_authorization,
+    }
+    return all(evidence.get(field) == value for field, value in expected_evidence.items())
+
+
+def plausible_evidence_sha(value: Any) -> bool:
+    """Reject malformed and obvious repeated-character placeholder SHAs."""
+    return isinstance(value, str) and SHA_RE.fullmatch(value) is not None and len(set(value)) > 1
 
 
 def bootstrap_allows_dependency(
@@ -486,7 +699,9 @@ def validate_l4_successor_dependencies(tasks: dict[str, dict[str, Any]], errors:
 
 
 def validate_risk_scope_successor_dependencies(
-    tasks: dict[str, dict[str, Any]], errors: list[str]
+    tasks: dict[str, dict[str, Any]],
+    errors: list[str],
+    evidence_binding: dict[str, Any] | None = None,
 ) -> None:
     """Require the fresh Risk scope gate without rewriting its historical predecessor."""
     task029 = tasks.get("TASK-029")
@@ -495,6 +710,12 @@ def validate_risk_scope_successor_dependencies(
             errors.append(f"tasks: {RISK_SCOPE_SUCCESSOR} successor gate missing for TASK-029")
         dependencies = task029.get("depends_on")
         if isinstance(dependencies, list):
+            if len(dependencies) != len(RISK_SCOPE_REQUIRED_DEPENDENCIES) or set(
+                dependencies
+            ) != set(RISK_SCOPE_REQUIRED_DEPENDENCIES):
+                errors.append(
+                    "TASK-029: required scope dependencies must be TASK-015, TASK-031, TASK-051"
+                )
             if RISK_SCOPE_SUCCESSOR not in dependencies:
                 errors.append(
                     f"TASK-029: missing {RISK_SCOPE_SUCCESSOR} scope successor dependency"
@@ -506,17 +727,31 @@ def validate_risk_scope_successor_dependencies(
                     )
 
     task030 = tasks.get(RISK_HISTORICAL_SCOPE_TASK)
-    if isinstance(task030, dict):
+    if not isinstance(task030, dict):
+        errors.append("TASK-030 historical record must remain present")
+    else:
         if task030.get("status") != "completed":
             errors.append("TASK-030 historical queue status must remain completed")
         delivery = task030.get("delivery")
         if not isinstance(delivery, dict):
             errors.append("TASK-030 historical delivery metadata must remain present")
         else:
-            if delivery.get("review_status") != "reported_unverified":
-                errors.append("TASK-030 historical review must remain reported_unverified")
-            if delivery.get("release_status") != "prohibited":
-                errors.append("TASK-030 historical release must remain prohibited")
+            for field, expected in RISK_HISTORICAL_DELIVERY.items():
+                if delivery.get(field) != expected:
+                    errors.append(
+                        f"TASK-030 historical {field.removesuffix('_status')} must remain "
+                        f"{expected}"
+                    )
+
+    task051 = tasks.get(RISK_SCOPE_SUCCESSOR)
+    if isinstance(task051, dict) and task051.get("status") == "completed":
+        delivery = task051.get("delivery")
+        if (
+            isinstance(delivery, dict)
+            and delivery.get("review_status") in {"approved", "not_required"}
+            and not task051_completion_evidence_is_bound(delivery, evidence_binding)
+        ):
+            errors.append("TASK-051 evidence does not match its governance binding")
 
 
 def validate_json_schemas(errors: list[str]) -> None:
@@ -611,7 +846,10 @@ def validate_tasks(specs: dict[str, Path], errors: list[str], *, today: date | N
     if has_cycle(graph):
         errors.append("tasks: dependency graph contains a cycle")
     validate_l4_successor_dependencies(tasks, errors)
-    validate_risk_scope_successor_dependencies(tasks, errors)
+    risk_scope_binding = None
+    if "TASK-029" in tasks or RISK_SCOPE_SUCCESSOR in tasks:
+        risk_scope_binding = load_risk_scope_evidence_binding(errors)
+    validate_risk_scope_successor_dependencies(tasks, errors, risk_scope_binding)
 
     bootstrap_entries = [
         waiver
@@ -666,7 +904,11 @@ def validate_tasks(specs: dict[str, Path], errors: list[str], *, today: date | N
                 not isinstance(dependency_task, dict)
                 or dependency_task.get("status") != "completed"
                 or (
-                    not delivery_is_unlockable(dependency_task)
+                    not delivery_is_unlockable(
+                        dependency_task,
+                        task_id=dependency,
+                        evidence_binding=risk_scope_binding,
+                    )
                     and not bootstrap_allows_dependency(
                         dependency,
                         task_id,

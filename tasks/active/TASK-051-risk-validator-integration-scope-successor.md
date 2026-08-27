@@ -82,7 +82,9 @@ delivery:
 ## Implementation evidence
 
 - `ai/governance/risk-validator-integration-scope-task-051.yaml` 以 schema-v1 记录 accepted spec、可信依赖、TASK-030 历史边界、TASK-029 精确范围、四态 activation matrix、TASK-050 并行分支隔离与 Review 权限边界。
+- `successor_evidence_binding` 将 successor gate 固定到 `qifuxiao/QuantiQmt` PR #87、实现者身份和独立 GitHub Review 字段；在 Review/merge/人类收尾事实仍为 pending 时，任何 TASK-051 completion evidence 都不能解锁 TASK-029。
 - `scripts/validate_specs.py` 将通用 L4/TASK-046 gate 与 Risk/TASK-051 gate 分离：TASK-029 必须依赖 TASK-051，TASK-030/TASK-046 均不能替代；TASK-030 必须保持 completed + reported-unverified + prohibited。
+- successor validator 只验证治理记录与任务 evidence 的固定仓库/PR/Review URL、SHA、reviewer 独立性和字段一致性；它不联网声称 GitHub Review、精确 Head、merge 或人类授权事实已真实发生，这些仍须独立 Review 与人类收尾确认。
 - TASK-029 仅把直接依赖从 TASK-030 迁移到 TASK-051，并补充 successor 授权/forbidden scope；其 status 仍为 blocked，既有 allowed paths 和 acceptance criteria 未削弱。
 - `tests/spec/test_validate_specs.py` 覆盖 real-repository 投影、历史不可提升、错误 successor 替代，以及 active、reported-unverified、missing evidence、trusted completed 四态；测试兼容未来 TASK-051 合法 active → completed 路径迁移。
 - TASK-030 文件与 TASK-044 历史审计文件的 Git blob 分别保持 `4cc37f6d1805d98bc4f223bfe69d4de5c51b7f8e`、`c4dfc1703c1782fdd9c062ce22fb830c2388c365`，与 `origin/main` 完全一致。
@@ -103,6 +105,7 @@ delivery:
 ## Review focus
 
 - successor 是否是真正独立的新授权，而不是改写或包装 TASK-030 的历史批准。
+- successor completion evidence 是否逐字段匹配 PR #87 的治理 binding，且没有使用实现者身份、占位 SHA、任意仓库/PR 或无效 Review URL 伪造独立 Review；静态校验与 GitHub/人类事实的边界是否清楚。
 - TASK-051 未可信 completed 时，TASK-029 是否在目录、依赖与 delivery evidence 三层都保持 fail-closed。
 - TASK-029 范围是否足以接入既有 validator，同时没有扩大到 Order/Persistence/Broker/Execution/Redis、规范语义或 release。
 - validator/tests 是否既拒绝历史 gate 旁路，又允许未来合法的 TASK-051 reviewed/merged closeout 后由人类另行激活 TASK-029。

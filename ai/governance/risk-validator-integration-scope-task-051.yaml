@@ -7,6 +7,39 @@ repository:
   base_sha: 17fec4553a23f0f209f607c22bb0047590803605
   implementation_branch: codex/task-051-risk-validator-scope-successor
   review_binding: exact_head_sha_required_at_handoff
+successor_evidence_binding:
+  task_id: TASK-051
+  beneficiary_task: TASK-029
+  repository: qifuxiao/QuantiQmt
+  pull_request_number: 87
+  change_pr: https://github.com/qifuxiao/QuantiQmt/pull/87
+  implementation_identity:
+    agent: codex-task-051-implementing-agent
+    pull_request_author: qifuxiao
+  required_review:
+    verdict: APPROVE
+    reviewer: pending_independent_github_reviewer
+    reviewed_head_sha: pending_exact_reviewed_head
+    evidence_url: pending_github_pull_request_review_url
+  required_merge:
+    merge_commit_sha: pending_merge_commit
+  human_authorization_evidence: pending_human_closeout_authorization
+  external_fact_status: pending_github_and_human_verification
+  static_validator_boundary:
+    verifies:
+      - completion evidence exactly matches this TASK-051 binding
+      - repository and change PR are qifuxiao/QuantiQmt PR 87
+      - Review evidence URL is a PR 87 pullrequestreview URL
+      - reviewer is a valid bound GitHub login distinct from implementation agent and PR author
+      - reviewed Head and merge commit are non-placeholder 40-character hexadecimal SHAs
+      - external facts have been recorded as verified before dependency unlock
+    does_not_verify:
+      - GitHub Review existence, verdict, reviewer identity or reviewed Head via network
+      - GitHub merge existence or merge commit ancestry via network
+      - human closeout authorization authenticity outside the repository
+    external_confirmation_required:
+      - independent reviewer verifies APPROVE on the exact current PR Head in GitHub
+      - human verifies merge and authorizes active-to-completed closeout
 concurrent_work:
   observed_branch: origin/codex/task-050-registration-binding-contracts
   observed_head_sha: eece2db86d5bb5fd4ae36ac390399094ff755da1

@@ -6,6 +6,7 @@ import yaml
 from scripts.validate_specs import (
     ROOT,
     bootstrap_allows_dependency,
+    completion_evidence_is_trusted,
     delivery_is_unlockable,
     extract_front_matter,
     has_cycle,
@@ -61,6 +62,193 @@ def write_task047_index_fixture(
         yaml.safe_dump({"tasks": entries}, sort_keys=False), encoding="utf-8"
     )
     return task_path
+
+
+def write_governance_task_fixture(
+    path: Path,
+    task_id: str,
+    status: str,
+    depends_on: list[str],
+    delivery: dict,
+) -> None:
+    task = {
+        "id": task_id,
+        "status": status,
+        "depends_on": depends_on,
+        "spec_refs": [],
+        "allowed_paths": [],
+        "forbidden_paths": [],
+        "verification": {"commands": ["check"]},
+        "delivery": delivery,
+    }
+    path.write_text(
+        "---\n"
+        + yaml.safe_dump(task, sort_keys=False)
+        + "---\n\n## Acceptance criteria\n- [x] fixture\n",
+        encoding="utf-8",
+    )
+
+
+def trusted_delivery(
+    *,
+    change_pr: str = "https://github.com/qifuxiao/QuantiQmt/pull/87",
+    reviewed_head_sha: str = "8a49f8165e562a63e16206b903cc14a3c7a814a4",
+    reviewer: str = "independent-reviewer",
+    evidence_url: str = ("https://github.com/qifuxiao/QuantiQmt/pull/87#pullrequestreview-12345"),
+) -> dict:
+    return {
+        "schema_version": 1,
+        "contract_status": "not_applicable",
+        "implementation_status": "merged",
+        "acceptance_status": "passed",
+        "review_status": "approved",
+        "release_status": "prohibited",
+        "completion_evidence": {
+            "mode": "governance_closeout_after_independent_review",
+            "change_pr": change_pr,
+            "reviewed_head_sha": reviewed_head_sha,
+            "review_verdict": "APPROVE",
+            "reviewer": reviewer,
+            "evidence_url": evidence_url,
+            "merge_commit_sha": "17fec4553a23f0f209f607c22bb0047590803605",
+            "human_authorization_evidence": "human-authorized TASK-051 closeout",
+        },
+    }
+
+
+def risk_scope_evidence_binding() -> dict:
+    return {
+        "schema_version": 1,
+        "audit_task": "TASK-051",
+        "successor_evidence_binding": {
+            "task_id": "TASK-051",
+            "beneficiary_task": "TASK-029",
+            "repository": "qifuxiao/QuantiQmt",
+            "pull_request_number": 87,
+            "change_pr": "https://github.com/qifuxiao/QuantiQmt/pull/87",
+            "implementation_identity": {
+                "agent": "codex-task-051-implementing-agent",
+                "pull_request_author": "qifuxiao",
+            },
+            "required_review": {
+                "verdict": "APPROVE",
+                "reviewer": "independent-reviewer",
+                "reviewed_head_sha": "8a49f8165e562a63e16206b903cc14a3c7a814a4",
+                "evidence_url": (
+                    "https://github.com/qifuxiao/QuantiQmt/pull/87#pullrequestreview-12345"
+                ),
+            },
+            "required_merge": {"merge_commit_sha": "17fec4553a23f0f209f607c22bb0047590803605"},
+            "human_authorization_evidence": "human-authorized TASK-051 closeout",
+            "external_fact_status": "recorded_after_github_and_human_verification",
+            "static_validator_boundary": {
+                "verifies": ["local evidence binding"],
+                "does_not_verify": ["external GitHub facts"],
+                "external_confirmation_required": ["independent review and human closeout"],
+            },
+        },
+    }
+
+
+def run_risk_scope_validate_tasks_fixture(
+    monkeypatch: pytest.MonkeyPatch,
+    task_root: Path,
+    *,
+    task029_dependencies: list[str] | None = None,
+    task051_delivery: dict | None = None,
+    task030_delivery_overrides: dict | None = None,
+    include_task030: bool = True,
+    governance_binding: dict | None = None,
+) -> list[str]:
+    task029_dependencies = task029_dependencies or ["TASK-015", "TASK-031", "TASK-051"]
+    task051_delivery = task051_delivery or trusted_delivery()
+    governance_binding = governance_binding or risk_scope_evidence_binding()
+    completed_dependency = {
+        "schema_version": 1,
+        "contract_status": "not_applicable",
+        "implementation_status": "merged",
+        "acceptance_status": "passed",
+        "review_status": "approved",
+        "release_status": "prohibited",
+        "completion_evidence": {
+            "mode": "fixture",
+            "change_pr": "https://github.com/example/repo/pull/1",
+            "reviewed_head_sha": "a" * 40,
+            "review_verdict": "APPROVE",
+            "reviewer": "reviewer",
+            "evidence_url": "https://github.com/example/repo/pull/1#pullrequestreview-1",
+            "merge_commit_sha": "b" * 40,
+            "human_authorization_evidence": "fixture",
+        },
+    }
+    task030_delivery = {
+        "schema_version": 1,
+        "contract_status": "accepted",
+        "implementation_status": "merged",
+        "acceptance_status": "unverified",
+        "review_status": "reported_unverified",
+        "release_status": "prohibited",
+        "remediation_task": "TASK-031",
+        "completion_evidence": {
+            "mode": "historical_git_verified_review_unavailable",
+            "change_pr": "https://github.com/qifuxiao/QuantiQmt/pull/44",
+            "reviewed_head_sha": "e7c087fc1292f1c57d8352112802ed60f99e9466",
+            "review_verdict": "reported_unverified",
+            "reviewer": "unverifiable",
+            "evidence_url": "unverifiable",
+            "merge_commit_sha": "238b0ac2c3c82de88c59a900feca8cbb71d38863",
+            "human_authorization_evidence": "unverifiable",
+        },
+    }
+    task030_delivery.update(task030_delivery_overrides or {})
+    task_documents = {
+        "TASK-015": ("completed", [], completed_dependency),
+        "TASK-031": ("completed", [], completed_dependency),
+        "TASK-044": ("completed", [], completed_dependency),
+        "TASK-051": ("completed", ["TASK-015", "TASK-031", "TASK-044"], task051_delivery),
+        "TASK-029": (
+            "active",
+            task029_dependencies,
+            {
+                "schema_version": 1,
+                "contract_status": "accepted",
+                "implementation_status": "in_progress",
+                "acceptance_status": "unverified",
+                "review_status": "pending",
+                "release_status": "prohibited",
+            },
+        ),
+    }
+    if include_task030:
+        task_documents["TASK-030"] = ("completed", ["TASK-015"], task030_delivery)
+
+    paths = []
+    index_entries = []
+    for task_id, (status, dependencies, delivery) in task_documents.items():
+        path = task_root / f"{task_id}.md"
+        write_governance_task_fixture(path, task_id, status, dependencies, delivery)
+        paths.append(path)
+        index_entries.append(
+            {"id": task_id, "path": path.name, "status": status, "depends_on": dependencies}
+        )
+
+    monkeypatch.setattr(validator, "task_files", lambda: paths)
+    monkeypatch.setattr(validator, "validate_active_readme", lambda tasks, errors: None)
+    original_load_yaml = validator.load_yaml
+
+    def fake_load_yaml(path):
+        if path == validator.TASK_ROOT / "governance-waivers.yaml":
+            return {"schema_version": 1, "waivers": []}
+        if path == validator.TASK_ROOT / "index.yaml":
+            return {"tasks": index_entries}
+        if path == validator.RISK_SCOPE_GOVERNANCE_PATH:
+            return governance_binding
+        return original_load_yaml(path)
+
+    monkeypatch.setattr(validator, "load_yaml", fake_load_yaml)
+    errors: list[str] = []
+    validate_tasks({}, errors)
+    return errors
 
 
 def test_package_is_importable() -> None:
@@ -329,6 +517,119 @@ def test_risk_scope_successor_policy_preserves_task030_history(
 
 
 @pytest.mark.parametrize(
+    "forgery",
+    ["wrong_pr", "fabricated_shas", "implementing_reviewer", "invalid_review_url"],
+)
+def test_task051_forged_evidence_is_rejected_via_validate_tasks(
+    monkeypatch: pytest.MonkeyPatch,
+    isolated_task_root: Path,
+    forgery: str,
+) -> None:
+    delivery = trusted_delivery()
+    evidence = delivery["completion_evidence"]
+    binding = risk_scope_evidence_binding()
+    bound_evidence = binding["successor_evidence_binding"]
+    if forgery == "wrong_pr":
+        evidence["change_pr"] = "https://github.com/example/repo/pull/999"
+        bound_evidence["change_pr"] = "https://github.com/example/repo/pull/999"
+    elif forgery == "fabricated_shas":
+        evidence["reviewed_head_sha"] = "a" * 40
+        evidence["merge_commit_sha"] = "b" * 40
+        bound_evidence["required_review"]["reviewed_head_sha"] = "a" * 40
+        bound_evidence["required_merge"]["merge_commit_sha"] = "b" * 40
+    elif forgery == "implementing_reviewer":
+        evidence["reviewer"] = "codex-task-051-implementing-agent"
+        bound_evidence["required_review"]["reviewer"] = "codex-task-051-implementing-agent"
+    else:
+        evidence["evidence_url"] = "https://github.com/example/review/87"
+        bound_evidence["required_review"]["evidence_url"] = "https://github.com/example/review/87"
+
+    errors = run_risk_scope_validate_tasks_fixture(
+        monkeypatch,
+        isolated_task_root,
+        task051_delivery=delivery,
+        governance_binding=binding,
+    )
+
+    assert any(
+        "TASK-051 evidence does not match its governance binding" in error for error in errors
+    )
+    assert any(
+        "TASK-029: dependency TASK-051 lacks trusted completed delivery" in error
+        for error in errors
+    )
+    assert not completion_evidence_is_trusted(
+        delivery,
+        task_id="TASK-051",
+        evidence_binding=binding["successor_evidence_binding"],
+    )
+
+
+@pytest.mark.parametrize("removed_dependency", ["TASK-015", "TASK-031"])
+def test_task029_required_dependencies_are_enforced_via_validate_tasks(
+    monkeypatch: pytest.MonkeyPatch,
+    isolated_task_root: Path,
+    removed_dependency: str,
+) -> None:
+    dependencies = ["TASK-015", "TASK-031", "TASK-051"]
+    dependencies.remove(removed_dependency)
+
+    errors = run_risk_scope_validate_tasks_fixture(
+        monkeypatch,
+        isolated_task_root,
+        task029_dependencies=dependencies,
+    )
+
+    assert any(
+        "TASK-029: required scope dependencies must be TASK-015, TASK-031, TASK-051" in error
+        for error in errors
+    )
+
+
+def test_task030_history_record_is_required_via_validate_tasks(
+    monkeypatch: pytest.MonkeyPatch,
+    isolated_task_root: Path,
+) -> None:
+    errors = run_risk_scope_validate_tasks_fixture(
+        monkeypatch,
+        isolated_task_root,
+        include_task030=False,
+    )
+
+    assert any("TASK-030 historical record must remain present" in error for error in errors)
+
+
+def test_task030_acceptance_cannot_be_promoted_via_validate_tasks(
+    monkeypatch: pytest.MonkeyPatch,
+    isolated_task_root: Path,
+) -> None:
+    errors = run_risk_scope_validate_tasks_fixture(
+        monkeypatch,
+        isolated_task_root,
+        task030_delivery_overrides={"acceptance_status": "passed"},
+    )
+
+    assert any("TASK-030 historical acceptance must remain unverified" in error for error in errors)
+
+
+@pytest.mark.parametrize("replacement", ["TASK-030", "TASK-046"])
+def test_risk_scope_bypass_is_rejected_via_validate_tasks(
+    monkeypatch: pytest.MonkeyPatch,
+    isolated_task_root: Path,
+    replacement: str,
+) -> None:
+    errors = run_risk_scope_validate_tasks_fixture(
+        monkeypatch,
+        isolated_task_root,
+        task029_dependencies=["TASK-015", "TASK-031", replacement],
+    )
+
+    assert any(
+        f"TASK-029: {replacement} cannot replace or bypass TASK-051" in error for error in errors
+    )
+
+
+@pytest.mark.parametrize(
     "successor_state,activation_allowed",
     [
         ("active", False),
@@ -346,14 +647,15 @@ def test_task051_risk_scope_gate_requires_trusted_completed_delivery(
     historical = fixture_root / "TASK-030.md"
     trusted_evidence = (
         "  completion_evidence:\n"
-        "    mode: fixture\n"
-        "    change_pr: https://github.com/example/repo/pull/51\n"
-        "    reviewed_head_sha: " + "a" * 40 + "\n"
+        "    mode: governance_closeout_after_independent_review\n"
+        "    change_pr: https://github.com/qifuxiao/QuantiQmt/pull/87\n"
+        "    reviewed_head_sha: 8a49f8165e562a63e16206b903cc14a3c7a814a4\n"
         "    review_verdict: APPROVE\n"
         "    reviewer: independent-reviewer\n"
-        "    evidence_url: https://github.com/example/review/51\n"
-        "    merge_commit_sha: " + "b" * 40 + "\n"
-        "    human_authorization_evidence: fixture authorization\n"
+        "    evidence_url: https://github.com/qifuxiao/QuantiQmt/pull/87"
+        "#pullrequestreview-12345\n"
+        "    merge_commit_sha: 17fec4553a23f0f209f607c22bb0047590803605\n"
+        "    human_authorization_evidence: human-authorized TASK-051 closeout\n"
     )
     if successor_state == "active":
         successor_status = "active"
@@ -442,6 +744,8 @@ def test_task051_risk_scope_gate_requires_trusted_completed_delivery(
                         {"id": "TASK-030", "path": "TASK-030.md", "status": "completed"},
                     ]
                 }
+            if path == validator.RISK_SCOPE_GOVERNANCE_PATH:
+                return risk_scope_evidence_binding()
             return original_load_yaml(path)
 
         monkeypatch.setattr(validator, "load_yaml", fake_load_yaml)
