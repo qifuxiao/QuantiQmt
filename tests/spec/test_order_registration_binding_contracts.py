@@ -136,7 +136,10 @@ def test_manifest_and_task_handoff_record_spec_change() -> None:
     change = manifest["change"]
     assert change["id"] == "SPEC-0.14.0-ORDER-REGISTRATION-BINDING-COMPATIBILITY"
     assert change["previous_version"] == "0.13.0"
-    assert change["runtime_code_change"] == "none_in_TASK_050"
+    assert change["runtime_code_change"] == (
+        "package_bundle_and_fail_closed_expected_manifest_version_parity_only; "
+        "no_Order_runtime_SQL_migration_or_Broker_behavior"
+    )
     assert "TASK-050" in change["affected_tasks"]
     assert "TASK-048" in change["affected_tasks"]
     assert change["migration"]["destructive_backfill"] == "forbidden"
@@ -146,3 +149,12 @@ def test_manifest_and_task_handoff_record_spec_change() -> None:
     assert "status: active" in index.split("id: TASK-050", maxsplit=1)[1].splitlines()[0]
     task_048 = _text("tasks/backlog/TASK-048-order-registration-broker-capability-binding.md")
     assert "depends_on: [TASK-004, TASK-017, TASK-050]" in task_048
+    assert "TASK-048 期间 legacy `(null, null)` 永久保持 `UNBOUND`" in task_048
+    assert (
+        "不得通过对账证据、人工授权、当前 adapter、ambient capability 或任何旁路改成 `BOUND`"
+        in task_048
+    )
+    assert "任何未来历史绑定必须由独立 reviewed repair contract/task 承担" in task_048
+    assert "直到存在可审计来源或人类授权的绑定证据" not in task_048
+    assert "只有具备可审计来源的对账证据或明确人类授权才能完成历史绑定" not in task_048
+    assert "绑定修复是否只能由已冻结的可审计对账来源或人类授权触发" not in task_048

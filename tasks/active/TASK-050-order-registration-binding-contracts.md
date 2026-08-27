@@ -15,14 +15,18 @@ allowed_paths:
   - spec/workflows/submit-order.yaml
   - spec/workflows/cancel-order.yaml
   - spec/nfr/reliability.yaml
+  - src/quantiqmt/contracts/bundle.py
+  - src/quantiqmt/contracts/resources/schema-bundle.v1.json
   - tests/spec/test_order_registration_binding_contracts.py
   - tests/contract/messages/test_backtest_live_parity_contracts.py
+  - tests/contract/contracts/test_installed_schema_bundle.py
+  - tests/unit/contracts/test_schema_bundle.py
   - tasks/backlog/TASK-048-order-registration-broker-capability-binding.md
   - tasks/active/TASK-050-order-registration-binding-contracts.md
   - tasks/completed/TASK-050-order-registration-binding-contracts.md
   - tasks/active/README.md
   - tasks/index.yaml
-forbidden_paths: [src/**, migrations/**, tests/unit/**, tests/property/**, tests/integration/**]
+forbidden_paths: [migrations/**, tests/property/**, tests/integration/**]
 verification:
   commands:
     - poetry run python scripts/validate_specs.py
@@ -47,12 +51,14 @@ delivery:
 
 - 2026-08-27 人类明确授权创建、激活并实施 TASK-050。
 - 2026-08-27 人类追加授权精确修改 `tests/contract/messages/test_backtest_live_parity_contracts.py`，仅用于把全局 manifest `0.13.0`/previous-version 硬编码改为最低兼容版本断言；不授权修改 Backtest schema、fixture 或业务语义。
+- 2026-08-27 人类授权本轮由独立开发会话修复 PR #86 Review 阻断，并精确允许同步 `src/quantiqmt/contracts/bundle.py`、不可变 package `schema-bundle.v1.json`、对应 unit/installed-wheel bundle tests 及 TASK-048 禁止 rebinding 文案；不授权修改其他 `src` 文件。
 - TASK-017 已可信 completed 并冻结 submit/cancel 的五项 broker binding guard，但未冻结 legacy unbound 的存储与恢复表示。TASK-004 是既有实现基线，不作为本规范任务的 trusted delivery 依赖。
 - 本任务不授权 runtime、migration、Broker dispatch、TASK-048 激活、部署、发布或 active → completed closeout。
 
 ## Non-goals
 
 - 不实现 TASK-048 runtime 或 SQL migration。
+- 除把已评审 spec 机械同步到不可变 package bundle 并更新 fail-closed expected manifest version 外，不修改 Order runtime；不实现 SQL migration 或 Broker 行为。
 - 不新增公开 Event/Command、错误码或 Order 状态迁移。
 - 不提供历史 registration 绑定修复入口；任何未来修复必须由独立、可审计的 reconciliation/spec-change task 冻结。
 - 不回填或推断任何历史 broker/capability identity。
@@ -65,6 +71,7 @@ delivery:
 - [x] 冻结旧 Journal/Snapshot 原始 checksum 不重写、缺失字段按 UNBOUND 读取、新记录完整写入绑定及 projection/replay 一致性。
 - [x] 明确 TASK-048 不得绑定历史数据，未来 repair 需要独立审核契约和追加式审计事实。
 - [x] 更新 manifest 版本、兼容性、迁移、回滚、受影响任务与 TASK-048 依赖。
+- [x] 机械再生成不可变 package bundle，并同步 fail-closed expected manifest version；不放宽 parity/integrity 校验或增加 source-checkout runtime fallback。
 - [x] 提供机器测试覆盖 binding 状态矩阵、storage 列/约束、recovery、workflow guard、manifest 与 task handoff。
 
 ## Implementation evidence
@@ -74,15 +81,18 @@ delivery:
 - 新 registration 必须在事务前 BOUND；legacy 缺字段或 null pair 只在原始 Journal/Snapshot checksum 验证后解析为 UNBOUND，禁止注入 null 后重新 canonicalize，projection/rebuild 只能以 Journal 为权威。
 - submit/cancel 对 UNBOUND 在 dispatch 前 fail closed；Recovery 保留 UNBOUND、保持 SAFE 并要求 reconciliation evidence。TASK-048 不提供 rebinding，未来修复需要独立审核的追加式 repair contract。
 - manifest 升级到 `0.14.0`，公开消息与错误码不变；TASK-048 增加 TASK-050 trusted closeout 依赖并继续 blocked。
+- package bundle 仅通过既有 `write_schema_bundle` 从已评审 spec 机械再生成，fail-closed expected manifest version 同步为 `0.14.0`；Order runtime、SQL migration 与 Broker 行为保持未实现。
 - 经追加人类授权，Backtest 既有契约测试仅把全局 manifest 精确版本硬编码替换为 `>= 0.13.0` 最低兼容断言，未修改 Backtest schema、fixture 或业务语义。
 
 ## Verification evidence
 
 - `poetry run python scripts/validate_specs.py`：通过。
 - `poetry run pytest tests/spec -q`：`51 passed`。
-- `poetry run pytest tests/contract -q`：`666 passed`。
-- focused binding/Backtest compatibility：`54 passed`。
-- `poetry run ruff check` 与 `poetry run ruff format --check`：两个变更测试文件通过。
+- `poetry run pytest tests/contract -q`（`poetry build` 后）：`679 passed`。
+- `poetry run pytest tests/unit/contracts/test_schema_bundle.py -q`：`5 passed`。
+- CI quality 原命令 `poetry run pytest tests/unit tests/property tests/spec tests/contract --cov --cov-report=term-missing`：`938 passed, 1 skipped`；唯一 skip 是该 workflow 未先 build wheel 的既有 installed-wheel case，bundle/parity tests 全部通过。
+- `poetry build`：sdist 与 wheel 均成功；随后 `poetry run pytest tests/contract/contracts/test_installed_schema_bundle.py -q`：`4 passed`，验证 wheel 不依赖 source checkout。
+- `poetry check`、`poetry run ruff check .`、`poetry run ruff format --check .` 与 `poetry run mypy src scripts`：全部通过；两个变更 Python 测试文件的 focused Ruff check/format-check 亦通过。
 - `git diff --check`：通过。
 
 ## Handoff boundary

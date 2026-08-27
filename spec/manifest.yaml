@@ -214,7 +214,7 @@ change:
   public_message_schema_changes: none
   storage_schema_changes: "freezes additive nullable broker varchar(64) and broker_capability_version varchar(128) projection columns, complete-or-unbound and trimmed-bound checks, immutability, no historical backfill, and expand-only idempotent migration/rollback sequencing"
   error_catalog_change: none
-  runtime_code_change: none_in_TASK_050
+  runtime_code_change: "package_bundle_and_fail_closed_expected_manifest_version_parity_only; no_Order_runtime_SQL_migration_or_Broker_behavior"
   review_change: "requires independent Review of the exact TASK-050 Head before TASK-048 may be reactivated"
   contract_change: "freezes BOUND(non-null pair) and legacy UNBOUND(null pair) OrderRegistration states, rejects partial binding, requires every new registration to be BOUND before Repository write, and prohibits TASK-048 legacy rebinding"
   semantic_validation_change: "freezes legacy missing-field parsing after raw checksum verification, no injected-null recanonicalization, Journal-authoritative projection/rebuild binding, submit/cancel rejection before dispatch, and prohibition on ambient/current capability inference"
