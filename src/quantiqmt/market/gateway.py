@@ -16,6 +16,7 @@ from quantiqmt.market.observability import MarketObserver, NullMarketObserver
 from quantiqmt.market.policy import AcceptedPolicyStore
 from quantiqmt.market.quality import MarketQuality, QualityState, RecoveryEvidenceRegistry
 from quantiqmt.market.validation import (
+    QUALITY_PRIORITY,
     format_utc,
     parse_utc,
     validate_health_exchange,
@@ -109,6 +110,8 @@ class InMemoryMarketGateway:
         fencing_token: int,
         raw: Mapping[str, object],
     ) -> IngressResult:
+        if not self._running:
+            return IngressResult(False, "UNAVAILABLE")
         if not isinstance(subscription_id, str):
             return IngressResult(False, "INVALID_REQUEST")
         subscription = self._subscriptions.get(subscription_id)
@@ -270,22 +273,93 @@ class InMemoryMarketGateway:
         validate_market_dto(request, self._registry)
         now = self._clock.now()
         policy = self._policies.resolve(request)
-        quality_states = list(self._quality.states)
-        state = (
-            max(quality_states, key=lambda item: item.quality_version) if quality_states else None
+        context = self._health_context(request)
+        if context is None:
+            return self._health_result(
+                request,
+                policy,
+                now,
+                quality="UNAVAILABLE",
+                queue_depth=0,
+                source_lag_ms=cast(int, policy["source_lag_stale_ms"]),
+            )
+        subscription, states = context
+        source_version = max(state.source_version for state in states)
+        quality_version = max(state.quality_version for state in states)
+        if (
+            request["source_version"] != source_version
+            or request["quality_version"] != quality_version
+        ):
+            return self._health_result(
+                request,
+                policy,
+                now,
+                quality="UNAVAILABLE",
+                queue_depth=0,
+                source_lag_ms=cast(int, policy["source_lag_stale_ms"]),
+            )
+        quality = max(
+            (state.quality for state in states), key=lambda value: QUALITY_PRIORITY[value]
         )
-        quality = state.quality if state is not None else "UNAVAILABLE"
-        depth = sum(len(subscription.queue) for subscription in self._subscriptions.values())
-        source_version = cast(int, request["source_version"])
-        quality_version = cast(int, request["quality_version"])
-        last_received = (
-            self._last_received_at.get(state.instrument_id) if state is not None else None
+        source_lag_ms = max(
+            (
+                max(0, int((now - last_received).total_seconds() * 1000))
+                if (last_received := self._last_received_at.get(state.instrument_id)) is not None
+                else cast(int, policy["source_lag_stale_ms"])
+            )
+            for state in states
         )
-        source_lag_ms = (
-            max(0, int((now - last_received).total_seconds() * 1000))
-            if last_received is not None
-            else cast(int, policy["source_lag_stale_ms"])
+        return self._health_result(
+            request,
+            policy,
+            now,
+            quality=quality,
+            queue_depth=len(subscription.queue),
+            source_lag_ms=source_lag_ms,
         )
+
+    def _health_context(
+        self, request: Mapping[str, object]
+    ) -> tuple[_Subscription, tuple[QualityState, ...]] | None:
+        if not self._running or request.get("generation") != self._generation:
+            return None
+        fields = ("provider", "generation", "calendar_id", "calendar_version", "session_id")
+        candidates = [
+            subscription
+            for subscription in self._subscriptions.values()
+            if subscription.active
+            and subscription.request.get("fencing_token") == self._fencing_token
+            and subscription.request.get("policy_version") == request.get("policy_version")
+            and all(subscription.request.get(field) == request.get(field) for field in fields)
+        ]
+        if len(candidates) != 1:
+            return None
+        subscription = candidates[0]
+        states: list[QualityState] = []
+        for instrument_id in cast(list[str], subscription.request["instruments"]):
+            try:
+                state = self._quality.state(instrument_id)
+            except MarketContractError:
+                return None
+            if any(
+                getattr(state, field) != request.get(field)
+                for field in fields
+                if field != "generation"
+            ):
+                return None
+            states.append(state)
+        return (subscription, tuple(states)) if states else None
+
+    @staticmethod
+    def _health_result(
+        request: Mapping[str, object],
+        policy: Mapping[str, object],
+        observed_at: datetime,
+        *,
+        quality: str,
+        queue_depth: int,
+        source_lag_ms: int,
+    ) -> dict[str, object]:
         if quality == "UNAVAILABLE":
             status, reason = "DISCONNECTED", "UNAVAILABLE"
         elif quality == "GAP":
@@ -295,14 +369,13 @@ class InMemoryMarketGateway:
         elif quality == "RECOVERING":
             status, reason = "DEGRADED", "RECOVERING"
         elif source_lag_ms >= cast(int, policy["source_lag_stale_ms"]):
-            status, reason = "DEGRADED", "SOURCE_LAG"
-            quality = "DEGRADED"
-        elif depth >= cast(int, policy["warning_watermark"]):
+            status, reason, quality = "DEGRADED", "SOURCE_LAG", "DEGRADED"
+        elif queue_depth >= cast(int, policy["warning_watermark"]):
+            status, reason, quality = "DEGRADED", "BACKPRESSURE", "DEGRADED"
+        elif quality == "DEGRADED":
             status, reason = "DEGRADED", "BACKPRESSURE"
-            quality = "DEGRADED"
         else:
-            status, reason = "HEALTHY", "OK"
-            quality = "NORMAL"
+            status, reason, quality = "HEALTHY", "OK", "NORMAL"
         result = {
             "dto_type": "MARKET_HEALTH",
             "schema_version": 1,
@@ -312,14 +385,14 @@ class InMemoryMarketGateway:
             "calendar_id": request["calendar_id"],
             "calendar_version": request["calendar_version"],
             "session_id": request["session_id"],
-            "source_version": source_version,
-            "quality_version": quality_version,
+            "source_version": request["source_version"],
+            "quality_version": request["quality_version"],
             "policy_version": request["policy_version"],
             "status": status,
             "quality": quality,
             "reason_code": reason,
-            "observed_at": format_utc(now),
-            "queue_depth": depth,
+            "observed_at": format_utc(observed_at),
+            "queue_depth": queue_depth,
             "queue_capacity": policy["queue_capacity"],
             "warning_watermark": policy["warning_watermark"],
             "critical_watermark": policy["critical_watermark"],
@@ -327,7 +400,7 @@ class InMemoryMarketGateway:
             "source_lag_ms": source_lag_ms,
             "source_lag_stale_ms": policy["source_lag_stale_ms"],
         }
-        validate_health_exchange(request, result, policy, now)
+        validate_health_exchange(request, result, policy, observed_at)
         return result
 
     def _lifecycle(self, request: Mapping[str, object], operation: str) -> dict[str, object]:

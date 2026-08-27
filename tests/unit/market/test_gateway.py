@@ -74,12 +74,12 @@ def request(operation: str = "SUBSCRIBE", *, key: str = "subscribe-key-0001") ->
     }
 
 
-def tick(sequence: int) -> dict[str, object]:
+def tick(sequence: int, *, instrument_id: str = "600000.XSHG") -> dict[str, object]:
     return {
         "event_id": f"550e8400-e29b-41d4-a716-{sequence:012d}",
-        "partition_key": "600000.XSHG",
+        "partition_key": instrument_id,
         "provider": "SIM",
-        "instrument_id": "600000.XSHG",
+        "instrument_id": instrument_id,
         "exchange": "XSHG",
         "calendar_id": "CN-A",
         "calendar_version": "cal-v1",
@@ -188,8 +188,8 @@ def snapshot_request() -> dict[str, object]:
     }
 
 
-def health_request() -> dict[str, object]:
-    return {
+def health_request(**overrides: object) -> dict[str, object]:
+    result = {
         "dto_type": "HEALTH_REQUEST",
         "schema_version": 1,
         "request_id": "550e8400-e29b-41d4-a716-446655440043",
@@ -203,6 +203,27 @@ def health_request() -> dict[str, object]:
         "policy_version": "market-policy-v1",
         "deadline_at": "2026-08-11T01:31:00Z",
     }
+    result.update(overrides)
+    return result
+
+
+def lifecycle_request(
+    operation: str, *, generation: int = 1, fencing_token: int = 1
+) -> dict[str, object]:
+    return {
+        "dto_type": "LIFECYCLE_REQUEST",
+        "schema_version": 1,
+        "operation": operation,
+        "request_id": "550e8400-e29b-41d4-a716-446655440044",
+        "generation": generation,
+        "fencing_token": fencing_token,
+        "idempotency_key": f"lifecycle-{operation.lower()}-key-0001",
+        "deadline_at": "2026-08-11T01:31:00Z",
+    }
+
+
+def start(subject: InMemoryMarketGateway) -> None:
+    assert subject.start(lifecycle_request("START"))["reason_code"] == "STARTED"
 
 
 def test_subscribe_and_unsubscribe_are_idempotent() -> None:
@@ -224,8 +245,109 @@ def test_subscribe_and_unsubscribe_are_idempotent() -> None:
     assert stopped_replay["outcome"] == "IDEMPOTENT_REPLAY"
 
 
+def test_callback_requires_running_lifecycle_before_ingress_or_after_stop() -> None:
+    subject = gateway()
+    subscription_id = request()["subscription_id"]
+    subject.subscribe(request())
+    baseline = subject.quality("600000.XSHG")
+
+    rejected = subject.on_tick(subscription_id, 1, 1, tick(1))
+    assert (rejected.accepted, rejected.reason_code) == (False, "UNAVAILABLE")
+    assert subject.queue_depth(subscription_id) == 0
+    assert subject.quality("600000.XSHG") == baseline
+
+    start(subject)
+    assert subject.on_tick(subscription_id, 1, 1, tick(1)).accepted is True
+    assert subject.queue_depth(subscription_id) == 1
+    subject.stop(lifecycle_request("STOP"))
+    stopped_state = subject.quality("600000.XSHG")
+    rejected = subject.on_tick(subscription_id, 1, 1, tick(2))
+    assert (rejected.accepted, rejected.reason_code) == (False, "UNAVAILABLE")
+    assert subject.queue_depth(subscription_id) == 1
+    assert subject.quality("600000.XSHG") == stopped_state
+
+
+def test_health_ignores_unrelated_higher_version_quality_state() -> None:
+    subject = gateway()
+    start(subject)
+    subscription_id = request()["subscription_id"]
+    subject.subscribe(request())
+    subject.on_tick(subscription_id, 1, 1, tick(1))
+    subject.drain(subscription_id)
+    subject._quality.baseline(
+        provider="OTHER",
+        instrument_id="OTHER.XX",
+        calendar_id="OTHER-CAL",
+        calendar_version="other-v1",
+        session_id="other",
+        source_version=99,
+        quality_version=99,
+    )
+    subject._quality.overflow("OTHER.XX", 100)
+
+    result = subject.health(health_request(source_version=1, quality_version=1))
+
+    assert (result["status"], result["quality"], result["reason_code"]) == (
+        "HEALTHY",
+        "NORMAL",
+        "OK",
+    )
+    assert (result["source_version"], result["quality_version"]) == (1, 1)
+
+
+def test_health_conservatively_aggregates_matching_subscription_instruments() -> None:
+    subject = gateway()
+    start(subject)
+    multi = request()
+    multi["instruments"] = ["600000.XSHG", "000001.XSHE"]
+    subject.subscribe(multi)
+    subscription_id = multi["subscription_id"]
+    subject.on_tick(subscription_id, 1, 1, tick(1, instrument_id="600000.XSHG"))
+    subject.drain(subscription_id)
+    subject.on_tick(subscription_id, 1, 1, tick(1, instrument_id="000001.XSHE"))
+    subject.drain(subscription_id)
+    subject.evaluate_staleness("600000.XSHG", observed_at=NOW.replace(second=33))
+    subject.evaluate_staleness("600000.XSHG", observed_at=NOW.replace(second=33))
+    subject.on_tick(subscription_id, 1, 1, tick(3, instrument_id="000001.XSHE"))
+    subject.drain(subscription_id)
+
+    result = subject.health(health_request(source_version=3, quality_version=3))
+
+    assert (result["status"], result["quality"], result["reason_code"]) == (
+        "DEGRADED",
+        "GAP",
+        "GAP",
+    )
+    assert (result["source_version"], result["quality_version"]) == (3, 3)
+
+
+def test_health_returns_unavailable_for_generation_or_subscription_context_mismatch() -> None:
+    subject = gateway()
+    start(subject)
+    subject.subscribe(request())
+    subject.start(lifecycle_request("START", generation=2, fencing_token=2))
+
+    generation_mismatch = subject.health(health_request())
+    assert (generation_mismatch["status"], generation_mismatch["quality"]) == (
+        "DISCONNECTED",
+        "UNAVAILABLE",
+    )
+    assert (
+        generation_mismatch["source_version"],
+        generation_mismatch["quality_version"],
+    ) == (0, 1)
+
+    disconnected = gateway()
+    start(disconnected)
+    disconnected.subscribe(request())
+    disconnected.unsubscribe(request("UNSUBSCRIBE", key="unsubscribe-key01"))
+    no_context = disconnected.health(health_request())
+    assert (no_context["status"], no_context["quality"]) == ("DISCONNECTED", "UNAVAILABLE")
+
+
 def test_callback_is_nonblocking_bounded_and_overflow_is_gap_visible() -> None:
     subject = gateway()
+    start(subject)
     subject.subscribe(request())
 
     assert [
@@ -248,6 +370,7 @@ def test_callback_is_nonblocking_bounded_and_overflow_is_gap_visible() -> None:
 def test_gateway_overflow_gap_awaits_the_rejected_sequence_as_bounded_backfill() -> None:
     subject = gateway()
     subscription_id = request()["subscription_id"]
+    start(subject)
     subject.subscribe(request())
 
     for sequence in range(1, 4):
@@ -273,14 +396,15 @@ def test_gateway_overflow_gap_awaits_the_rejected_sequence_as_bounded_backfill()
 
 def test_gateway_overflow_backfill_requires_registered_recovery_evidence() -> None:
     recovery = RecoveryEvidenceRegistry()
-    start_snapshot, start_checkpoint, start = overflow_recovery_evidence(3)
+    start_snapshot, start_checkpoint, start_evidence = overflow_recovery_evidence(3)
     complete_snapshot, complete_checkpoint, complete = overflow_recovery_evidence(4)
-    recovery.register_snapshot(start["snapshot_identity"], start_snapshot)
-    recovery.register_checkpoint(start["checkpoint_identity"], start_checkpoint)
+    recovery.register_snapshot(start_evidence["snapshot_identity"], start_snapshot)
+    recovery.register_checkpoint(start_evidence["checkpoint_identity"], start_checkpoint)
     recovery.register_snapshot(complete["snapshot_identity"], complete_snapshot)
     recovery.register_checkpoint(complete["checkpoint_identity"], complete_checkpoint)
     subject = gateway(recovery)
     subscription_id = request()["subscription_id"]
+    start(subject)
     subject.subscribe(request())
 
     for sequence in range(1, 4):
@@ -296,7 +420,9 @@ def test_gateway_overflow_backfill_requires_registered_recovery_evidence() -> No
     with pytest.raises(MarketContractError, match="only RECOVERING"):
         subject._quality.complete_recovery("600000.XSHG", complete)
     assert (
-        subject._quality.begin_recovery("600000.XSHG", start, reason="BACKFILL_STARTED").quality
+        subject._quality.begin_recovery(
+            "600000.XSHG", start_evidence, reason="BACKFILL_STARTED"
+        ).quality
         == "RECOVERING"
     )
     assert subject._quality.complete_recovery("600000.XSHG", complete).quality == "NORMAL"
@@ -305,6 +431,7 @@ def test_gateway_overflow_backfill_requires_registered_recovery_evidence() -> No
 def test_gateway_overflow_backfill_rejects_outside_range_and_conflicts() -> None:
     subject = gateway()
     subscription_id = request()["subscription_id"]
+    start(subject)
     subject.subscribe(request())
 
     for sequence in range(1, 4):
@@ -319,6 +446,7 @@ def test_gateway_overflow_backfill_rejects_outside_range_and_conflicts() -> None
         subject.drain(subscription_id)
 
     duplicate_subject = gateway()
+    start(duplicate_subject)
     duplicate_subject.subscribe(request())
     for sequence in range(1, 4):
         duplicate_subject.on_tick(subscription_id, 1, 1, tick(sequence))
@@ -340,6 +468,7 @@ def test_gateway_overflow_backfill_rejects_outside_range_and_conflicts() -> None
 def test_drain_delivers_bounded_backfill_to_the_quality_pipeline() -> None:
     subject = gateway()
     subscription_id = request()["subscription_id"]
+    start(subject)
     subject.subscribe(request())
 
     assert subject.on_tick(subscription_id, 1, 1, tick(5)).accepted is True
@@ -357,6 +486,7 @@ def test_drain_delivers_bounded_backfill_to_the_quality_pipeline() -> None:
 
 def test_snapshot_and_health_are_validated_before_every_return() -> None:
     subject = gateway()
+    start(subject)
     subject.subscribe(request())
     snapshot = {
         "dto_type": "MARKET_SNAPSHOT",
