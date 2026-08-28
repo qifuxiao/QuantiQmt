@@ -1,10 +1,11 @@
 ---
 id: TASK-052
 title: Revalidate TASK-004 persistence and outbox delivery evidence
-status: active
+status: blocked
 depends_on: [TASK-031, TASK-043, TASK-049, TASK-050]
 spec_refs: [INV-CONSISTENCY, REPO-ORDER, STORAGE-SOT, STORAGE-ORDER-PERSISTENCE, STORAGE-OUTBOX, PORTS-ORDER-PERSISTENCE, WF-ORDER-COMMIT, WF-OUTBOX-PUBLICATION, WF-RECOVERY, CONTRACT-MESSAGE-ENVELOPE-V1, CONTRACT-ORDER-REGISTERED-V1, CONTRACT-ORDER-STATUS-V1, CONTRACT-ERROR-CATALOG]
 allowed_paths:
+  - tasks/backlog/TASK-052-task-004-delivery-revalidation.md
   - tasks/active/TASK-052-task-004-delivery-revalidation.md
   - tasks/completed/TASK-052-task-004-delivery-revalidation.md
   - tasks/active/README.md
@@ -166,15 +167,28 @@ TASK-048 `blocked`、release prohibited。
   历史证据不可验证。
 - 该缺口属于 TASK-048 已定义但尚未授权实施的范围，而 TASK-048 又直接依赖
   TASK-004 的可信 delivery。TASK-052 不得利用 waiver、降低 acceptance、修改
-  依赖或把旧测试通过冒充解决。人类必须另行授权精确的 remediation 与依赖顺序；
-  在此之前 TASK-052 可以保持 active 以记录阻断，但不得进入 passed/approved
-  closeout，也不得更新 TASK-004 delivery metadata。
+  依赖或把旧测试通过冒充解决。人类已另行授权 TASK-053 审计并解除这一 sequencing
+  deadlock；在 TASK-053 独立 Review/合并、精确 remediation 可信完成之前，
+  TASK-052 暂停在 backlog 且保持 `blocked`，不得进入 passed/approved closeout，
+  也不得更新 TASK-004 delivery metadata。
+
+## TASK-053 sequencing pause
+
+- PR #89 只可信证明 TASK-052 的激活治理变更已被独立 Review、4/4 CI 验证并合并；
+  它不证明 TASK-004 revalidation 或 Spec 0.14 runtime/migration/test gap 已完成。
+- TASK-053 是当前唯一 active 治理任务，只允许审计 TASK-048 的依赖语义并形成受控
+  correction 或明确 successor 方案；它不授权 TASK-048 业务 remediation。
+- TASK-053 的治理实现经独立 Review 并合并后，仍须由人类另行激活 TASK-048 或经
+  审计确定的精确 remediation task。可信 remediation 合并后，才可由人类重新激活
+  TASK-052 执行 PostgreSQL 16 revalidation。
+- 本暂停不完成 TASK-052，不改变其五轴 delivery，不更新 TASK-004，不创建 waiver，
+  不授权部署或发布。
 
 ## Revalidation plan
 
-1. 人类先处理上面的 runtime/migration/test 阻断，明确由哪个独立任务实施，以及
-   如何解除 TASK-048 ↔ TASK-004 evidence 的顺序问题。TASK-052 本身不修改这些
-   文件。
+1. TASK-053 先以独立治理 PR 审计并解除 TASK-048 ↔ TASK-004 evidence 的顺序问题；
+   该 PR 必须独立 Review 并合并。其后由人类另行激活 TASK-048 或经审计确定的精确
+   remediation task；TASK-052 本身不修改这些文件。
 2. remediation 合并后，从最新 `origin/main` 开始新的 revalidation 回合；在
    `ai/governance/task-004-delivery-revalidation-task-052.yaml` 记录 exact base
    main SHA、执行最终校验时的 exact `origin/main` SHA、exact revalidation PR
