@@ -2,14 +2,17 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import subprocess
 import sys
 import urllib.error
+import urllib.parse
 import urllib.request
 from collections.abc import Iterable
-from datetime import date
+from dataclasses import dataclass
+from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
 
@@ -17,6 +20,7 @@ import yaml
 from jsonschema.validators import Draft202012Validator  # type: ignore[import-untyped]
 
 ROOT = Path(__file__).resolve().parents[1]
+GIT_ROOT = ROOT
 SPEC_ROOT = ROOT / "spec"
 TASK_ROOT = ROOT / "tasks"
 TASK_STATES = {"blocked", "ready", "active", "completed"}
@@ -58,8 +62,8 @@ RISK_SCOPE_REQUIRED_DEPENDENCIES = frozenset({"TASK-015", "TASK-031", "TASK-051"
 RISK_SCOPE_GOVERNANCE_PATH = (
     ROOT / "ai" / "governance" / "risk-validator-integration-scope-task-051.yaml"
 )
-RISK_SCOPE_BASE_SHA = "5650c3738dceff61862b41e672a96a5cce6fe8e5"
-RISK_SCOPE_TASK050_HEAD_SHA = "b27f941a3f6fcca46349aa36a208d97fbc5d1281"
+RISK_SCOPE_BASE_SHA = "bfa77268941f3814d1856c59094fd8a90e3cda81"
+RISK_SCOPE_TASK050_HEAD_SHA = "132b83f2be3543a650fd86b9bbcd7aa28b4c2cf3"
 RISK_SCOPE_ACCEPTED_SPEC_VERSION = "0.14.0"
 RISK_SCOPE_REPOSITORY = "qifuxiao/QuantiQmt"
 RISK_SCOPE_PR_NUMBER = 87
@@ -74,24 +78,32 @@ RISK_SCOPE_PENDING_REVIEW_URL = "pending_github_pull_request_review_url"
 RISK_SCOPE_PENDING_MERGE = "pending_merge_commit"
 RISK_SCOPE_PENDING_HUMAN_AUTHORIZATION = "pending_human_closeout_authorization"
 RISK_SCOPE_EXTERNAL_TIMEOUT_SECONDS = 2.0
+RISK_SCOPE_MAX_RESPONSE_BYTES = 512 * 1024
+RISK_SCOPE_MAX_REVIEW_PAGES = 10
+RISK_SCOPE_MAX_REVIEW_ITEMS = 1000
 RISK_SCOPE_GITHUB_API_PR_URL = "https://api.github.com/repos/qifuxiao/QuantiQmt/pulls/87"
+RISK_SCOPE_GITHUB_API_REVIEWS_URL = f"{RISK_SCOPE_GITHUB_API_PR_URL}/reviews?per_page=100"
+RISK_SCOPE_GITHUB_API_ISSUE_URL = "https://api.github.com/repos/qifuxiao/QuantiQmt/issues/87"
+RISK_SCOPE_HEAD_REF = "codex/task-051-risk-validator-scope-successor"
+RISK_SCOPE_HUMAN_AUTHORIZERS = frozenset({"qifuxiao"})
+RISK_HISTORICAL_TASK_BLOB_OID = "4cc37f6d1805d98bc4f223bfe69d4de5c51b7f8e"
 RISK_SCOPE_BOUNDARY_REQUIREMENTS = {
     "verifies": {
         "completion evidence exactly matches this TASK-051 binding",
         "repository and change PR are qifuxiao/QuantiQmt PR 87",
-        "Review evidence URL is a PR 87 pullrequestreview URL",
+        "Review evidence URL ID exactly matches a PR 87 GitHub Review API object",
         "reviewer is a valid bound GitHub login distinct from implementation agent and PR author",
         "reviewed Head and merge commit are non-placeholder 40-character hexadecimal SHAs",
         "external facts have been recorded as verified before dependency unlock",
+        "human closeout authorization is an exact PR 87 GitHub issue comment object",
     },
     "does_not_verify": {
-        "GitHub Review existence, verdict, reviewer identity or reviewed Head via network",
-        "GitHub merge existence or merge commit ancestry via network",
-        "human closeout authorization authenticity outside the repository",
+        "GitHub account ownership beyond API object identity and User type",
+        "authorization intent beyond the exact required closeout body",
     },
     "external_confirmation_required": {
-        "independent reviewer verifies APPROVE on the exact current PR Head in GitHub",
-        "human verifies merge and authorizes active-to-completed closeout",
+        "fixed GitHub verifier confirms latest effective Review state on the exact Head",
+        "fixed GitHub verifier confirms merge ancestry and exact human authorization object",
     },
 }
 RISK_HISTORICAL_DELIVERY = {
@@ -115,10 +127,58 @@ RISK_HISTORICAL_COMPLETION_EVIDENCE = {
 }
 
 
+@dataclass(frozen=True)
+class GitHubJsonResponse:
+    """One bounded GitHub JSON response and its validated pagination link."""
+
+    payload: object
+    final_url: str
+    next_url: str | None
+
+
+class _RejectRedirects(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
 class GitHubJsonTransport:
     """Bounded, read-only transport for the GitHub facts used by TASK-051."""
 
-    def get_json(self, url: str, timeout_seconds: float) -> object:
+    def __init__(self, *, opener: Any | None = None, max_response_bytes: int | None = None) -> None:
+        self._opener = opener or urllib.request.build_opener(_RejectRedirects())
+        requested_bound = (
+            RISK_SCOPE_MAX_RESPONSE_BYTES if max_response_bytes is None else int(max_response_bytes)
+        )
+        self._max_response_bytes = min(max(requested_bound, 1), RISK_SCOPE_MAX_RESPONSE_BYTES)
+
+    @staticmethod
+    def _next_link(headers: Any) -> str | None:
+        raw_link = headers.get("Link") if hasattr(headers, "get") else None
+        if raw_link is None:
+            return None
+        if not isinstance(raw_link, str):
+            raise ValueError("GitHub Link header must be text")
+        next_urls: list[str] = []
+        for part in raw_link.split(","):
+            match = re.fullmatch(r'\s*<([^>]+)>\s*;\s*rel="([^"]+)"\s*', part)
+            if match is None:
+                raise ValueError("malformed GitHub Link header")
+            if match.group(2) == "next":
+                next_urls.append(match.group(1))
+        if len(next_urls) > 1:
+            raise ValueError("duplicate GitHub next link")
+        return next_urls[0] if next_urls else None
+
+    def get_json(self, url: str, timeout_seconds: float) -> GitHubJsonResponse:
+        parsed = urllib.parse.urlsplit(url)
+        if (
+            parsed.scheme != "https"
+            or parsed.hostname != "api.github.com"
+            or parsed.username is not None
+            or parsed.password is not None
+            or parsed.fragment
+        ):
+            raise ValueError("GitHub API URL is not allowed")
         request = urllib.request.Request(
             url,
             headers={
@@ -126,12 +186,24 @@ class GitHubJsonTransport:
                 "User-Agent": "QuantiQmt-task-051-validator",
             },
         )
-        with urllib.request.urlopen(request, timeout=timeout_seconds) as response:
+        with self._opener.open(request, timeout=timeout_seconds) as response:
             if response.status != 200:
                 raise urllib.error.HTTPError(
                     url, response.status, "unexpected GitHub response", response.headers, None
                 )
-            return json.loads(response.read().decode("utf-8"))
+            if response.geturl() != url:
+                raise ValueError("GitHub response final URL does not match request")
+            body = response.read(self._max_response_bytes + 1)
+            if len(body) > self._max_response_bytes:
+                raise ValueError("GitHub response exceeds maximum bytes")
+            payload = json.loads(body.decode("utf-8"))
+            if payload is None:
+                raise ValueError("GitHub JSON response must not be null")
+            return GitHubJsonResponse(
+                payload=payload,
+                final_url=url,
+                next_url=self._next_link(response.headers),
+            )
 
 
 class GitHubRiskScopeVerifier:
@@ -151,11 +223,11 @@ class GitHubRiskScopeVerifier:
         self._transport = transport or GitHubJsonTransport()
         self._timeout_seconds = min(max(float(timeout_seconds), 0.1), 2.0)
 
-    def _verify_merge_ancestry(self, reviewed_head: str, merge_commit: str) -> bool:
+    def _git_succeeds(self, *arguments: str) -> bool:
         try:
             result = subprocess.run(
-                ["git", "merge-base", "--is-ancestor", reviewed_head, merge_commit],
-                cwd=ROOT,
+                ["git", *arguments],
+                cwd=GIT_ROOT,
                 capture_output=True,
                 timeout=self._timeout_seconds,
                 check=False,
@@ -163,6 +235,184 @@ class GitHubRiskScopeVerifier:
         except (OSError, subprocess.SubprocessError):
             return False
         return result.returncode == 0
+
+    def _verify_git_relationships(self, reviewed_head: str, merge_commit: str) -> bool:
+        return all(
+            (
+                self._git_succeeds("cat-file", "-e", f"{reviewed_head}^{{commit}}"),
+                self._git_succeeds("cat-file", "-e", f"{merge_commit}^{{commit}}"),
+                self._git_succeeds("rev-parse", "--verify", "origin/main^{commit}"),
+                self._git_succeeds("merge-base", "--is-ancestor", reviewed_head, merge_commit),
+                self._git_succeeds("merge-base", "--is-ancestor", merge_commit, "origin/main"),
+            )
+        )
+
+    @staticmethod
+    def _response_payload(response: object, expected_url: str) -> object:
+        if not isinstance(response, GitHubJsonResponse) or response.final_url != expected_url:
+            raise ValueError("unexpected GitHub transport response")
+        return response.payload
+
+    @staticmethod
+    def _review_page_number(url: str) -> int:
+        parsed = urllib.parse.urlsplit(url)
+        if (
+            parsed.scheme != "https"
+            or parsed.netloc != "api.github.com"
+            or parsed.path != "/repos/qifuxiao/QuantiQmt/pulls/87/reviews"
+            or parsed.fragment
+        ):
+            raise ValueError("review next link escaped the fixed endpoint")
+        query = urllib.parse.parse_qs(parsed.query, keep_blank_values=True, strict_parsing=True)
+        if set(query) - {"per_page", "page"} or query.get("per_page") != ["100"]:
+            raise ValueError("review next link has invalid pagination parameters")
+        page_values = query.get("page", ["1"])
+        if len(page_values) != 1 or re.fullmatch(r"[1-9][0-9]*", page_values[0]) is None:
+            raise ValueError("review next link has invalid page")
+        return int(page_values[0])
+
+    def _get_all_reviews(self) -> list[dict[str, Any]]:
+        url: str | None = RISK_SCOPE_GITHUB_API_REVIEWS_URL
+        expected_page = 1
+        seen: set[str] = set()
+        reviews: list[dict[str, Any]] = []
+        for _ in range(RISK_SCOPE_MAX_REVIEW_PAGES):
+            if url is None or url in seen or self._review_page_number(url) != expected_page:
+                raise ValueError("invalid or cyclic review pagination")
+            seen.add(url)
+            response = self._transport.get_json(url, self._timeout_seconds)
+            payload = self._response_payload(response, url)
+            if not isinstance(payload, list) or len(payload) > 100:
+                raise ValueError("invalid review page")
+            if not all(isinstance(item, dict) for item in payload):
+                raise ValueError("review page contains non-object item")
+            reviews.extend(payload)
+            if len(reviews) > RISK_SCOPE_MAX_REVIEW_ITEMS:
+                raise ValueError("review item limit exceeded")
+            if response.next_url is None:
+                return reviews
+            url = response.next_url
+            expected_page += 1
+        raise ValueError("review page limit exceeded")
+
+    @staticmethod
+    def _parse_submitted_at(value: Any) -> datetime:
+        if (
+            not isinstance(value, str)
+            or re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z", value) is None
+        ):
+            raise ValueError("review submitted_at is missing or malformed")
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        if parsed.tzinfo != UTC:
+            raise ValueError("review submitted_at must be UTC")
+        return parsed
+
+    def _verify_reviews(
+        self,
+        reviews: list[dict[str, Any]],
+        *,
+        reviewer: str,
+        reviewed_head: str,
+        evidence_url: str,
+        evidence_id: int,
+        identity: dict[str, Any],
+    ) -> bool:
+        allowed_states = {"APPROVED", "CHANGES_REQUESTED", "COMMENTED", "DISMISSED", "PENDING"}
+        decisive_states = {"APPROVED", "CHANGES_REQUESTED", "DISMISSED"}
+        seen_ids: set[int] = set()
+        decisive_by_reviewer: dict[str, tuple[datetime, int, dict[str, Any]]] = {}
+        review_by_id: dict[int, dict[str, Any]] = {}
+        for item in reviews:
+            review_id = item.get("id")
+            state = item.get("state")
+            user = item.get("user")
+            if (
+                type(review_id) is not int
+                or review_id <= 0
+                or review_id in seen_ids
+                or state not in allowed_states
+                or not isinstance(user, dict)
+                or not isinstance(user.get("login"), str)
+                or user.get("type") not in {"User", "Bot"}
+                or item.get("pull_request_url") != RISK_SCOPE_GITHUB_API_PR_URL
+                or item.get("html_url") != f"{RISK_SCOPE_PR_URL}#pullrequestreview-{review_id}"
+                or SHA_RE.fullmatch(str(item.get("commit_id"))) is None
+            ):
+                return False
+            submitted_at = self._parse_submitted_at(item.get("submitted_at"))
+            seen_ids.add(review_id)
+            review_by_id[review_id] = item
+            if state == "PENDING":
+                return False
+            if state in decisive_states:
+                key = (submitted_at, review_id, item)
+                reviewer_key = user["login"].casefold()
+                previous = decisive_by_reviewer.get(reviewer_key)
+                if previous is None or key[:2] > previous[:2]:
+                    decisive_by_reviewer[reviewer_key] = key
+        if any(
+            item[2].get("state") == "CHANGES_REQUESTED" for item in decisive_by_reviewer.values()
+        ):
+            return False
+        effective_approvals = [
+            item[2]
+            for login, item in decisive_by_reviewer.items()
+            if item[2].get("state") == "APPROVED"
+            and item[2].get("commit_id") == reviewed_head
+            and item[2].get("user", {}).get("type") == "User"
+            and github_reviewer_is_independent(login, identity)
+        ]
+        matched = review_by_id.get(evidence_id)
+        return (
+            bool(effective_approvals)
+            and matched in effective_approvals
+            and matched is not None
+            and matched.get("html_url") == evidence_url
+            and matched.get("user", {}).get("login") == reviewer
+        )
+
+    def _verify_human_authorization(
+        self,
+        authorization: dict[str, Any],
+        *,
+        reviewed_head: str,
+        merge_commit: str,
+    ) -> bool:
+        object_id = authorization.get("object_id")
+        evidence_url = authorization.get("evidence_url")
+        author = authorization.get("author")
+        required_body = authorization.get("required_body")
+        if type(object_id) is not int or object_id <= 0:
+            return False
+        expected_url = f"{RISK_SCOPE_PR_URL}#issuecomment-{object_id}"
+        expected_body = (
+            "AUTHORIZE TASK-051 CLOSEOUT\n"
+            f"reviewed_head_sha: {reviewed_head}\n"
+            f"merge_commit_sha: {merge_commit}"
+        )
+        if (
+            authorization.get("object_type") != "issue_comment"
+            or evidence_url != expected_url
+            or not isinstance(author, str)
+            or author.casefold() not in {value.casefold() for value in RISK_SCOPE_HUMAN_AUTHORIZERS}
+            or required_body != expected_body
+        ):
+            return False
+        api_url = f"https://api.github.com/repos/qifuxiao/QuantiQmt/issues/comments/{object_id}"
+        response = self._transport.get_json(api_url, self._timeout_seconds)
+        comment = self._response_payload(response, api_url)
+        user = comment.get("user") if isinstance(comment, dict) else None
+        return bool(
+            isinstance(comment, dict)
+            and type(comment.get("id")) is int
+            and comment.get("id") == object_id
+            and comment.get("html_url") == evidence_url
+            and comment.get("issue_url") == RISK_SCOPE_GITHUB_API_ISSUE_URL
+            and comment.get("body") == required_body
+            and isinstance(user, dict)
+            and user.get("login") == author
+            and user.get("type") == "User"
+        )
 
     def verify(self, binding: dict[str, Any], evidence: dict[str, Any]) -> bool:
         try:
@@ -176,14 +426,24 @@ class GitHubRiskScopeVerifier:
             human_auth = binding["human_authorization_evidence"]
             if not all(
                 isinstance(value, str)
-                for value in (reviewer, reviewed_head, merge_commit, evidence_url, human_auth)
+                for value in (reviewer, reviewed_head, merge_commit, evidence_url)
             ):
                 return False
-            pull = self._transport.get_json(RISK_SCOPE_GITHUB_API_PR_URL, self._timeout_seconds)
-            reviews = self._transport.get_json(
-                f"{RISK_SCOPE_GITHUB_API_PR_URL}/reviews", self._timeout_seconds
+            if not isinstance(human_auth, dict):
+                return False
+            review_match = re.fullmatch(
+                rf"{re.escape(RISK_SCOPE_PR_URL)}#pullrequestreview-([1-9][0-9]*)",
+                evidence_url,
             )
-            if not isinstance(pull, dict) or not isinstance(reviews, list):
+            if review_match is None:
+                return False
+            review_id = int(review_match.group(1))
+            pull_response = self._transport.get_json(
+                RISK_SCOPE_GITHUB_API_PR_URL, self._timeout_seconds
+            )
+            pull = self._response_payload(pull_response, RISK_SCOPE_GITHUB_API_PR_URL)
+            reviews = self._get_all_reviews()
+            if not isinstance(pull, dict):
                 return False
             base = pull.get("base")
             head = pull.get("head")
@@ -200,6 +460,9 @@ class GitHubRiskScopeVerifier:
                 and base["repo"].get("full_name") == RISK_SCOPE_REPOSITORY
                 and isinstance(head, dict)
                 and head.get("sha") == reviewed_head
+                and head.get("ref") == RISK_SCOPE_HEAD_REF
+                and isinstance(head.get("repo"), dict)
+                and head["repo"].get("full_name") == RISK_SCOPE_REPOSITORY
                 and pull.get("merge_commit_sha") == merge_commit
                 and isinstance(author, dict)
                 and author.get("login") == RISK_SCOPE_PR_AUTHOR
@@ -208,34 +471,18 @@ class GitHubRiskScopeVerifier:
                 and merged_by.get("type") == "User"
             ):
                 return False
-            expected_human_auth = (
-                f"github-merge:{RISK_SCOPE_REPOSITORY}#{RISK_SCOPE_PR_NUMBER}:"
-                f"{merge_commit}:{merged_by['login']}"
-            )
-            if human_auth != expected_human_auth:
-                return False
-            matched_review = next(
-                (
-                    item
-                    for item in reviews
-                    if isinstance(item, dict) and item.get("html_url") == evidence_url
-                ),
-                None,
-            )
-            if not isinstance(matched_review, dict):
-                return False
-            review_user = matched_review.get("user")
-            if not (
-                matched_review.get("pull_request_url") == RISK_SCOPE_GITHUB_API_PR_URL
-                and matched_review.get("state") == "APPROVED"
-                and matched_review.get("commit_id") == reviewed_head
-                and isinstance(review_user, dict)
-                and review_user.get("login") == reviewer
-                and review_user.get("type") == "User"
-                and github_reviewer_is_independent(reviewer, identity)
+            if not self._verify_reviews(
+                reviews,
+                reviewer=reviewer,
+                reviewed_head=reviewed_head,
+                evidence_url=evidence_url,
+                evidence_id=review_id,
+                identity=identity,
             ):
                 return False
-            return self._verify_merge_ancestry(reviewed_head, merge_commit)
+            return self._verify_human_authorization(
+                human_auth, reviewed_head=reviewed_head, merge_commit=merge_commit
+            ) and self._verify_git_relationships(reviewed_head, merge_commit)
         except (
             KeyError,
             TypeError,
@@ -257,6 +504,12 @@ def load_json(path: Path) -> Any:
     """Load one JSON document."""
     with path.open(encoding="utf-8") as stream:
         return json.load(stream)
+
+
+def git_blob_oid(content: bytes) -> str:
+    """Return the Git blob object ID for exact file bytes."""
+    header = f"blob {len(content)}\0".encode()
+    return hashlib.sha1(header + content, usedforsecurity=False).hexdigest()
 
 
 def extract_front_matter(path: Path) -> dict[str, Any]:
@@ -697,9 +950,9 @@ def load_risk_scope_evidence_binding(errors: list[str]) -> dict[str, Any] | None
     if not isinstance(concurrent_work, dict) or any(
         concurrent_work.get(field) != expected_value
         for field, expected_value in {
-            "observed_branch": "origin/codex/task-050-registration-binding-contracts",
+            "observed_branch": "origin/codex/task-050-closeout",
             "observed_head_sha": RISK_SCOPE_TASK050_HEAD_SHA,
-            "observed_state": "merged_into_main",
+            "observed_state": "completed_in_main",
             "merged_commit_sha": RISK_SCOPE_BASE_SHA,
         }.items()
     ):
@@ -825,6 +1078,29 @@ def load_risk_scope_evidence_binding(errors: list[str]) -> dict[str, Any] | None
                 "ai/governance/risk-validator-integration-scope-task-051.yaml: "
                 "production verifier timeout must be 2 seconds"
             )
+        expected_endpoints = [
+            RISK_SCOPE_GITHUB_API_PR_URL,
+            RISK_SCOPE_GITHUB_API_REVIEWS_URL,
+            "https://api.github.com/repos/qifuxiao/QuantiQmt/issues/comments/{comment_id}",
+        ]
+        if production_verifier.get("endpoints") != expected_endpoints:
+            errors.append(
+                "ai/governance/risk-validator-integration-scope-task-051.yaml: "
+                "production verifier endpoints must remain fixed to PR 87"
+            )
+        expected_bounds = {
+            "max_response_bytes": RISK_SCOPE_MAX_RESPONSE_BYTES,
+            "max_review_pages": RISK_SCOPE_MAX_REVIEW_PAGES,
+            "max_review_items": RISK_SCOPE_MAX_REVIEW_ITEMS,
+            "redirect_policy": "reject_all",
+            "authorization_header": "not_sent",
+        }
+        for field, expected_value in expected_bounds.items():
+            if production_verifier.get(field) != expected_value:
+                errors.append(
+                    "ai/governance/risk-validator-integration-scope-task-051.yaml: "
+                    f"production verifier {field} must be {expected_value}"
+                )
         if production_verifier.get("failure_policy") != (
             "network_timeout_rate_limit_404_invalid_json_or_mismatch_denies"
         ):
@@ -892,13 +1168,35 @@ def load_risk_scope_evidence_binding(errors: list[str]) -> dict[str, Any] | None
                 "ai/governance/risk-validator-integration-scope-task-051.yaml: "
                 "recorded evidence_url must identify a PR 87 review"
             )
-        if not isinstance(binding.get("human_authorization_evidence"), str) or is_placeholder_text(
-            binding.get("human_authorization_evidence")
-        ):
+        authorization = binding.get("human_authorization_evidence")
+        if not isinstance(authorization, dict):
             errors.append(
                 "ai/governance/risk-validator-integration-scope-task-051.yaml: "
-                "recorded human authorization evidence must not be a placeholder"
+                "recorded human authorization must bind an external GitHub object"
             )
+        else:
+            object_id = authorization.get("object_id")
+            expected_authorization_url = (
+                f"{RISK_SCOPE_PR_URL}#issuecomment-{object_id}"
+                if type(object_id) is int and object_id > 0
+                else None
+            )
+            expected_authorization_body = (
+                "AUTHORIZE TASK-051 CLOSEOUT\n"
+                f"reviewed_head_sha: {review.get('reviewed_head_sha')}\n"
+                f"merge_commit_sha: {merge.get('merge_commit_sha')}"
+            )
+            if (
+                authorization.get("object_type") != "issue_comment"
+                or expected_authorization_url is None
+                or authorization.get("evidence_url") != expected_authorization_url
+                or authorization.get("author") not in RISK_SCOPE_HUMAN_AUTHORIZERS
+                or authorization.get("required_body") != expected_authorization_body
+            ):
+                errors.append(
+                    "ai/governance/risk-validator-integration-scope-task-051.yaml: "
+                    "recorded human authorization object is not exactly bound to TASK-051 facts"
+                )
     return binding
 
 
@@ -966,7 +1264,16 @@ def task051_completion_evidence_is_bound(
     review_url_re = re.compile(rf"^{re.escape(RISK_SCOPE_PR_URL)}#pullrequestreview-[1-9][0-9]*$")
     if not isinstance(evidence_url, str) or review_url_re.fullmatch(evidence_url) is None:
         return False
-    if not isinstance(human_authorization, str) or is_placeholder_text(human_authorization):
+    if not isinstance(human_authorization, dict):
+        return False
+    authorization_url = human_authorization.get("evidence_url")
+    if (
+        not isinstance(authorization_url, str)
+        or re.fullmatch(
+            rf"{re.escape(RISK_SCOPE_PR_URL)}#issuecomment-[1-9][0-9]*", authorization_url
+        )
+        is None
+    ):
         return False
     expected_evidence = {
         "mode": RISK_SCOPE_COMPLETION_MODE,
@@ -976,7 +1283,7 @@ def task051_completion_evidence_is_bound(
         "reviewer": reviewer,
         "evidence_url": evidence_url,
         "merge_commit_sha": merge_commit_sha,
-        "human_authorization_evidence": human_authorization,
+        "human_authorization_evidence": authorization_url,
     }
     if not all(evidence.get(field) == value for field, value in expected_evidence.items()):
         return False
@@ -1021,7 +1328,11 @@ def github_reviewer_is_independent(value: Any, identity: Any) -> bool:
         and GITHUB_LOGIN_RE.fullmatch(value) is not None
         and not is_placeholder_text(value)
         and isinstance(identity, dict)
-        and value not in {identity.get("agent"), identity.get("pull_request_author")}
+        and value.casefold()
+        not in {
+            str(identity.get("agent", "")).casefold(),
+            str(identity.get("pull_request_author", "")).casefold(),
+        }
     )
 
 
@@ -1215,6 +1526,13 @@ def validate_tasks(
             errors.append(f"duplicate task id: {task_id}")
         tasks[task_id] = task
         task_paths[task_id] = path
+        if task_id == RISK_HISTORICAL_SCOPE_TASK:
+            try:
+                historical_oid = git_blob_oid(path.read_bytes())
+            except OSError:
+                historical_oid = None
+            if historical_oid != RISK_HISTORICAL_TASK_BLOB_OID:
+                errors.append("TASK-030 historical file bytes do not match immutable Git blob")
         status = task.get("status")
         expected_dir = (
             {

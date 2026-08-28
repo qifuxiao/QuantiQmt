@@ -84,17 +84,19 @@ delivery:
 - `ai/governance/risk-validator-integration-scope-task-051.yaml` 以 schema-v1 记录 accepted spec、可信依赖、TASK-030 历史边界、TASK-029 精确范围、四态 activation matrix、TASK-050 并行分支隔离与 Review 权限边界。
 - `successor_evidence_binding` 将 successor gate 固定到 `qifuxiao/QuantiQmt` PR #87、实现者身份和独立 GitHub Review 字段；在 Review/merge/人类收尾事实仍为 pending 时，任何 TASK-051 completion evidence 都不能解锁 TASK-029。
 - `scripts/validate_specs.py` 将通用 L4/TASK-046 gate 与 Risk/TASK-051 gate 分离：TASK-029 必须依赖 TASK-051，TASK-030/TASK-046 均不能替代；TASK-030 必须保持 completed + reported-unverified + prohibited。
-- successor validator 只验证治理记录与任务 evidence 的固定仓库/PR/Review URL、SHA、reviewer 独立性和字段一致性；它不联网声称 GitHub Review、精确 Head、merge 或人类授权事实已真实发生，这些仍须独立 Review 与人类收尾确认。
+- successor validator 在 active/pending 状态保持完全离线；仅在未来 completed closeout 校验中，通过固定 GitHub API 端点有界分页获取 PR #87 Review，按 reviewer 的 `submitted_at`/`id` 计算最新有效状态，并验证精确 Review ID/URL、Head、merge、`origin/main` 祖先关系及绑定 Head/merge SHA 的人类授权 issue comment 对象。任何异常、歧义、未解除 CHANGES_REQUESTED、PENDING、缺失时间、分页越界或对象不匹配均 fail-closed。
+- `COMMENTED` 不改变同一 reviewer 最近一次决定性 Review；`APPROVED`、`CHANGES_REQUESTED`、`DISMISSED` 按时间与 ID 决定最新状态。最新 `DISMISSED` 不再构成批准，任何 reviewer 的最新有效 `CHANGES_REQUESTED` 都会阻断，且至少一个独立 reviewer 的最新有效 `APPROVED` 必须绑定 exact reviewed Head。
+- TASK-030 completed 文件以不可变 Git blob `4cc37f6d1805d98bc4f223bfe69d4de5c51b7f8e` 整体冻结，标题、正文、scope、delivery 或任意字节变化均被 validator 拒绝；TASK-030 与 TASK-044 实际文件均未修改。
 - TASK-029 仅把直接依赖从 TASK-030 迁移到 TASK-051，并补充 successor 授权/forbidden scope；其 status 仍为 blocked，既有 allowed paths 和 acceptance criteria 未削弱。
 - `tests/spec/test_validate_specs.py` 覆盖 real-repository 投影、历史不可提升、错误 successor 替代，以及 active、reported-unverified、missing evidence、trusted completed 四态；测试兼容未来 TASK-051 合法 active → completed 路径迁移。
-- TASK-030 文件与 TASK-044 历史审计文件的 Git blob 分别保持 `4cc37f6d1805d98bc4f223bfe69d4de5c51b7f8e`、`c4dfc1703c1782fdd9c062ce22fb830c2388c365`，与 `origin/main` 完全一致。
+- TASK-030 文件与 TASK-044 历史审计文件的 Git blob 分别保持 `4cc37f6d1805d98bc4f223bfe69d4de5c51b7f8e`、`9f15442f7ffc0f8db4cbc5edde8dab195b8d3072`，与最新 `origin/main` 完全一致。
 
 ## Verification evidence
 
 - 2026-08-27 复核确认用户级 `poetry.exe` 是有效的 Windows symbolic link；Poetry 2.4.1、Python 3.12.10 与项目环境 `quantiqmt-pHxzv3NO-py3.12` 均正常。最初五条 `poetry run ...` 尝试在测试启动前 exit 1，真实根因是 Codex sandbox 拒绝访问用户目录；早先将 0-byte link 显示解释为 launcher 损坏属于已更正的证据错误，不代表 Poetry 或依赖失败。
-- 在用户明确授权的 sandbox 外执行上下文中，将同一 Poetry 进程绑定到上述项目环境后，五条原始命令均实际通过：`poetry run python scripts/validate_specs.py` exit 0；`poetry run pytest tests/spec` exit 0，53 passed；首次 `poetry run pytest tests/contract` exit 0，678 passed、1 skipped（该用例明确要求前置 `poetry build` wheel）；两条 `poetry run ruff ...` 均 exit 0。随后在同一环境执行 `poetry build` exit 0，生成 `quantiqmt-0.1.0-py3-none-any.whl` 后重跑原 contract 命令 exit 0，679 passed、0 skipped，wheel 安装包测试已实际执行。
+- 2026-08-28 修复 Review findings 后，在同一既有 Poetry 环境中重新运行：`poetry run python scripts/validate_specs.py` exit 0；`poetry run pytest tests/spec` exit 0，137 passed；`poetry build` exit 0；build 后 `poetry run pytest tests/contract` exit 0，679 passed、0 skipped；两条 focused `poetry run ruff ...` 均 exit 0。
 - 首次提交的 pre-commit hooks exit 1、随后使用 `--no-verify` 提交是保留的真实历史；根因同样是当时 Codex sandbox 无法使用用户目录中的已授权项目环境，而不是 Poetry 安装或项目依赖损坏。本次 `poetry run pre-commit run --all-files` 在 sandbox 外 exit 0，`ruff check`、`ruff format`、`validate specs and tasks` 三个 hook 全部 Passed；本次修正提交不得使用 `--no-verify`。
-- 测试先行证据：validator 新入口实现前，focused spec test collection exit 1，精确失败为无法导入 `validate_risk_scope_successor_dependencies`；最小实现后同一文件 53 passed。
+- 本轮测试先行证据：Review/API/历史 blob 新回归加入后，focused spec test exit 1，19 failed、101 passed；最小实现与边界修正后 `tests/spec/test_validate_specs.py` 131 passed。
 - `git diff --check` exit 0；changed-path audit 仅包含 TASK-051 `allowed_paths`。
 
 ## Handoff boundary

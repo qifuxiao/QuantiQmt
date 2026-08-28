@@ -4,7 +4,7 @@ record_status: implementation_complete_pending_independent_review
 authorized_on: "2026-08-27"
 repository:
   base_branch: origin/main
-  base_sha: 5650c3738dceff61862b41e672a96a5cce6fe8e5
+  base_sha: bfa77268941f3814d1856c59094fd8a90e3cda81
   implementation_branch: codex/task-051-risk-validator-scope-successor
   review_binding: exact_head_sha_required_at_handoff
 successor_evidence_binding:
@@ -29,39 +29,46 @@ successor_evidence_binding:
     verifies:
       - completion evidence exactly matches this TASK-051 binding
       - repository and change PR are qifuxiao/QuantiQmt PR 87
-      - Review evidence URL is a PR 87 pullrequestreview URL
+      - Review evidence URL ID exactly matches a PR 87 GitHub Review API object
       - reviewer is a valid bound GitHub login distinct from implementation agent and PR author
       - reviewed Head and merge commit are non-placeholder 40-character hexadecimal SHAs
       - external facts have been recorded as verified before dependency unlock
+      - human closeout authorization is an exact PR 87 GitHub issue comment object
     does_not_verify:
-      - GitHub Review existence, verdict, reviewer identity or reviewed Head via network
-      - GitHub merge existence or merge commit ancestry via network
-      - human closeout authorization authenticity outside the repository
+      - GitHub account ownership beyond API object identity and User type
+      - authorization intent beyond the exact required closeout body
     external_confirmation_required:
-      - independent reviewer verifies APPROVE on the exact current PR Head in GitHub
-      - human verifies merge and authorizes active-to-completed closeout
+      - fixed GitHub verifier confirms latest effective Review state on the exact Head
+      - fixed GitHub verifier confirms merge ancestry and exact human authorization object
   production_external_verifier:
     adapter: fixed_github_public_api_task_051_verifier
     endpoints:
       - https://api.github.com/repos/qifuxiao/QuantiQmt/pulls/87
-      - https://api.github.com/repos/qifuxiao/QuantiQmt/pulls/87/reviews
+      - https://api.github.com/repos/qifuxiao/QuantiQmt/pulls/87/reviews?per_page=100
+      - https://api.github.com/repos/qifuxiao/QuantiQmt/issues/comments/{comment_id}
     timeout_seconds: 2
+    max_response_bytes: 524288
+    max_review_pages: 10
+    max_review_items: 1000
+    redirect_policy: reject_all
+    authorization_header: not_sent
     verifies:
       - closed_merged_PR_87_on_main
       - exact_PR_head_and_merge_commit
       - APPROVED_review_URL_reviewer_and_commit
+      - latest_effective_review_state_per_reviewer_without_blocking_changes
       - reviewer_independent_from_PR_author_and_implementer
-      - human_authorization_bound_to_merged_by_and_merge_commit
-      - local_git_merge_ancestry
+      - human_closeout_authorization_issue_comment_object
+      - local_git_reviewed_head_merge_and_origin_main_ancestry
     failure_policy: network_timeout_rate_limit_404_invalid_json_or_mismatch_denies
 concurrent_work:
-  observed_branch: origin/codex/task-050-registration-binding-contracts
-  observed_head_sha: b27f941a3f6fcca46349aa36a208d97fbc5d1281
-  observed_state: merged_into_main
-  merged_commit_sha: 5650c3738dceff61862b41e672a96a5cce6fe8e5
+  observed_branch: origin/codex/task-050-closeout
+  observed_head_sha: 132b83f2be3543a650fd86b9bbcd7aa28b4c2cf3
+  observed_state: completed_in_main
+  merged_commit_sha: bfa77268941f3814d1856c59094fd8a90e3cda81
   domain_overlap: none
   shared_projection_paths: [tasks/active/README.md, tasks/index.yaml]
-  merge_requirement: preserve_both_active_projections_if_TASK_050_merges_first
+  merge_requirement: preserve_TASK_050_completed_and_TASK_051_active_projections
 authority:
   human_authorization: >-
     2026-08-27 explicit authorization to create, activate and implement TASK-051 as a
@@ -176,10 +183,10 @@ verification:
       summary: Specification_validation_passed
     - command: poetry run pytest tests/spec
       exit_code: 0
-      summary: 53_passed
+      summary: 137_passed
     - command: poetry run pytest tests/contract
       exit_code: 0
-      summary: initial_run_678_passed_1_skipped_wheel_build_precondition
+      summary: 679_passed_0_skipped_after_wheel_build
     - command: poetry run ruff check scripts/validate_specs.py tests/spec/test_validate_specs.py
       exit_code: 0
       summary: All_checks_passed
@@ -193,6 +200,15 @@ verification:
     post_build_contract_command: poetry run pytest tests/contract
     post_build_exit_code: 0
     summary: 679_passed_0_skipped
+  test_first_remediation:
+    pre_implementation:
+      command: poetry run pytest tests/spec/test_validate_specs.py -q
+      exit_code: 1
+      summary: 19_failed_101_passed
+    post_implementation:
+      command: poetry run pytest tests/spec/test_validate_specs.py -q
+      exit_code: 0
+      summary: 131_passed
   pre_commit:
     command: poetry run pre-commit run --all-files
     exit_code: 0

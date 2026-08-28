@@ -1,5 +1,6 @@
 from inspect import signature
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 import scripts.validate_specs as validator
@@ -21,6 +22,11 @@ from scripts.validate_specs import (
 )
 
 import quantiqmt
+
+FIXTURE_REVIEWED_HEAD = "132b83f2be3543a650fd86b9bbcd7aa28b4c2cf3"
+FIXTURE_MERGE_COMMIT = "bfa77268941f3814d1856c59094fd8a90e3cda81"
+FIXTURE_REVIEW_ID = 99999
+FIXTURE_AUTHORIZATION_ID = 88888
 
 
 @pytest.fixture
@@ -93,9 +99,11 @@ def write_governance_task_fixture(
 def trusted_delivery(
     *,
     change_pr: str = "https://github.com/qifuxiao/QuantiQmt/pull/87",
-    reviewed_head_sha: str = "0123456789abcdef0123456789abcdef01234567",
+    reviewed_head_sha: str = FIXTURE_REVIEWED_HEAD,
     reviewer: str = "independent-reviewer",
-    evidence_url: str = ("https://github.com/qifuxiao/QuantiQmt/pull/87#pullrequestreview-99999"),
+    evidence_url: str = (
+        f"https://github.com/qifuxiao/QuantiQmt/pull/87#pullrequestreview-{FIXTURE_REVIEW_ID}"
+    ),
 ) -> dict:
     return {
         "schema_version": 1,
@@ -111,10 +119,10 @@ def trusted_delivery(
             "review_verdict": "APPROVE",
             "reviewer": reviewer,
             "evidence_url": evidence_url,
-            "merge_commit_sha": "89abcdef0123456789abcdef0123456789abcdef",
+            "merge_commit_sha": FIXTURE_MERGE_COMMIT,
             "human_authorization_evidence": (
-                "github-merge:qifuxiao/QuantiQmt#87:"
-                "89abcdef0123456789abcdef0123456789abcdef:qifuxiao"
+                f"https://github.com/qifuxiao/QuantiQmt/pull/87"
+                f"#issuecomment-{FIXTURE_AUTHORIZATION_ID}"
             ),
         },
     }
@@ -137,22 +145,33 @@ def risk_scope_evidence_binding() -> dict:
             "required_review": {
                 "verdict": "APPROVE",
                 "reviewer": "independent-reviewer",
-                "reviewed_head_sha": "0123456789abcdef0123456789abcdef01234567",
+                "reviewed_head_sha": FIXTURE_REVIEWED_HEAD,
                 "evidence_url": (
-                    "https://github.com/qifuxiao/QuantiQmt/pull/87#pullrequestreview-99999"
+                    f"https://github.com/qifuxiao/QuantiQmt/pull/87"
+                    f"#pullrequestreview-{FIXTURE_REVIEW_ID}"
                 ),
             },
-            "required_merge": {"merge_commit_sha": "89abcdef0123456789abcdef0123456789abcdef"},
-            "human_authorization_evidence": (
-                "github-merge:qifuxiao/QuantiQmt#87:"
-                "89abcdef0123456789abcdef0123456789abcdef:qifuxiao"
-            ),
+            "required_merge": {"merge_commit_sha": FIXTURE_MERGE_COMMIT},
+            "human_authorization_evidence": {
+                "object_type": "issue_comment",
+                "object_id": FIXTURE_AUTHORIZATION_ID,
+                "evidence_url": (
+                    f"https://github.com/qifuxiao/QuantiQmt/pull/87"
+                    f"#issuecomment-{FIXTURE_AUTHORIZATION_ID}"
+                ),
+                "author": "qifuxiao",
+                "required_body": (
+                    "AUTHORIZE TASK-051 CLOSEOUT\n"
+                    f"reviewed_head_sha: {FIXTURE_REVIEWED_HEAD}\n"
+                    f"merge_commit_sha: {FIXTURE_MERGE_COMMIT}"
+                ),
+            },
             "external_fact_status": "recorded_after_github_and_human_verification",
             "static_validator_boundary": {
                 "verifies": [
                     "completion evidence exactly matches this TASK-051 binding",
                     "repository and change PR are qifuxiao/QuantiQmt PR 87",
-                    "Review evidence URL is a PR 87 pullrequestreview URL",
+                    "Review evidence URL ID exactly matches a PR 87 GitHub Review API object",
                     (
                         "reviewer is a valid bound GitHub login distinct from implementation "
                         "agent and PR author"
@@ -162,34 +181,47 @@ def risk_scope_evidence_binding() -> dict:
                         "hexadecimal SHAs"
                     ),
                     "external facts have been recorded as verified before dependency unlock",
+                    "human closeout authorization is an exact PR 87 GitHub issue comment object",
                 ],
                 "does_not_verify": [
-                    (
-                        "GitHub Review existence, verdict, reviewer identity or reviewed Head "
-                        "via network"
-                    ),
-                    "GitHub merge existence or merge commit ancestry via network",
-                    "human closeout authorization authenticity outside the repository",
+                    "GitHub account ownership beyond API object identity and User type",
+                    "authorization intent beyond the exact required closeout body",
                 ],
                 "external_confirmation_required": [
-                    "independent reviewer verifies APPROVE on the exact current PR Head in GitHub",
-                    "human verifies merge and authorizes active-to-completed closeout",
+                    (
+                        "fixed GitHub verifier confirms latest effective Review state on the "
+                        "exact Head"
+                    ),
+                    (
+                        "fixed GitHub verifier confirms merge ancestry and exact human "
+                        "authorization object"
+                    ),
                 ],
             },
             "production_external_verifier": {
                 "adapter": "fixed_github_public_api_task_051_verifier",
                 "endpoints": [
                     "https://api.github.com/repos/qifuxiao/QuantiQmt/pulls/87",
-                    "https://api.github.com/repos/qifuxiao/QuantiQmt/pulls/87/reviews",
+                    "https://api.github.com/repos/qifuxiao/QuantiQmt/pulls/87/reviews?per_page=100",
+                    (
+                        "https://api.github.com/repos/qifuxiao/QuantiQmt/issues/comments/"
+                        "{comment_id}"
+                    ),
                 ],
                 "timeout_seconds": 2,
+                "max_response_bytes": 524288,
+                "max_review_pages": 10,
+                "max_review_items": 1000,
+                "redirect_policy": "reject_all",
+                "authorization_header": "not_sent",
                 "verifies": [
                     "closed_merged_PR_87_on_main",
                     "exact_PR_head_and_merge_commit",
                     "APPROVED_review_URL_reviewer_and_commit",
+                    "latest_effective_review_state_per_reviewer_without_blocking_changes",
                     "reviewer_independent_from_PR_author_and_implementer",
-                    "human_authorization_bound_to_merged_by_and_merge_commit",
-                    "local_git_merge_ancestry",
+                    "human_closeout_authorization_issue_comment_object",
+                    "local_git_reviewed_head_merge_and_origin_main_ancestry",
                 ],
                 "failure_policy": "network_timeout_rate_limit_404_invalid_json_or_mismatch_denies",
             },
@@ -209,35 +241,27 @@ class FixtureGitHubTransport:
         self.calls.append((url, timeout_seconds))
         if self.failure is not None:
             raise self.failure
-        return self.payloads[url]
-
-
-class FixtureGitHubVerifier(validator.GitHubRiskScopeVerifier):
-    transport: FixtureGitHubTransport
-
-    def __init__(self, transport: FixtureGitHubTransport) -> None:
-        self.transport = transport
-        super().__init__(transport=transport)
-
-    def _verify_merge_ancestry(self, reviewed_head: str, merge_commit: str) -> bool:
-        return reviewed_head != merge_commit
+        payload = self.payloads[url]
+        if isinstance(payload, validator.GitHubJsonResponse):
+            return payload
+        return validator.GitHubJsonResponse(payload=payload, final_url=url, next_url=None)
 
 
 def install_fixture_verifier(
     monkeypatch: pytest.MonkeyPatch, transport: FixtureGitHubTransport
 ) -> None:
-    class BoundFixtureVerifier(FixtureGitHubVerifier):
-        def __init__(self) -> None:
-            super().__init__(transport)
-
-    monkeypatch.setattr(validator, "GitHubRiskScopeVerifier", BoundFixtureVerifier)
+    monkeypatch.setattr(validator.GitHubJsonTransport, "get_json", transport.get_json)
 
 
 def github_fixture_transport(delivery: dict) -> FixtureGitHubTransport:
     evidence = delivery["completion_evidence"]
     review_url = evidence["evidence_url"]
     api_pr = "https://api.github.com/repos/qifuxiao/QuantiQmt/pulls/87"
-    api_reviews = f"{api_pr}/reviews"
+    api_reviews = f"{api_pr}/reviews?per_page=100"
+    api_authorization = (
+        f"https://api.github.com/repos/qifuxiao/QuantiQmt/issues/comments/"
+        f"{FIXTURE_AUTHORIZATION_ID}"
+    )
     return FixtureGitHubTransport(
         {
             api_pr: {
@@ -246,20 +270,37 @@ def github_fixture_transport(delivery: dict) -> FixtureGitHubTransport:
                 "state": "closed",
                 "merged": True,
                 "base": {"ref": "main", "repo": {"full_name": "qifuxiao/QuantiQmt"}},
-                "head": {"sha": evidence["reviewed_head_sha"]},
+                "head": {
+                    "sha": evidence["reviewed_head_sha"],
+                    "ref": "codex/task-051-risk-validator-scope-successor",
+                    "repo": {"full_name": "qifuxiao/QuantiQmt"},
+                },
                 "merge_commit_sha": evidence["merge_commit_sha"],
                 "user": {"login": "qifuxiao", "type": "User"},
                 "merged_by": {"login": "qifuxiao", "type": "User"},
             },
             api_reviews: [
                 {
+                    "id": FIXTURE_REVIEW_ID,
                     "html_url": review_url,
                     "pull_request_url": api_pr,
                     "state": "APPROVED",
                     "commit_id": evidence["reviewed_head_sha"],
+                    "submitted_at": "2026-08-28T01:00:00Z",
                     "user": {"login": evidence["reviewer"], "type": "User"},
                 }
             ],
+            api_authorization: {
+                "id": FIXTURE_AUTHORIZATION_ID,
+                "html_url": evidence["human_authorization_evidence"],
+                "issue_url": "https://api.github.com/repos/qifuxiao/QuantiQmt/issues/87",
+                "body": (
+                    "AUTHORIZE TASK-051 CLOSEOUT\n"
+                    f"reviewed_head_sha: {evidence['reviewed_head_sha']}\n"
+                    f"merge_commit_sha: {evidence['merge_commit_sha']}"
+                ),
+                "user": {"login": "qifuxiao", "type": "User"},
+            },
         }
     )
 
@@ -527,6 +568,9 @@ def test_l4_queue_and_risk_scope_use_independent_successor_gates() -> None:
     assert "TASK-030" not in task029["depends_on"]
     assert "TASK-046" not in task029["depends_on"]
 
+    assert extract_front_matter(indexed_task_path("TASK-005"))["status"] == "blocked"
+    assert extract_front_matter(indexed_task_path("TASK-050"))["status"] == "completed"
+
     task030 = extract_front_matter(indexed_task_path("TASK-030"))
     assert task030["delivery"]["review_status"] == "reported_unverified"
     assert task030["delivery"]["release_status"] == "prohibited"
@@ -638,6 +682,7 @@ def test_risk_scope_successor_policy_preserves_task030_history(
         "fabricated_shas",
         "implementing_reviewer",
         "pr_author_reviewer",
+        "pr_author_case_alias",
         "invalid_review_url",
     ],
 )
@@ -664,6 +709,9 @@ def test_task051_forged_evidence_is_rejected_via_validate_tasks(
     elif forgery == "pr_author_reviewer":
         evidence["reviewer"] = "qifuxiao"
         bound_evidence["required_review"]["reviewer"] = "qifuxiao"
+    elif forgery == "pr_author_case_alias":
+        evidence["reviewer"] = "QIFUXIAO"
+        bound_evidence["required_review"]["reviewer"] = "QIFUXIAO"
     else:
         evidence["evidence_url"] = "https://github.com/example/review/87"
         bound_evidence["required_review"]["evidence_url"] = "https://github.com/example/review/87"
@@ -720,6 +768,18 @@ def test_task051_completed_delivery_is_denied_without_external_verifier(
         "TASK-029: dependency TASK-051 lacks trusted completed delivery" in error
         for error in errors
     )
+
+
+def test_real_active_task051_validation_is_offline(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[str] = []
+
+    def forbidden_network(self, url: str, timeout_seconds: float) -> object:
+        calls.append(url)
+        raise AssertionError("active TASK-051 must not access GitHub")
+
+    monkeypatch.setattr(validator.GitHubJsonTransport, "get_json", forbidden_network)
+    assert main() == 0
+    assert calls == []
 
 
 def test_task051_simultaneous_local_binding_forgery_is_denied(
@@ -780,6 +840,19 @@ def test_task051_completed_delivery_and_human_active_task029_use_github_verifier
     )
 
 
+def test_task051_legitimate_completed_delivery_uses_production_verifier_path() -> None:
+    delivery = trusted_delivery()
+    binding = risk_scope_evidence_binding()["successor_evidence_binding"]
+    verifier = validator.GitHubRiskScopeVerifier(transport=github_fixture_transport(delivery))
+
+    assert delivery_is_unlockable(
+        {"id": "TASK-051", "delivery": delivery},
+        task_id="TASK-051",
+        evidence_binding=binding,
+        external_verifier=verifier,
+    )
+
+
 def test_validate_tasks_has_no_public_boolean_verifier_injection() -> None:
     assert "external_fact_verifier" not in signature(validate_tasks).parameters
 
@@ -826,6 +899,8 @@ def test_github_verifier_external_failures_are_fail_closed(failure: Exception) -
     [
         "wrong_pr",
         "wrong_head",
+        "wrong_head_ref",
+        "wrong_head_repo",
         "wrong_merge",
         "wrong_reviewer",
         "wrong_author",
@@ -840,11 +915,15 @@ def test_github_verifier_rejects_external_fact_mutations(mutation: str) -> None:
     binding = risk_scope_evidence_binding()["successor_evidence_binding"]
     transport = github_fixture_transport(delivery)
     pull_url = validator.RISK_SCOPE_GITHUB_API_PR_URL
-    reviews_url = f"{pull_url}/reviews"
+    reviews_url = f"{pull_url}/reviews?per_page=100"
     if mutation == "wrong_pr":
         transport.payloads[pull_url]["number"] = 86
     elif mutation == "wrong_head":
         transport.payloads[pull_url]["head"]["sha"] = "f" * 40
+    elif mutation == "wrong_head_ref":
+        transport.payloads[pull_url]["head"]["ref"] = "codex/other"
+    elif mutation == "wrong_head_repo":
+        transport.payloads[pull_url]["head"]["repo"]["full_name"] = "fork/QuantiQmt"
     elif mutation == "wrong_merge":
         transport.payloads[pull_url]["merge_commit_sha"] = "e" * 40
     elif mutation == "wrong_reviewer":
@@ -858,18 +937,322 @@ def test_github_verifier_rejects_external_fact_mutations(mutation: str) -> None:
     elif mutation == "not_approved":
         transport.payloads[reviews_url][0]["state"] = "CHANGES_REQUESTED"
     elif mutation == "wrong_human_authorization":
-        binding["human_authorization_evidence"] = "local-admin-approved"
+        binding["human_authorization_evidence"]["object_id"] = 999
     else:
-
-        class AncestryFailureVerifier(FixtureGitHubVerifier):
-            def _verify_merge_ancestry(self, reviewed_head: str, merge_commit: str) -> bool:
-                return False
-
-        verifier = AncestryFailureVerifier(transport)
-        assert not verifier.verify(binding, delivery["completion_evidence"])
-        return
-    verifier = FixtureGitHubVerifier(transport)
+        binding["required_merge"]["merge_commit_sha"] = "f" * 40
+        delivery["completion_evidence"]["merge_commit_sha"] = "f" * 40
+    verifier = validator.GitHubRiskScopeVerifier(transport=transport)
     assert not verifier.verify(binding, delivery["completion_evidence"])
+
+
+def _review(
+    review_id: int,
+    reviewer: str,
+    state: str,
+    submitted_at: str | None,
+    *,
+    commit_id: str = FIXTURE_REVIEWED_HEAD,
+) -> dict:
+    return {
+        "id": review_id,
+        "html_url": (
+            f"https://github.com/qifuxiao/QuantiQmt/pull/87#pullrequestreview-{review_id}"
+        ),
+        "pull_request_url": validator.RISK_SCOPE_GITHUB_API_PR_URL,
+        "state": state,
+        "commit_id": commit_id,
+        "submitted_at": submitted_at,
+        "user": {"login": reviewer, "type": "User"},
+    }
+
+
+@pytest.mark.parametrize("later_state", ["CHANGES_REQUESTED", "DISMISSED"])
+def test_latest_effective_review_replaces_older_approval(later_state: str) -> None:
+    delivery = trusted_delivery()
+    binding = risk_scope_evidence_binding()["successor_evidence_binding"]
+    transport = github_fixture_transport(delivery)
+    reviews_url = f"{validator.RISK_SCOPE_GITHUB_API_PR_URL}/reviews?per_page=100"
+    transport.payloads[reviews_url].append(
+        _review(100000, "independent-reviewer", later_state, "2026-08-28T02:00:00Z")
+    )
+
+    assert not validator.GitHubRiskScopeVerifier(transport=transport).verify(
+        binding, delivery["completion_evidence"]
+    )
+
+
+def test_different_reviewer_unresolved_changes_request_blocks_approval() -> None:
+    delivery = trusted_delivery()
+    binding = risk_scope_evidence_binding()["successor_evidence_binding"]
+    transport = github_fixture_transport(delivery)
+    reviews_url = f"{validator.RISK_SCOPE_GITHUB_API_PR_URL}/reviews?per_page=100"
+    transport.payloads[reviews_url].append(
+        _review(100000, "second-reviewer", "CHANGES_REQUESTED", "2026-08-28T02:00:00Z")
+    )
+
+    assert not validator.GitHubRiskScopeVerifier(transport=transport).verify(
+        binding, delivery["completion_evidence"]
+    )
+
+
+def test_dismissal_clears_same_reviewer_changes_request_without_becoming_approval() -> None:
+    delivery = trusted_delivery()
+    binding = risk_scope_evidence_binding()["successor_evidence_binding"]
+    transport = github_fixture_transport(delivery)
+    reviews_url = f"{validator.RISK_SCOPE_GITHUB_API_PR_URL}/reviews?per_page=100"
+    transport.payloads[reviews_url].extend(
+        [
+            _review(100000, "second-reviewer", "CHANGES_REQUESTED", "2026-08-28T02:00:00Z"),
+            _review(100001, "second-reviewer", "DISMISSED", "2026-08-28T03:00:00Z"),
+        ]
+    )
+
+    assert validator.GitHubRiskScopeVerifier(transport=transport).verify(
+        binding, delivery["completion_evidence"]
+    )
+
+
+def test_commented_review_does_not_replace_latest_decisive_approval() -> None:
+    delivery = trusted_delivery()
+    binding = risk_scope_evidence_binding()["successor_evidence_binding"]
+    transport = github_fixture_transport(delivery)
+    reviews_url = f"{validator.RISK_SCOPE_GITHUB_API_PR_URL}/reviews?per_page=100"
+    transport.payloads[reviews_url].append(
+        _review(100000, "independent-reviewer", "COMMENTED", "2026-08-28T02:00:00Z")
+    )
+
+    assert validator.GitHubRiskScopeVerifier(transport=transport).verify(
+        binding, delivery["completion_evidence"]
+    )
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    ["pending", "missing_submitted_at", "duplicate_id", "unknown_state"],
+)
+def test_review_collection_malformed_or_pending_fails_closed(mutation: str) -> None:
+    delivery = trusted_delivery()
+    binding = risk_scope_evidence_binding()["successor_evidence_binding"]
+    transport = github_fixture_transport(delivery)
+    reviews_url = f"{validator.RISK_SCOPE_GITHUB_API_PR_URL}/reviews?per_page=100"
+    reviews = transport.payloads[reviews_url]
+    if mutation == "pending":
+        reviews.append(_review(100000, "second-reviewer", "PENDING", "2026-08-28T02:00:00Z"))
+    elif mutation == "missing_submitted_at":
+        reviews[0]["submitted_at"] = None
+    elif mutation == "duplicate_id":
+        reviews.append(
+            _review(FIXTURE_REVIEW_ID, "second-reviewer", "COMMENTED", "2026-08-28T02:00:00Z")
+        )
+    else:
+        reviews.append(_review(100000, "second-reviewer", "OUTDATED", "2026-08-28T02:00:00Z"))
+
+    assert not validator.GitHubRiskScopeVerifier(transport=transport).verify(
+        binding, delivery["completion_evidence"]
+    )
+
+
+def test_review_order_uses_submitted_time_then_id_not_api_order() -> None:
+    delivery = trusted_delivery()
+    binding = risk_scope_evidence_binding()["successor_evidence_binding"]
+    transport = github_fixture_transport(delivery)
+    reviews_url = f"{validator.RISK_SCOPE_GITHUB_API_PR_URL}/reviews?per_page=100"
+    transport.payloads[reviews_url] = [
+        _review(FIXTURE_REVIEW_ID, "independent-reviewer", "APPROVED", "2026-08-28T02:00:00Z"),
+        _review(99998, "independent-reviewer", "CHANGES_REQUESTED", "2026-08-28T01:00:00Z"),
+    ]
+
+    assert validator.GitHubRiskScopeVerifier(transport=transport).verify(
+        binding, delivery["completion_evidence"]
+    )
+
+
+@pytest.mark.parametrize("mutation", ["missing", "wrong_type", "wrong_value", "wrong_html"])
+def test_review_evidence_url_id_must_exactly_match_api_review(mutation: str) -> None:
+    delivery = trusted_delivery()
+    binding = risk_scope_evidence_binding()["successor_evidence_binding"]
+    transport = github_fixture_transport(delivery)
+    reviews_url = f"{validator.RISK_SCOPE_GITHUB_API_PR_URL}/reviews?per_page=100"
+    review = transport.payloads[reviews_url][0]
+    if mutation == "missing":
+        review.pop("id")
+    elif mutation == "wrong_type":
+        review["id"] = str(FIXTURE_REVIEW_ID)
+    elif mutation == "wrong_value":
+        review["id"] = FIXTURE_REVIEW_ID + 1
+    else:
+        review["html_url"] += "-wrong"
+
+    assert not validator.GitHubRiskScopeVerifier(transport=transport).verify(
+        binding, delivery["completion_evidence"]
+    )
+
+
+def test_review_pagination_is_bounded_and_follows_only_expected_next_url() -> None:
+    delivery = trusted_delivery()
+    binding = risk_scope_evidence_binding()["successor_evidence_binding"]
+    transport = github_fixture_transport(delivery)
+    first = f"{validator.RISK_SCOPE_GITHUB_API_PR_URL}/reviews?per_page=100"
+    second = f"{first}&page=2"
+    approval = transport.payloads[first][0]
+    transport.payloads[first] = validator.GitHubJsonResponse(
+        payload=[_review(99998, "observer", "COMMENTED", "2026-08-28T00:00:00Z")],
+        final_url=first,
+        next_url=second,
+    )
+    transport.payloads[second] = [approval]
+
+    assert validator.GitHubRiskScopeVerifier(transport=transport).verify(
+        binding, delivery["completion_evidence"]
+    )
+    assert [url for url, _ in transport.calls if "/reviews" in url] == [first, second]
+
+
+@pytest.mark.parametrize(
+    "authorization_mutation",
+    ["id", "html_url", "issue_url", "author", "author_type", "body", "missing"],
+)
+def test_human_closeout_requires_exact_external_issue_comment(
+    authorization_mutation: str,
+) -> None:
+    delivery = trusted_delivery()
+    binding = risk_scope_evidence_binding()["successor_evidence_binding"]
+    transport = github_fixture_transport(delivery)
+    url = (
+        f"https://api.github.com/repos/qifuxiao/QuantiQmt/issues/comments/"
+        f"{FIXTURE_AUTHORIZATION_ID}"
+    )
+    comment = transport.payloads[url]
+    if authorization_mutation == "id":
+        comment["id"] += 1
+    elif authorization_mutation == "html_url":
+        comment["html_url"] += "-wrong"
+    elif authorization_mutation == "issue_url":
+        comment["issue_url"] = comment["issue_url"].replace("/87", "/86")
+    elif authorization_mutation == "author":
+        comment["user"]["login"] = "mallory"
+    elif authorization_mutation == "author_type":
+        comment["user"]["type"] = "Bot"
+    elif authorization_mutation == "body":
+        comment["body"] = "approved"
+    else:
+        comment.pop("body")
+
+    assert not validator.GitHubRiskScopeVerifier(transport=transport).verify(
+        binding, delivery["completion_evidence"]
+    )
+
+
+class _HttpResponseFixture:
+    def __init__(self, body: bytes, url: str, headers: dict[str, str] | None = None) -> None:
+        self.status = 200
+        self._body = body
+        self._url = url
+        self.headers = headers or {}
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        return False
+
+    def read(self, limit: int) -> bytes:
+        return self._body[:limit]
+
+    def geturl(self) -> str:
+        return self._url
+
+
+def test_github_transport_rejects_response_larger_than_bound() -> None:
+    url = validator.RISK_SCOPE_GITHUB_API_PR_URL
+    response = _HttpResponseFixture(b'{"value":"0123456789"}', url)
+    opener = SimpleNamespace(open=lambda request, timeout: response)
+    transport = validator.GitHubJsonTransport(opener=opener, max_response_bytes=8)
+
+    with pytest.raises(ValueError, match="response exceeds"):
+        transport.get_json(url, 0.1)
+
+
+def test_github_transport_rejects_redirected_final_url() -> None:
+    url = validator.RISK_SCOPE_GITHUB_API_PR_URL
+    response = _HttpResponseFixture(b"{}", "https://example.com/stolen")
+    opener = SimpleNamespace(open=lambda request, timeout: response)
+    transport = validator.GitHubJsonTransport(opener=opener)
+
+    with pytest.raises(ValueError, match="final URL"):
+        transport.get_json(url, 0.1)
+
+
+@pytest.mark.parametrize("body", [b"not-json", b"null"])
+def test_github_transport_rejects_invalid_or_null_json(body: bytes) -> None:
+    url = validator.RISK_SCOPE_GITHUB_API_PR_URL
+    response = _HttpResponseFixture(body, url)
+    opener = SimpleNamespace(open=lambda request, timeout: response)
+    transport = validator.GitHubJsonTransport(opener=opener)
+
+    with pytest.raises((ValueError, validator.json.JSONDecodeError)):
+        transport.get_json(url, 0.1)
+
+
+def test_review_pagination_rejects_cross_host_next_link() -> None:
+    delivery = trusted_delivery()
+    binding = risk_scope_evidence_binding()["successor_evidence_binding"]
+    transport = github_fixture_transport(delivery)
+    first = f"{validator.RISK_SCOPE_GITHUB_API_PR_URL}/reviews?per_page=100"
+    transport.payloads[first] = validator.GitHubJsonResponse(
+        payload=transport.payloads[first],
+        final_url=first,
+        next_url="https://example.com/reviews?page=2&per_page=100",
+    )
+
+    assert not validator.GitHubRiskScopeVerifier(transport=transport).verify(
+        binding, delivery["completion_evidence"]
+    )
+
+
+@pytest.mark.parametrize("mutation", ["loop", "skip", "too_many_items"])
+def test_review_pagination_malformed_or_over_bound_fails_closed(mutation: str) -> None:
+    delivery = trusted_delivery()
+    binding = risk_scope_evidence_binding()["successor_evidence_binding"]
+    transport = github_fixture_transport(delivery)
+    first = f"{validator.RISK_SCOPE_GITHUB_API_PR_URL}/reviews?per_page=100"
+    if mutation == "loop":
+        next_url = first
+        payload = transport.payloads[first]
+    elif mutation == "skip":
+        next_url = f"{first}&page=3"
+        payload = transport.payloads[first]
+    else:
+        next_url = None
+        payload = [
+            _review(
+                200000 + index,
+                f"observer-{index}",
+                "COMMENTED",
+                "2026-08-28T00:00:00Z",
+            )
+            for index in range(101)
+        ]
+    transport.payloads[first] = validator.GitHubJsonResponse(
+        payload=payload,
+        final_url=first,
+        next_url=next_url,
+    )
+
+    assert not validator.GitHubRiskScopeVerifier(transport=transport).verify(
+        binding, delivery["completion_evidence"]
+    )
+
+
+def test_production_wiring_break_fails_closed(monkeypatch: pytest.MonkeyPatch) -> None:
+    delivery = trusted_delivery()
+    binding = risk_scope_evidence_binding()["successor_evidence_binding"]
+
+    def disconnected_transport(self, url: str, timeout_seconds: float) -> object:
+        raise OSError("transport disconnected")
+
+    monkeypatch.setattr(validator.GitHubJsonTransport, "get_json", disconnected_transport)
+    assert not validator.GitHubRiskScopeVerifier().verify(binding, delivery["completion_evidence"])
 
 
 def test_task051_boundary_must_explicitly_model_external_facts(
@@ -993,6 +1376,63 @@ def test_task030_all_historical_completion_facts_are_frozen_via_validate_tasks(
     )
 
 
+def test_task030_repository_blob_matches_immutable_historical_oid() -> None:
+    path = ROOT / "tasks" / "completed" / "TASK-030-risk-validator-integration-scope.md"
+    assert validator.git_blob_oid(path.read_bytes()) == validator.RISK_HISTORICAL_TASK_BLOB_OID
+
+
+@pytest.mark.parametrize("mutation", ["title", "body", "scope", "completion"])
+def test_task030_any_byte_level_history_rewrite_is_rejected_by_validate_tasks(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    mutation: str,
+) -> None:
+    source = ROOT / "tasks" / "completed" / "TASK-030-risk-validator-integration-scope.md"
+    text = source.read_text(encoding="utf-8")
+    replacements = {
+        "title": ("title: Authorize unified", "title: Rewrite unified"),
+        "body": ("# Objective", "# Rewritten Objective"),
+        "scope": (
+            "  - tasks/active/TASK-029-risk-runtime-schema-contract.md",
+            "  - tasks/active/TASK-999-risk-runtime-schema-contract.md",
+        ),
+        "completion": ("acceptance_status: unverified", "acceptance_status: passed"),
+    }
+    old, new = replacements[mutation]
+    assert old in text
+    task_root = tmp_path / "tasks"
+    path = task_root / "completed" / source.name
+    path.parent.mkdir(parents=True)
+    path.write_text(text.replace(old, new, 1), encoding="utf-8")
+    monkeypatch.setattr(validator, "ROOT", tmp_path)
+    monkeypatch.setattr(validator, "TASK_ROOT", task_root)
+    monkeypatch.setattr(validator, "task_files", lambda: [path])
+    monkeypatch.setattr(validator, "validate_active_readme", lambda tasks, errors: None)
+    original_load_yaml = validator.load_yaml
+
+    def fake_load_yaml(candidate: Path):
+        if candidate == task_root / "governance-waivers.yaml":
+            return {"schema_version": 1, "waivers": []}
+        if candidate == task_root / "index.yaml":
+            return {
+                "tasks": [
+                    {
+                        "id": "TASK-030",
+                        "path": f"completed/{source.name}",
+                        "status": "completed",
+                        "depends_on": ["TASK-015"],
+                    }
+                ]
+            }
+        return original_load_yaml(candidate)
+
+    monkeypatch.setattr(validator, "load_yaml", fake_load_yaml)
+    errors: list[str] = []
+    validate_tasks({}, errors)
+
+    assert "TASK-030 historical file bytes do not match immutable Git blob" in errors
+
+
 def test_task029_human_activation_without_external_facts_is_denied(
     monkeypatch: pytest.MonkeyPatch,
     isolated_task_root: Path,
@@ -1045,14 +1485,14 @@ def test_task051_risk_scope_gate_requires_trusted_completed_delivery(
         "  completion_evidence:\n"
         "    mode: governance_closeout_after_independent_review\n"
         "    change_pr: https://github.com/qifuxiao/QuantiQmt/pull/87\n"
-        "    reviewed_head_sha: 0123456789abcdef0123456789abcdef01234567\n"
+        f"    reviewed_head_sha: {FIXTURE_REVIEWED_HEAD}\n"
         "    review_verdict: APPROVE\n"
         "    reviewer: independent-reviewer\n"
         "    evidence_url: https://github.com/qifuxiao/QuantiQmt/pull/87"
-        "#pullrequestreview-99999\n"
-        "    merge_commit_sha: 89abcdef0123456789abcdef0123456789abcdef\n"
-        "    human_authorization_evidence: github-merge:qifuxiao/QuantiQmt#87:"
-        "89abcdef0123456789abcdef0123456789abcdef:qifuxiao\n"
+        f"#pullrequestreview-{FIXTURE_REVIEW_ID}\n"
+        f"    merge_commit_sha: {FIXTURE_MERGE_COMMIT}\n"
+        "    human_authorization_evidence: https://github.com/qifuxiao/QuantiQmt/pull/87"
+        f"#issuecomment-{FIXTURE_AUTHORIZATION_ID}\n"
     )
     if successor_state == "active":
         successor_status = "active"
@@ -1148,12 +1588,7 @@ def test_task051_risk_scope_gate_requires_trusted_completed_delivery(
         monkeypatch.setattr(validator, "load_yaml", fake_load_yaml)
         if successor_state == "trusted_completed":
             transport = github_fixture_transport(trusted_delivery())
-
-            class StateFixtureVerifier(FixtureGitHubVerifier):
-                def __init__(self) -> None:
-                    super().__init__(transport)
-
-            monkeypatch.setattr(validator, "GitHubRiskScopeVerifier", StateFixtureVerifier)
+            install_fixture_verifier(monkeypatch, transport)
         errors: list[str] = []
         validate_tasks({}, errors)
         denied = any(
