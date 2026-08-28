@@ -14,11 +14,17 @@ allowed_paths:
   - tasks/active/README.md
   - tasks/completed/README.md
   - tasks/index.yaml
+  - tests/spec/test_order_registration_binding_contracts.py
 forbidden_paths:
   - src/**
   - spec/**
   - migrations/**
-  - tests/**
+  - tests/unit/**
+  - tests/property/**
+  - tests/contract/**
+  - tests/integration/**
+  - tests/spec/test_validate_specs.py
+  - tests/spec/test_task_052_delivery_evidence.py
   - scripts/**
   - .github/**
   - docs/**
@@ -91,11 +97,16 @@ delivery，而 TASK-004 正等待 TASK-052 revalidation。该循环是治理排�
    fail-closed 结果：
    - 若证据足够，只允许精确修正 TASK-048 的依赖/任务元数据，保留 TASK-017 与
      TASK-050 的可信门禁以及全部业务 scope、acceptance、binding/UNBOUND 安全边界；
+     若 `depends_on` 改变，只允许同步
+     `tests/spec/test_order_registration_binding_contracts.py` 中
+     `test_manifest_and_task_handoff_record_spec_change` 对 TASK-048 dependency 的精确
+     治理断言，不得修改该文件的其他断言或测试；
    - 若证据不足，TASK-048 保持原样 blocked，只在 TASK-053 正文中记录一个具有
      精确职责、依赖和独立授权要求的 remediation successor 方案；不得自行创建、
      激活或实施该 successor。
 3. TASK-048 metadata 不得在本激活 PR 中顺带修改。任何后续 correction 必须属于
-   TASK-053 的单独实施 Head，并经独立 Review、CI 与人类 merge。
+   TASK-053 的单独实施 Head；上述精确测试同步必须与 metadata correction 位于同一
+   Head，并经独立 Review、CI 与人类 merge。
 4. TASK-053 治理实现可信合并后，仍不得自动激活 TASK-048。人类只能另行激活
    TASK-048，或另行授权并激活审计选择的精确 remediation task。
 5. remediation 业务实现完成、独立 Review、CI 与 merge 可信后，才可由人类重新
@@ -108,8 +119,11 @@ delivery，而 TASK-004 正等待 TASK-052 revalidation。该循环是治理排�
 
 - 不实现或修改 TASK-048 的 runtime DTO、serialization、Memory/PostgreSQL adapter、
   `002` migration 或任何 business test。
-- 不修改 `src/**`、`spec/**`、`migrations/**`、`tests/**`、`scripts/**`、CI、依赖、
-  lockfile、运行时、部署或发布文件。
+- 不修改 `src/**`、`spec/**`、`migrations/**`、任何业务测试、`scripts/**`、CI、依赖、
+  lockfile、运行时、部署或发布文件。后续实施唯一测试写权限是同步
+  `tests/spec/test_order_registration_binding_contracts.py` 中 TASK-048 dependency 的
+  精确治理断言；不得新增、删除或改名测试，不得修改该文件的 BOUND/UNBOUND、legacy
+  no-rebinding、manifest、storage、Repository 或 Workflow 契约断言。
 - 不改变 Event、Command、DTO、错误码、状态迁移、Repository 或 Workflow 契约。
 - 不修改 TASK-004 delivery，不完成 TASK-052，不自动激活 TASK-048/TASK-052 或任何
   下游任务。
@@ -120,8 +134,12 @@ delivery，而 TASK-004 正等待 TASK-052 revalidation。该循环是治理排�
 - 本激活 PR：TASK-053 active task、TASK-052 backlog/blocked 暂停投影、唯一 active
   README 与 `tasks/index.yaml` 一致性；不修改 TASK-048。
 - 后续 TASK-053 实施 PR：TASK-048 依赖语义审计及上述二选一治理决策，只使用精确
-  allowed paths，并记录 exact Base/Head、changed paths、验证、独立 Review 与 merge
-  证据。
+  allowed paths；若修正 dependency，同步唯一精确治理断言，并记录 exact Base/Head、
+  changed paths、验证、独立 Review 与 merge 证据。
+- 不预留新的 task-owned test/evidence 路径：现有精确 binding contract test 已同时
+  覆盖 TASK-048 dependency handoff 和不可削弱的安全断言，新增路径会重复证据并扩大
+  权限。若未来审计发现现有测试无法表达新治理不变量，必须先取得新的精确人类授权，
+  不得在 TASK-053 内自行扩展 allowed paths。
 - 明确后续手工门禁：治理合并 → 人类激活精确 remediation → remediation 可信合并
   → 人类重新激活 TASK-052 → PostgreSQL 16 revalidation。
 
@@ -133,13 +151,16 @@ delivery，而 TASK-004 正等待 TASK-052 revalidation。该循环是治理排�
   metadata，或保持 TASK-048 不变并记录需另行授权的精确 successor 方案。
 - [ ] 若修正 TASK-048，只改变依赖/任务元数据；TASK-017、TASK-050、全部业务
   acceptance、allowed/forbidden paths、BOUND/UNBOUND 与 no-rebinding 边界保持。
+  唯一允许的测试变化是同步 `test_manifest_and_task_handoff_record_spec_change` 中
+  TASK-048 dependency 的精确治理断言，该测试文件其余断言与测试保持不变并通过。
 - [ ] TASK-053 是唯一 active task；TASK-052 为 backlog/blocked，TASK-048 仍为
   backlog/blocked 且未自动激活，目录/status/index/active README 完全一致。
 - [ ] TASK-004 保持 `acceptance_status: unverified`、
   `review_status: reported_unverified`、`release_status: prohibited`，没有 waiver、
   inferred approval 或 activation PR 证据替代。
-- [ ] 没有修改任何业务实现、规范、migration、现有测试、validator、CI、依赖、
-  runtime、部署或发布文件；exact allowed/forbidden path audit 通过。
+- [ ] 没有修改任何业务实现、规范、migration、业务测试、validator、CI、依赖、
+  runtime、部署或发布文件；除上述精确 dependency 断言同步外没有测试变化，exact
+  allowed/forbidden path audit 通过。
 - [ ] TASK-053 实施 Head 的所有 verification commands 与 CI 通过，并获得不同作者的
   独立正式 `APPROVED` Review；实现 Agent 不自审、不 approve、不 merge。
 - [ ] 治理 closeout 只给后续人类激活精确 remediation 提供输入，不自动激活任何
@@ -161,6 +182,8 @@ delivery，而 TASK-004 正等待 TASK-052 revalidation。该循环是治理排�
 - 是否真正解除排序循环，而没有把不可信 TASK-004 历史 delivery 伪装成已验证。
 - 是否保留 TASK-048 的 Spec 0.14 BOUND/UNBOUND、no-rebinding、expand-only migration
   与 fail-closed 安全边界。
+- 若 TASK-048 dependency 改变，binding contract test 是否只同步了对应治理断言，
+  且所有 BOUND/UNBOUND、legacy no-rebinding 与规范契约断言原样保留。
 - 是否严格分离治理 correction、业务 remediation、TASK-052 revalidation 与发布。
 - 是否存在越权业务路径、自动激活、waiver、self-review 或 release 状态提升。
 
