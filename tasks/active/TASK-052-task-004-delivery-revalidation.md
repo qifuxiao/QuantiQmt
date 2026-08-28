@@ -12,7 +12,9 @@ allowed_paths:
   - tasks/index.yaml
   - tasks/completed/TASK-004-persistence-outbox.md
   - ai/governance/task-004-delivery-revalidation-task-052.yaml
-  - tests/spec/test_validate_specs.py
+  - scripts/validate_task_052_delivery_evidence.py
+  - tests/spec/test_task_052_delivery_evidence.py
+  - tests/integration/persistence/test_task_052_migration_revalidation.py
 forbidden_paths:
   - src/**
   - spec/**
@@ -20,28 +22,33 @@ forbidden_paths:
   - tests/unit/**
   - tests/property/**
   - tests/contract/**
-  - tests/integration/**
+  - tests/integration/market/**
+  - tests/integration/persistence/test_postgres_order_persistence.py
+  - tests/integration/persistence/test_migration_and_ci_contract.py
   - .github/**
   - pyproject.toml
   - poetry.lock
   - tasks/backlog/TASK-048-order-registration-broker-capability-binding.md
 verification:
   commands:
-    - git rev-parse HEAD
     - poetry run python scripts/validate_specs.py
-    - poetry run pytest tests/spec/test_validate_specs.py
+    - poetry run pytest tests/spec/test_task_052_delivery_evidence.py
     - poetry run pytest tests/unit/order/application/test_persistence_model.py
     - poetry run pytest tests/contract/persistence/test_order_persistence_contract.py
     - poetry run pytest tests/integration/persistence/test_migration_and_ci_contract.py
+    - docker pull postgres:16
+    - poetry run python -c "import json, subprocess; image=json.loads(subprocess.check_output(['docker','image','inspect','postgres:16'], text=True))[0]; digests=image.get('RepoDigests') or []; matches=[value for value in digests if '@sha256:' in value]; print('\n'.join(matches)); raise SystemExit(0 if matches else 'postgres:16 has no immutable RepoDigest')"
     - docker run --detach --rm --name quantiqmt-task-052-postgres -e POSTGRES_USER=quantiqmt -e POSTGRES_PASSWORD=quantiqmt -e POSTGRES_DB=quantiqmt_task052 -p 55432:5432 postgres:16
     - docker exec quantiqmt-task-052-postgres pg_isready -U quantiqmt -d quantiqmt_task052
-    - docker exec quantiqmt-task-052-postgres psql -U quantiqmt -d quantiqmt_task052 -Atqc "SHOW server_version_num"
+    - poetry run python -c "import subprocess; value=subprocess.check_output(['docker','exec','quantiqmt-task-052-postgres','psql','-U','quantiqmt','-d','quantiqmt_task052','-Atqc','SHOW server_version_num'], text=True).strip(); print(value); raise SystemExit(0 if value.isdecimal() and 160000 <= int(value) < 170000 else f'expected PostgreSQL 16.x server_version_num, got {value!r}')"
     - poetry run python -c "import os, subprocess, sys; env={**os.environ, 'QUANTIQMT_POSTGRES_DSN':'postgresql://quantiqmt:quantiqmt@localhost:55432/quantiqmt_task052'}; raise SystemExit(subprocess.call([sys.executable, '-m', 'pytest', 'tests/integration/persistence/test_postgres_order_persistence.py', 'tests/integration/persistence/test_migration_and_ci_contract.py'], env=env))"
+    - poetry run python -c "import os, subprocess, sys; env={**os.environ, 'QUANTIQMT_POSTGRES_DSN':'postgresql://quantiqmt:quantiqmt@localhost:55432/quantiqmt_task052'}; raise SystemExit(subprocess.call([sys.executable, '-m', 'pytest', 'tests/integration/persistence/test_task_052_migration_revalidation.py', '-q'], env=env))"
     - poetry run python -c "import os; from pathlib import Path; from time import monotonic_ns; from quantiqmt.order.infrastructure.postgres import PostgresOrderPersistence; store=PostgresOrderPersistence('postgresql://quantiqmt:quantiqmt@localhost:55432/quantiqmt_task052'); migrations=[path.read_text(encoding='utf-8') for path in sorted(Path('migrations').glob('*.sql'))]; [store.apply_migration(sql, deadline_monotonic_ns=monotonic_ns()+60000000000) for _ in range(2) for sql in migrations]"
     - poetry run pytest tests/unit/order/application tests/contract/persistence tests/integration/persistence
     - poetry run mypy src/quantiqmt/order/application/persistence src/quantiqmt/order/infrastructure src/quantiqmt/messaging/outbox
     - poetry run ruff check src/quantiqmt/order/application/persistence src/quantiqmt/order/infrastructure src/quantiqmt/messaging/outbox tests/unit/order/application tests/contract/persistence tests/integration/persistence
     - poetry run ruff format --check src/quantiqmt/order/application/persistence src/quantiqmt/order/infrastructure src/quantiqmt/messaging/outbox tests/unit/order/application tests/contract/persistence tests/integration/persistence
+    - poetry run python scripts/validate_task_052_delivery_evidence.py --evidence ai/governance/task-004-delivery-revalidation-task-052.yaml --repository qifuxiao/QuantiQmt
     - git diff --check origin/main...HEAD
     - git diff --name-only origin/main...HEAD
     - docker stop quantiqmt-task-052-postgres
@@ -170,31 +177,91 @@ TASK-048 `blocked`、release prohibited。
    文件。
 2. remediation 合并后，从最新 `origin/main` 开始新的 revalidation 回合；在
    `ai/governance/task-004-delivery-revalidation-task-052.yaml` 记录 exact base
-   main SHA、exact revalidation PR Head、accepted spec version、完整 inventory、
-   command/result/exit code 与 path audit。Head 变化后全部 acceptance 命令必须重跑。
+   main SHA、执行最终校验时的 exact `origin/main` SHA、exact revalidation PR
+   number/Head、merge-base、accepted spec baseline、完整 inventory、command/result/
+   exit code 与 path audit。Head 变化后全部 acceptance 命令必须重跑。
 3. 使用全新 PostgreSQL 16 容器 `quantiqmt-task-052-postgres` 和独立数据库
    `quantiqmt_task052`，显式 DSN 为
    `postgresql://quantiqmt:quantiqmt@localhost:55432/quantiqmt_task052`；确认
-   `server_version_num` 以 `16` 开头，缺少服务/driver/DSN 时 fail closed。
+   `server_version_num` 位于 `[160000, 170000)`，否则命令非零退出；记录本次
+   `docker pull postgres:16` 后 `docker image inspect` 返回的 immutable
+   `RepoDigest`。缺少 digest、服务、driver 或 DSN 时 fail closed。
 4. 按 `verification.commands` 验证 migration 按文件名顺序重复应用、expand-only
-   rollback safety、Order+Journal+Outbox 原子性、幂等/唯一竞争/CAS、Journal
-   chain、Snapshot corruption/full replay、projection rebuild、recovery paging、
-   Outbox publish-before-ack/reclaim/fencing/retry/dead-letter，以及当前
-   BOUND/UNBOUND compatibility。任何失败均不得改为 skip。
+   rollback safety，并显式执行 task-owned migration probe；同时验证
+   Order+Journal+Outbox 原子性、幂等/唯一竞争/CAS、Journal chain、Snapshot
+   corruption/full replay、projection rebuild、recovery paging、Outbox
+   publish-before-ack/reclaim/fencing/retry/dead-letter，以及当前 BOUND/UNBOUND
+   compatibility。任何缺少 `002`、DSN 或断言失败均不得改为 skip。
 5. 对同一 exact revalidation Head 完成 Mypy、Ruff、治理 validator、完整相关测试
    与 GitHub CI。独立 Review 必须依据 `ai/review/**` 给出正式 `APPROVED`，并绑定
    exact Head、reviewer 与 evidence URL；实现/治理 Agent 不得自批。
 6. PR 合并后记录 merge commit。只有 exact Head acceptance、独立 APPROVED Review、
    CI success、merge 与人类 closeout authorization 全部可审计时，后续受控
-   closeout 才能把 TASK-004 acceptance/review 更新为 `passed`/`approved`，把
-   completion evidence 指向这次新的 revalidation 事实，并迁移 TASK-052 lifecycle。
-   历史不可验证事实仍不得被描述成历史 APPROVE。
+   closeout 才能运行最终 evidence validator。validator 通过后才能把 TASK-004
+   acceptance/review 更新为 `passed`/`approved`，把 completion evidence 指向
+   这次新的 revalidation 事实，并迁移 TASK-052 lifecycle。历史不可验证事实仍
+   不得被描述成历史 APPROVE。
 7. TASK-004 获得新可信 delivery 后只能重新评估 TASK-048 的全部依赖和当前范围；
    TASK-052 不自动激活 TASK-048 或任何下游任务。
 
+## Frozen machine-verification contracts
+
+### Final delivery evidence validator
+
+- 后续实施只能在精确路径
+  `scripts/validate_task_052_delivery_evidence.py` 新增最终证据验证器，并在
+  `tests/spec/test_task_052_delivery_evidence.py` 为其增加确定性正例及缺字段、
+  mismatch、API failure、unmerged、非 exact-Head Review/check-run 等负例。不得
+  借此修改通用 validator、放宽 TASK-004/TASK-048 门禁或接受离线 prose 代替
+  GitHub 事实。
+- 唯一权威输入为
+  `ai/governance/task-004-delivery-revalidation-task-052.yaml`、本地 Git objects/
+  `origin` remote 与 `--repository qifuxiao/QuantiQmt` 指定仓库的实时 GitHub API。
+  artifact 必须至少包含：task/repository、base 与最终 `origin/main` SHA、PR number、
+  author、exact Head、merge-base、accepted spec version 及 `spec/manifest.yaml` blob
+  SHA-256、每个 exact-Head check-run 的 ID/name/status/conclusion/URL、正式 Review
+  ID/URL/reviewer/author association/state/`commit_id`、PR merged state 与 merge
+  commit，以及 PostgreSQL image digest/`server_version_num` 和逐命令结果。
+- 验证器必须先 fetch `origin/main`，逐项比较 artifact 与本地 Git/GitHub 实时事实：
+  记录最终 `origin/main` 的 exact SHA；PR number、author 与 Head；Head 对记录 base
+  的 merge-base；merge-base 上 accepted manifest 的 version/status/blob digest；
+  exact Head 的所有 check-runs 均为 `COMPLETED/SUCCESS` 且 artifact 未漏记；正式
+  Review 为 `APPROVED`、`commit_id` 等于 exact Head、reviewer 不同于 PR author、
+  reviewer association 为 `COLLABORATOR`/`MEMBER`/`OWNER` 且 URL/reviewer 一致；
+  PR 的实时规范化状态为 `MERGED`、merge commit 与 artifact 一致，并且该 merge
+  commit 是最终 `origin/main` 的祖先。
+- artifact 缺字段、格式错误、任何值不一致、Git/GitHub API/认证/网络失败、check
+  非全绿、Review 非正式或非 exact Head、reviewer 是作者/非 collaborator、PR 未
+  merge、merge commit 不可达时，验证器都必须给出非零退出；禁止 warning-only、
+  cached response、人工复制的 `git rev-parse` 输出或 activation PR CI 充当通过。
+
+### TASK-052 migration revalidation probe
+
+- 后续实施只可新增
+  `tests/integration/persistence/test_task_052_migration_revalidation.py`；这也是唯一从
+  原 `tests/integration/**` 禁止范围精确放行的 probe。现有 integration tests 仍
+  forbidden，其他 integration 路径也不在 `allowed_paths`。probe 不得实现或修改
+  migration/runtime，只消费另行授权并已可信合并的 `001`/`002` artifacts。
+- probe 必须在独立 PostgreSQL 16 数据库中先仅应用 `001`，构造含 Order、Journal、
+  Snapshot、Outbox 与已记录 raw/canonical checksum 的 legacy 数据；再按顺序应用
+  `001 -> 002` 并重复完整序列，断言 schema migration idempotent、既有行与关联链
+  全部保留。
+- legacy 行不得依据账户、环境或默认值推测 backfill `broker`/
+  `broker_capability_version`；读取/恢复时只能在原始 checksum 验证后得到规范定义的
+  `UNBOUND`。新 BOUND 数据必须逐轮保持准确的 broker/capability version。迁移前后
+  Journal continuity、Snapshot/Outbox payload 与 checksum、registration checksum、
+  row counts 和 identity 必须逐项相等或满足规范明确的 expand-only 增量。
+- probe 必须注入一次事务内失败并验证失败 rollback 后 schema/data/checksum 与失败
+  前完全一致；成功升级后的 operational rollback 只能停止 writer/worker，必须
+  保留新增 columns、所有 rows、Journal、Snapshot、Outbox 与 checksums，禁止
+  destructive downgrade、DROP、DELETE 或历史覆盖。缺少 `002`、DSN、PostgreSQL
+  16、任一 preservation assertion 时必须失败，不得 skip。
+
 ## Non-goals
 
-- 不修改 `src/**`、`spec/**`、`migrations/**`、业务测试、CI、依赖或 lockfile。
+- 不修改 `src/**`、`spec/**`、`migrations/**`、现有业务测试、CI、依赖或 lockfile；
+  仅允许后续在上述精确路径新增 task-owned evidence validator/test 与 migration
+  revalidation probe。
 - 不追溯、猜测、替换或伪造 TASK-004 的历史 PR、Head、Review、CI、merge、
   reviewer 或人类授权。
 - 不使用 waiver、completed 目录位置或当前测试全绿绕过可信依赖门禁。
@@ -208,14 +275,16 @@ TASK-048 `blocked`、release prohibited。
 - [ ] 当前规范与 runtime/migration/test inventory 无未授权缺口；上面记录的
   broker binding/`002` 阻断已由独立、经授权且可信合并的 remediation 解决，
   TASK-052 未修改任何业务、规范或 migration 文件。
-- [ ] PostgreSQL 16 隔离环境、`QUANTIQMT_POSTGRES_DSN`、driver 和 server version
-  均有可审计证据；integration tests 无 skip/sleep/替代存储。
+- [ ] PostgreSQL 16 隔离环境、`QUANTIQMT_POSTGRES_DSN`、driver、实际 image
+  RepoDigest 和强断言通过的 `server_version_num` 均有可审计证据；非 16.x 必须
+  非零退出，integration tests 无 skip/sleep/替代存储。
 - [ ] 全套 persistence unit、contract、PostgreSQL integration tests 通过，覆盖
   Order+Journal+Outbox 原子提交、幂等/冲突、唯一竞争、CAS、Journal continuity/
   checksum/append-only、Snapshot invalid fallback、full replay、projection rebuild
   与 recovery enumeration。
-- [ ] Migration 按顺序重复执行成功，验证 expand-only/idempotency；rollback 只
-  停止 writer/worker 并保留 columns、rows、Journal、Snapshot、Outbox 与审计事实，
+- [ ] 精确 migration probe 构造 `001` legacy 数据，验证 `001 -> 002` 与重复应用、
+  禁止推测 backfill、broker/capability version 语义、Journal/Snapshot/Outbox/
+  checksum preservation；事务失败和 operational rollback 后 schema/data 状态保持，
   无 DROP/DELETE/backfill/历史覆盖。
 - [ ] Outbox claim/reclaim、publish-before-ack duplicate、same message_id、expired
   token fencing、renew/release/ack、bounded retry、dead-letter 与 critical-lag
@@ -225,7 +294,8 @@ TASK-048 `blocked`、release prohibited。
 - [ ] 独立 reviewer 对 exact revalidation Head 提交新的正式 `APPROVED` Review；
   reviewer、verdict、evidence URL 与 reviewed Head 可独立核验，非实现者自审。
 - [ ] GitHub CI 在 exact reviewed Head 成功，revalidation PR 已合并且 merge commit
-  可核验，并取得人类 closeout authorization。
+  可核验，并取得人类 closeout authorization；最终 evidence validator 对实时 Git/
+  GitHub 事实和 evidence artifact 的逐项 fail-closed 比较以退出码 0 完成。
 - [ ] 只有上述新证据全部满足后，TASK-004 delivery metadata 才从
   `unverified`/`reported_unverified` 受控更新为 `passed`/`approved`；更新明确
   表示当前 main revalidation，不把历史事实重写为已验证。
@@ -236,10 +306,13 @@ TASK-048 `blocked`、release prohibited。
 
 - 使用 `ai/workflows/implement-task.md` 格式记录 task、spec refs、changed files、
   逐项 acceptance、命令/exit code、未验证范围、风险和 spec deviations。
-- 记录 PostgreSQL image digest/version、DSN（仅测试凭据）、migration 顺序与两次
-  应用结果、rollback preservation audit、测试数量与失败/skip 数。
+- 记录 `postgres:16` 实际 immutable RepoDigest、强断言通过的
+  `server_version_num`、DSN（仅测试凭据）、migration probe 的 legacy fixture、
+  顺序与两次应用结果、失败/rollback preservation audit、测试数量与失败/skip 数。
 - 记录 exact base/head、PR URL、GitHub CI URLs/conclusions、独立 Review
   verdict/reviewer/evidence URL/reviewed Head、merge commit 和人类 closeout 授权。
+- 保存最终 evidence validator 的命令、stdout/stderr、退出码和运行时
+  `origin/main` SHA；validator 未以 0 退出时禁止更新 TASK-004 metadata。
 - 未能独立复验的事实必须保持 `unverifiable`；不得用 prose 或测试全绿代替
   GitHub Review/merge evidence。
 
@@ -252,7 +325,8 @@ TASK-048 `blocked`、release prohibited。
 - 核对 TASK-004 metadata 更新只引用新的 revalidation 事实，未制造历史 APPROVE，
   且 TASK-048 仍 blocked、release prohibited。
 - 核对 changed paths 只属于 governance evidence、受控 metadata、TASK-052
-  lifecycle 和必要 validator test；不得借 revalidation 修改业务实现。
+  lifecycle、精确 validator/test 与 migration probe；不得借 revalidation 修改
+  业务实现、migration 或现有业务测试。
 
 ## Risks and rollback
 
