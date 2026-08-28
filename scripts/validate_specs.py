@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from jsonschema.validators import Draft202012Validator  # type: ignore[import-untyped]
+from jsonschema.validators import Draft202012Validator  # type: ignore[import-untyped,unused-ignore]
 
 ROOT = Path(__file__).resolve().parents[1]
 GIT_ROOT = ROOT
@@ -137,7 +137,15 @@ class GitHubJsonResponse:
 
 
 class _RejectRedirects(urllib.request.HTTPRedirectHandler):
-    def redirect_request(self, req, fp, code, msg, headers, newurl):
+    def redirect_request(
+        self,
+        req: Any,
+        fp: Any,
+        code: int,
+        msg: str,
+        headers: Any,
+        newurl: str,
+    ) -> None:
         return None
 
 
@@ -1088,18 +1096,18 @@ def load_risk_scope_evidence_binding(errors: list[str]) -> dict[str, Any] | None
                 "ai/governance/risk-validator-integration-scope-task-051.yaml: "
                 "production verifier endpoints must remain fixed to PR 87"
             )
-        expected_bounds = {
+        expected_bounds: dict[str, object] = {
             "max_response_bytes": RISK_SCOPE_MAX_RESPONSE_BYTES,
             "max_review_pages": RISK_SCOPE_MAX_REVIEW_PAGES,
             "max_review_items": RISK_SCOPE_MAX_REVIEW_ITEMS,
             "redirect_policy": "reject_all",
             "authorization_header": "not_sent",
         }
-        for field, expected_value in expected_bounds.items():
-            if production_verifier.get(field) != expected_value:
+        for bound_field, bound_value in expected_bounds.items():
+            if production_verifier.get(bound_field) != bound_value:
                 errors.append(
                     "ai/governance/risk-validator-integration-scope-task-051.yaml: "
-                    f"production verifier {field} must be {expected_value}"
+                    f"production verifier {bound_field} must be {bound_value}"
                 )
         if production_verifier.get("failure_policy") != (
             "network_timeout_rate_limit_404_invalid_json_or_mismatch_denies"
