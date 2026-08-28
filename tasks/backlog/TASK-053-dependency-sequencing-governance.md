@@ -1,7 +1,7 @@
 ---
 id: TASK-053
 title: Resolve TASK-052 and TASK-048 dependency sequencing deadlock
-status: active
+status: blocked
 depends_on: [TASK-031, TASK-043, TASK-049, TASK-050]
 spec_refs: [REVIEW-IMPLEMENTATION-READINESS-0.5]
 allowed_paths:
@@ -56,6 +56,15 @@ delivery:
 
 以 fail-closed 的治理顺序解除 TASK-052 与 TASK-048 的 sequencing deadlock，不修改
 任何业务实现、规范、migration、业务测试、CI、依赖文件、运行时或部署发布资产。
+
+## Human reprioritization pause
+
+- 2026-08-28 人类明确批准把已讨论的 Mini QMT 强制 M1 目标、AI 开发规则和本地配置
+  边界写入项目，以便随后使用 Codex/Cline 尽快交付可运行系统。
+- 为保持唯一 active task，TASK-053 原样暂停到 backlog/blocked；其 dependency audit、
+  acceptance、delivery 五轴和 release prohibition 均未被完成、降低或豁免。
+- TASK-054 是文档与开发治理任务，不实施 TASK-053、TASK-048 或任何交易业务代码；
+  TASK-054 closeout 后仍需人类另行恢复 TASK-053 或选择其他业务 task。
 
 TASK-052 已确认当前 Spec 0.14 broker binding、`002` migration 与对应测试缺口阻断
 TASK-004 revalidation；TASK-048 定义该 remediation，却直接依赖 TASK-004 的可信

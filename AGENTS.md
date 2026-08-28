@@ -2,6 +2,20 @@
 
 本仓库由人类与 Codex、Claude Code、Gemini、Cursor 等 AI Agent 协作开发。所有 Agent 必须遵守以下规则。
 
+## 产品交付北极星
+
+- 项目目标是可长期运行的量化交易系统，不是只交付 Python 包、契约集合或 Notebook。
+- 当前首要里程碑是 M1：必须连接 Mini QMT，并以精确 allowlist 的模拟资金账号完成
+  行情/账户查询和一笔受控模拟委托的端到端闭环。
+- Broker Simulator 是确定性测试与故障注入基线，不能替代 M1 的 Mini QMT 验收。
+- “尽快可运行”不授权绕过 `OrderIntent → OMS 注册 → Risk → OMS 迁移 → Execution`，
+  也不降低 PostgreSQL、审计、UNKNOWN、对账、恢复屏障或 Kill Switch 要求。
+- M1 禁止真实资金交易。任何真实资金账号接入、下单或发布必须由独立 task、评审和
+  人类明确授权；仅设置环境变量或 profile 不能获得该权限。
+- 详细产品目标和 M1 验收分别见
+  `docs/00-Architecture/06-Product-North-Star.md` 与
+  `docs/00-Architecture/07-M1-MiniQMT-Simulation-Delivery.md`。它们不得覆盖 `spec/`。
+
 ## 开始任务前
 
 1. 读取本文件以及目标目录内更近的 `AGENTS.md`（若存在）。
@@ -41,6 +55,26 @@
 - 保持 Domain 纯净，I/O 位于 Port/Adapter 边界。
 - 队列、重试、并发、缓存和外部调用必须有界且有 timeout。
 - 新增公共行为必须包含日志、指标、错误码和失败路径。
+- Mini QMT adapter 必须位于 Port/Adapter 边界；策略不得导入或调用 `xtquant`。
+- Mini QMT 默认只读、默认禁止发单、默认 Kill Switch 生效；启动时必须精确校验
+  `userdata_mini`、session、account type 和模拟账号 allowlist，任何不确定均 fail-closed。
+- Mini QMT 客户端登录凭据不得写入代码、`.env.example`、task、Prompt、fixture、日志或
+  Git。通常由已登录客户端提供会话；若券商版本确需 secret，只允许使用受控 secret
+  provider，并在 task 中明确验证与脱敏边界。
+- 回测运行只能读取版本化、带 checksum 的不可变历史快照；Mini QMT 可作为数据来源，
+  但回测运行期间不得读取变化中的实时数据或墙上时钟。
+- 回测与模拟实盘共享 Domain、Application、Strategy、OMS、Risk 和 Execution 语义；
+  仅 Market、Clock、Scheduler、Broker adapter 等边界实现不同。
+
+## AI 开发指令
+
+- Codex、Cline 与其他 Agent 必须使用同一权威链：本文件 → `spec/manifest.yaml` →
+  唯一 active task → 全部 `spec_refs`；工具适配文件不得复制业务契约。
+- 用户要求“继续开发”时，先报告当前 active task、依赖状态、允许路径和可演示结果；
+  不得以新增治理文档代替已授权的业务实现。
+- Task Prompt 必须写明目标、非目标、allowed/forbidden paths、验收、验证命令、失败路径
+  和预期演示；可使用 `ai/prompts/miniqmt-m1-task.md` 模板。
+- 没有 active 实现 task 时，Agent 只能报告并请求人类激活精确 task，不得自行开始代码。
 
 ## 完成与证据
 

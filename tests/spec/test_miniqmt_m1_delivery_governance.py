@@ -1,0 +1,108 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+import yaml
+from scripts.validate_specs import extract_front_matter
+
+ROOT = Path(__file__).resolve().parents[2]
+
+
+def _text(relative_path: str) -> str:
+    return (ROOT / relative_path).read_text(encoding="utf-8")
+
+
+def _yaml(relative_path: str) -> dict[str, object]:
+    value = yaml.safe_load(_text(relative_path))
+    assert isinstance(value, dict)
+    return value
+
+
+def test_task_054_is_the_only_active_task_and_task_053_is_paused() -> None:
+    active = sorted((ROOT / "tasks" / "active").glob("TASK-*.md"))
+    assert [path.name for path in active] == ["TASK-054-miniqmt-m1-delivery-governance.md"]
+    assert extract_front_matter(active[0])["status"] == "active"
+
+    paused = ROOT / "tasks/backlog/TASK-053-dependency-sequencing-governance.md"
+    assert extract_front_matter(paused)["status"] == "blocked"
+
+    entries = _yaml("tasks/index.yaml")["tasks"]
+    assert isinstance(entries, list)
+    indexed = {entry["id"]: entry for entry in entries}
+    assert indexed["TASK-053"]["path"].startswith("backlog/")
+    assert indexed["TASK-053"]["status"] == "blocked"
+    assert indexed["TASK-054"]["path"].startswith("active/")
+    assert indexed["TASK-054"]["status"] == "active"
+
+
+def test_product_rules_make_miniqmt_simulation_account_mandatory_for_m1() -> None:
+    agents = _text("AGENTS.md")
+    north_star = _text("docs/00-Architecture/06-Product-North-Star.md")
+    milestone = _text("docs/00-Architecture/07-M1-MiniQMT-Simulation-Delivery.md")
+
+    for content in (agents, north_star, milestone):
+        assert "Mini QMT" in content
+        assert "模拟账号" in content
+        assert "OrderIntent" in content
+        assert "Risk" in content
+        assert "UNKNOWN" in content
+        assert "真实资金" in content
+
+    assert "Broker Simulator 不能替代 M1" in milestone
+    assert "MINIQMT_SIM_READONLY" in milestone
+    assert "MINIQMT_SIM_TRADING" in milestone
+    assert "LIVE_PROHIBITED" in milestone
+    assert "target interface" in milestone
+
+
+def test_example_configuration_is_fail_closed_and_contains_no_broker_password() -> None:
+    example = _text(".env.example")
+
+    required = {
+        "QUANTIQMT_PROFILE=MINIQMT_SIM_READONLY",
+        "QUANTIQMT_QMT_USERDATA_PATH=",
+        "QUANTIQMT_QMT_ACCOUNT_ID=",
+        "QUANTIQMT_QMT_ACCOUNT_TYPE=STOCK",
+        "QUANTIQMT_QMT_SESSION_ID=12001",
+        "QUANTIQMT_QMT_ALLOWED_ACCOUNT_IDS=",
+        "QUANTIQMT_QMT_ORDER_SEND_ENABLED=false",
+        "QUANTIQMT_KILL_SWITCH_ENGAGED=true",
+    }
+    for line in required:
+        assert line in example
+
+    qmt_lines = [line for line in example.splitlines() if line.startswith("QUANTIQMT_QMT_")]
+    assert all("PASSWORD" not in line and "SECRET" not in line for line in qmt_lines)
+
+
+def test_backtest_and_miniqmt_share_semantics_without_sharing_external_assumptions() -> None:
+    backtest = _text("docs/60-Backtest/Backtest-Architecture.md")
+    milestone = _text("docs/00-Architecture/07-M1-MiniQMT-Simulation-Delivery.md")
+
+    for content in (backtest, milestone):
+        assert "不可变" in content
+        assert "checksum" in content
+        assert "VirtualClock" in content
+        assert "OrderIntent" in content
+        assert "OMS" in content
+        assert "Risk" in content
+        assert "Execution" in content
+    assert "运行期间" in milestone
+    assert "Mini QMT" in milestone
+
+
+def test_codex_and_cline_use_one_tool_neutral_authority_chain() -> None:
+    cline_rule = _text(".clinerules/00-quantiqmt-project.md")
+    cline_adapter = _text("ai/adapters/cline.md")
+    task_prompt = _text("ai/prompts/miniqmt-m1-task.md")
+
+    for content in (cline_rule, cline_adapter, task_prompt):
+        assert "AGENTS.md" in content
+        assert "spec/manifest.yaml" in content
+        assert "tasks/active/" in content
+        assert "allowed_paths" in content
+        assert "verification.commands" in content
+
+    assert "不得复制" in cline_adapter
+    assert "Task: TASK-XXX" in task_prompt
+    assert "不得自行激活" in task_prompt

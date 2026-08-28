@@ -2,6 +2,10 @@
 
 企业级 Python 量化交易系统，目标是安全、稳定、可恢复、可审计，并保持回测与实盘领域语义一致。
 
+当前首个可运行里程碑（M1）必须连接 Mini QMT 模拟资金账号，完成从行情/策略意图到
+OMS、Risk、Execution、Broker 回报、PostgreSQL 恢复和审计证据的端到端闭环。
+Broker Simulator 用于确定性测试，不能替代 Mini QMT M1 验收；真实资金交易保持禁止。
+
 ## 项目入口
 
 - 架构说明：[docs/README.md](docs/README.md)
@@ -9,6 +13,8 @@
 - Agent 任务队列：[tasks/README.md](tasks/README.md)
 - AI 工作流：[ai/README.md](ai/README.md)
 - Agent 持久规则：[AGENTS.md](AGENTS.md)
+- 产品北极星：[docs/00-Architecture/06-Product-North-Star.md](docs/00-Architecture/06-Product-North-Star.md)
+- Mini QMT M1 验收：[docs/00-Architecture/07-M1-MiniQMT-Simulation-Delivery.md](docs/00-Architecture/07-M1-MiniQMT-Simulation-Delivery.md)
 
 ## 当前状态以机器索引为准
 

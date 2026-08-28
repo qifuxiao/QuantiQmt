@@ -44,6 +44,20 @@
 - 所有变更记录 diff、操作者、审批、原因、时间和组件 ACK。
 - 配置日志脱敏；Secret 通过受控 Provider 获取并支持轮换。
 
+## Mini QMT M1 本地配置
+
+`.env.example` 只声明变量和安全默认值；本地 `.env` 必须被 Git 忽略。M1 需要
+`PROFILE`、`QMT_USERDATA_PATH`、`QMT_ACCOUNT_ID`、`QMT_ACCOUNT_TYPE`、唯一 session、
+精确账号 allowlist、`ORDER_SEND_ENABLED`、Kill Switch、单笔硬限额和标的 allowlist。
+
+Mini QMT 通常由桌面客户端完成登录，应用通过 `userdata_mini` 与已登录客户端通信；
+不得为了便利新增明文 password 环境变量。特定券商版本若确需 secret，配置只保存
+secret reference，值由操作系统凭据库或等价受控 Provider 注入。
+
+安全默认值必须是 `MINIQMT_SIM_READONLY`、禁止发单、Kill Switch 生效、空账号 allowlist。
+任何未知字段、路径/API 不兼容、账号不匹配、能力未绑定、查询失败或未完成对账均保持
+SAFE。真实资金能力不是配置开关，必须经过独立 task、评审、发布准入和人类授权。
+
 ## 配置失败
 
 候选版本校验失败不影响当前 active version。部分组件 Prepare/ACK 失败时禁止激活，或按配置域进入 SAFE；不得让同一交易链中的 OMS 和 Risk 长期运行不同版本。
