@@ -4,7 +4,7 @@ record_status: implementation_complete_pending_independent_review
 authorized_on: "2026-08-27"
 repository:
   base_branch: origin/main
-  base_sha: 17fec4553a23f0f209f607c22bb0047590803605
+  base_sha: 5650c3738dceff61862b41e672a96a5cce6fe8e5
   implementation_branch: codex/task-051-risk-validator-scope-successor
   review_binding: exact_head_sha_required_at_handoff
 successor_evidence_binding:
@@ -40,9 +40,25 @@ successor_evidence_binding:
     external_confirmation_required:
       - independent reviewer verifies APPROVE on the exact current PR Head in GitHub
       - human verifies merge and authorizes active-to-completed closeout
+  production_external_verifier:
+    adapter: fixed_github_public_api_task_051_verifier
+    endpoints:
+      - https://api.github.com/repos/qifuxiao/QuantiQmt/pulls/87
+      - https://api.github.com/repos/qifuxiao/QuantiQmt/pulls/87/reviews
+    timeout_seconds: 2
+    verifies:
+      - closed_merged_PR_87_on_main
+      - exact_PR_head_and_merge_commit
+      - APPROVED_review_URL_reviewer_and_commit
+      - reviewer_independent_from_PR_author_and_implementer
+      - human_authorization_bound_to_merged_by_and_merge_commit
+      - local_git_merge_ancestry
+    failure_policy: network_timeout_rate_limit_404_invalid_json_or_mismatch_denies
 concurrent_work:
   observed_branch: origin/codex/task-050-registration-binding-contracts
-  observed_head_sha: eece2db86d5bb5fd4ae36ac390399094ff755da1
+  observed_head_sha: b27f941a3f6fcca46349aa36a208d97fbc5d1281
+  observed_state: merged_into_main
+  merged_commit_sha: 5650c3738dceff61862b41e672a96a5cce6fe8e5
   domain_overlap: none
   shared_projection_paths: [tasks/active/README.md, tasks/index.yaml]
   merge_requirement: preserve_both_active_projections_if_TASK_050_merges_first
@@ -51,7 +67,7 @@ authority:
     2026-08-27 explicit authorization to create, activate and implement TASK-051 as a
     fresh independently reviewed successor authorization for TASK-029.
   accepted_spec:
-    version: 0.13.0
+    version: 0.14.0
     status: accepted
     refs:
       - CONTRACT-RISK-DECISION-V1

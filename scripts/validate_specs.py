@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import json
 import re
+import subprocess
 import sys
-from collections.abc import Callable, Iterable
+import urllib.error
+import urllib.request
+from collections.abc import Iterable
 from datetime import date
 from pathlib import Path
 from typing import Any
@@ -55,6 +58,9 @@ RISK_SCOPE_REQUIRED_DEPENDENCIES = frozenset({"TASK-015", "TASK-031", "TASK-051"
 RISK_SCOPE_GOVERNANCE_PATH = (
     ROOT / "ai" / "governance" / "risk-validator-integration-scope-task-051.yaml"
 )
+RISK_SCOPE_BASE_SHA = "5650c3738dceff61862b41e672a96a5cce6fe8e5"
+RISK_SCOPE_TASK050_HEAD_SHA = "b27f941a3f6fcca46349aa36a208d97fbc5d1281"
+RISK_SCOPE_ACCEPTED_SPEC_VERSION = "0.14.0"
 RISK_SCOPE_REPOSITORY = "qifuxiao/QuantiQmt"
 RISK_SCOPE_PR_NUMBER = 87
 RISK_SCOPE_PR_URL = "https://github.com/qifuxiao/QuantiQmt/pull/87"
@@ -67,6 +73,8 @@ RISK_SCOPE_PENDING_REVIEWED_HEAD = "pending_exact_reviewed_head"
 RISK_SCOPE_PENDING_REVIEW_URL = "pending_github_pull_request_review_url"
 RISK_SCOPE_PENDING_MERGE = "pending_merge_commit"
 RISK_SCOPE_PENDING_HUMAN_AUTHORIZATION = "pending_human_closeout_authorization"
+RISK_SCOPE_EXTERNAL_TIMEOUT_SECONDS = 2.0
+RISK_SCOPE_GITHUB_API_PR_URL = "https://api.github.com/repos/qifuxiao/QuantiQmt/pulls/87"
 RISK_SCOPE_BOUNDARY_REQUIREMENTS = {
     "verifies": {
         "completion evidence exactly matches this TASK-051 binding",
@@ -105,7 +113,138 @@ RISK_HISTORICAL_COMPLETION_EVIDENCE = {
     "merge_commit_sha": "238b0ac2c3c82de88c59a900feca8cbb71d38863",
     "human_authorization_evidence": "unverifiable",
 }
-RiskScopeExternalFactVerifier = Callable[[dict[str, Any], dict[str, Any]], bool]
+
+
+class GitHubJsonTransport:
+    """Bounded, read-only transport for the GitHub facts used by TASK-051."""
+
+    def get_json(self, url: str, timeout_seconds: float) -> object:
+        request = urllib.request.Request(
+            url,
+            headers={
+                "Accept": "application/vnd.github+json",
+                "User-Agent": "QuantiQmt-task-051-validator",
+            },
+        )
+        with urllib.request.urlopen(request, timeout=timeout_seconds) as response:
+            if response.status != 200:
+                raise urllib.error.HTTPError(
+                    url, response.status, "unexpected GitHub response", response.headers, None
+                )
+            return json.loads(response.read().decode("utf-8"))
+
+
+class GitHubRiskScopeVerifier:
+    """Verify TASK-051 facts through a fixed GitHub API contract.
+
+    The only test seam is the concrete JSON transport; callers cannot inject a
+    predicate or otherwise decide the result. Network and malformed responses
+    fail closed.
+    """
+
+    def __init__(
+        self,
+        *,
+        transport: GitHubJsonTransport | None = None,
+        timeout_seconds: float = RISK_SCOPE_EXTERNAL_TIMEOUT_SECONDS,
+    ) -> None:
+        self._transport = transport or GitHubJsonTransport()
+        self._timeout_seconds = min(max(float(timeout_seconds), 0.1), 2.0)
+
+    def _verify_merge_ancestry(self, reviewed_head: str, merge_commit: str) -> bool:
+        try:
+            result = subprocess.run(
+                ["git", "merge-base", "--is-ancestor", reviewed_head, merge_commit],
+                cwd=ROOT,
+                capture_output=True,
+                timeout=self._timeout_seconds,
+                check=False,
+            )
+        except (OSError, subprocess.SubprocessError):
+            return False
+        return result.returncode == 0
+
+    def verify(self, binding: dict[str, Any], evidence: dict[str, Any]) -> bool:
+        try:
+            review = binding["required_review"]
+            merge = binding["required_merge"]
+            identity = binding["implementation_identity"]
+            reviewer = review["reviewer"]
+            reviewed_head = review["reviewed_head_sha"]
+            merge_commit = merge["merge_commit_sha"]
+            evidence_url = review["evidence_url"]
+            human_auth = binding["human_authorization_evidence"]
+            if not all(
+                isinstance(value, str)
+                for value in (reviewer, reviewed_head, merge_commit, evidence_url, human_auth)
+            ):
+                return False
+            pull = self._transport.get_json(RISK_SCOPE_GITHUB_API_PR_URL, self._timeout_seconds)
+            reviews = self._transport.get_json(
+                f"{RISK_SCOPE_GITHUB_API_PR_URL}/reviews", self._timeout_seconds
+            )
+            if not isinstance(pull, dict) or not isinstance(reviews, list):
+                return False
+            base = pull.get("base")
+            head = pull.get("head")
+            author = pull.get("user")
+            merged_by = pull.get("merged_by")
+            if not (
+                pull.get("html_url") == RISK_SCOPE_PR_URL
+                and pull.get("number") == RISK_SCOPE_PR_NUMBER
+                and pull.get("state") == "closed"
+                and pull.get("merged") is True
+                and isinstance(base, dict)
+                and base.get("ref") == "main"
+                and isinstance(base.get("repo"), dict)
+                and base["repo"].get("full_name") == RISK_SCOPE_REPOSITORY
+                and isinstance(head, dict)
+                and head.get("sha") == reviewed_head
+                and pull.get("merge_commit_sha") == merge_commit
+                and isinstance(author, dict)
+                and author.get("login") == RISK_SCOPE_PR_AUTHOR
+                and isinstance(merged_by, dict)
+                and isinstance(merged_by.get("login"), str)
+                and merged_by.get("type") == "User"
+            ):
+                return False
+            expected_human_auth = (
+                f"github-merge:{RISK_SCOPE_REPOSITORY}#{RISK_SCOPE_PR_NUMBER}:"
+                f"{merge_commit}:{merged_by['login']}"
+            )
+            if human_auth != expected_human_auth:
+                return False
+            matched_review = next(
+                (
+                    item
+                    for item in reviews
+                    if isinstance(item, dict) and item.get("html_url") == evidence_url
+                ),
+                None,
+            )
+            if not isinstance(matched_review, dict):
+                return False
+            review_user = matched_review.get("user")
+            if not (
+                matched_review.get("pull_request_url") == RISK_SCOPE_GITHUB_API_PR_URL
+                and matched_review.get("state") == "APPROVED"
+                and matched_review.get("commit_id") == reviewed_head
+                and isinstance(review_user, dict)
+                and review_user.get("login") == reviewer
+                and review_user.get("type") == "User"
+                and github_reviewer_is_independent(reviewer, identity)
+            ):
+                return False
+            return self._verify_merge_ancestry(reviewed_head, merge_commit)
+        except (
+            KeyError,
+            TypeError,
+            ValueError,
+            OSError,
+            urllib.error.URLError,
+            json.JSONDecodeError,
+        ):
+            return False
 
 
 def load_yaml(path: Path) -> Any:
@@ -458,7 +597,7 @@ def delivery_is_unlockable(
     *,
     task_id: str | None = None,
     evidence_binding: dict[str, Any] | None = None,
-    external_fact_verifier: RiskScopeExternalFactVerifier | None = None,
+    external_verifier: GitHubRiskScopeVerifier | None = None,
 ) -> bool:
     delivery = task.get("delivery")
     resolved_task_id = task_id or task.get("id")
@@ -473,7 +612,7 @@ def delivery_is_unlockable(
             delivery,
             task_id=resolved_task_id,
             evidence_binding=evidence_binding,
-            external_fact_verifier=external_fact_verifier,
+            external_verifier=external_verifier,
         )
     )
     if not generally_unlockable:
@@ -481,9 +620,7 @@ def delivery_is_unlockable(
     if resolved_task_id == RISK_SCOPE_SUCCESSOR:
         if not isinstance(delivery, dict):
             return False
-        return task051_completion_evidence_is_bound(
-            delivery, evidence_binding, external_fact_verifier
-        )
+        return task051_completion_evidence_is_bound(delivery, evidence_binding, external_verifier)
     return True
 
 
@@ -492,7 +629,7 @@ def completion_evidence_is_trusted(
     *,
     task_id: str | None = None,
     evidence_binding: dict[str, Any] | None = None,
-    external_fact_verifier: RiskScopeExternalFactVerifier | None = None,
+    external_verifier: GitHubRiskScopeVerifier | None = None,
 ) -> bool:
     evidence = delivery.get("completion_evidence")
     if not isinstance(evidence, dict) or not COMPLETION_FIELDS.issubset(evidence):
@@ -514,9 +651,7 @@ def completion_evidence_is_trusted(
     if not generally_trusted:
         return False
     if task_id == RISK_SCOPE_SUCCESSOR:
-        return task051_completion_evidence_is_bound(
-            delivery, evidence_binding, external_fact_verifier
-        )
+        return task051_completion_evidence_is_bound(delivery, evidence_binding, external_verifier)
     return True
 
 
@@ -539,6 +674,64 @@ def load_risk_scope_evidence_binding(errors: list[str]) -> dict[str, Any] | None
         errors.append(
             "ai/governance/risk-validator-integration-scope-task-051.yaml: "
             "audit_task must be TASK-051"
+        )
+    repository = document.get("repository")
+    if not isinstance(repository, dict):
+        errors.append(
+            "ai/governance/risk-validator-integration-scope-task-051.yaml: "
+            "repository baseline must be present"
+        )
+    else:
+        expected_repository = {
+            "base_branch": "origin/main",
+            "base_sha": RISK_SCOPE_BASE_SHA,
+            "implementation_branch": "codex/task-051-risk-validator-scope-successor",
+        }
+        for field, expected_value in expected_repository.items():
+            if repository.get(field) != expected_value:
+                errors.append(
+                    "ai/governance/risk-validator-integration-scope-task-051.yaml: "
+                    f"repository.{field} must remain {expected_value}"
+                )
+    concurrent_work = document.get("concurrent_work")
+    if not isinstance(concurrent_work, dict) or any(
+        concurrent_work.get(field) != expected_value
+        for field, expected_value in {
+            "observed_branch": "origin/codex/task-050-registration-binding-contracts",
+            "observed_head_sha": RISK_SCOPE_TASK050_HEAD_SHA,
+            "observed_state": "merged_into_main",
+            "merged_commit_sha": RISK_SCOPE_BASE_SHA,
+        }.items()
+    ):
+        errors.append(
+            "ai/governance/risk-validator-integration-scope-task-051.yaml: "
+            "concurrent TASK-050 observation is not the merged origin/main fact"
+        )
+    authority = document.get("authority")
+    accepted_spec = authority.get("accepted_spec") if isinstance(authority, dict) else None
+    if (
+        not isinstance(accepted_spec, dict)
+        or accepted_spec.get("version") != RISK_SCOPE_ACCEPTED_SPEC_VERSION
+    ):
+        errors.append(
+            "ai/governance/risk-validator-integration-scope-task-051.yaml: "
+            f"authority.accepted_spec.version must be {RISK_SCOPE_ACCEPTED_SPEC_VERSION}"
+        )
+    elif accepted_spec.get("status") != "accepted":
+        errors.append(
+            "ai/governance/risk-validator-integration-scope-task-051.yaml: "
+            "authority.accepted_spec.status must be accepted"
+        )
+    try:
+        manifest = load_yaml(SPEC_ROOT / "manifest.yaml")
+        manifest_spec = manifest.get("specification") if isinstance(manifest, dict) else None
+        manifest_version = manifest_spec.get("version") if isinstance(manifest_spec, dict) else None
+    except Exception:
+        manifest_version = None
+    if manifest_version != RISK_SCOPE_ACCEPTED_SPEC_VERSION:
+        errors.append(
+            "spec/manifest.yaml: specification.version must match the accepted TASK-051 "
+            f"governance version {RISK_SCOPE_ACCEPTED_SPEC_VERSION}"
         )
         return None
     binding = document.get("successor_evidence_binding")
@@ -615,6 +808,30 @@ def load_risk_scope_evidence_binding(errors: list[str]) -> dict[str, Any] | None
                     "ai/governance/risk-validator-integration-scope-task-051.yaml: "
                     f"static validator boundary {field} is incomplete"
                 )
+    production_verifier = binding.get("production_external_verifier")
+    if not isinstance(production_verifier, dict):
+        errors.append(
+            "ai/governance/risk-validator-integration-scope-task-051.yaml: "
+            "production external verifier must be explicitly modeled"
+        )
+    else:
+        if production_verifier.get("adapter") != "fixed_github_public_api_task_051_verifier":
+            errors.append(
+                "ai/governance/risk-validator-integration-scope-task-051.yaml: "
+                "production verifier adapter must be the fixed GitHub adapter"
+            )
+        if production_verifier.get("timeout_seconds") != 2:
+            errors.append(
+                "ai/governance/risk-validator-integration-scope-task-051.yaml: "
+                "production verifier timeout must be 2 seconds"
+            )
+        if production_verifier.get("failure_policy") != (
+            "network_timeout_rate_limit_404_invalid_json_or_mismatch_denies"
+        ):
+            errors.append(
+                "ai/governance/risk-validator-integration-scope-task-051.yaml: "
+                "production verifier must fail closed"
+            )
     external_status = binding.get("external_fact_status")
     if external_status == "pending_github_and_human_verification":
         pending_values = {
@@ -688,9 +905,11 @@ def load_risk_scope_evidence_binding(errors: list[str]) -> dict[str, Any] | None
 def task051_completion_evidence_is_bound(
     delivery: dict[str, Any],
     evidence_binding: dict[str, Any] | None,
-    external_fact_verifier: RiskScopeExternalFactVerifier | None = None,
+    external_verifier: GitHubRiskScopeVerifier | None = None,
+    *,
+    require_external: bool = True,
 ) -> bool:
-    """Check local binding and require independently supplied external facts."""
+    """Check local binding and optionally require independently supplied facts."""
     if (
         delivery.get("contract_status") != "not_applicable"
         or delivery.get("implementation_status") != "merged"
@@ -761,14 +980,11 @@ def task051_completion_evidence_is_bound(
     }
     if not all(evidence.get(field) == value for field, value in expected_evidence.items()):
         return False
-    # The CLI intentionally supplies no verifier.  A caller may inject a trusted adapter
-    # that checks GitHub review/merge ancestry and human authorization outside this repo.
-    if external_fact_verifier is None:
+    if not require_external:
+        return True
+    if external_verifier is None:
         return False
-    try:
-        return external_fact_verifier(evidence_binding, evidence) is True
-    except Exception:
-        return False
+    return external_verifier.verify(evidence_binding, evidence)
 
 
 def plausible_evidence_sha(value: Any) -> bool:
@@ -868,13 +1084,13 @@ def validate_risk_scope_successor_dependencies(
     tasks: dict[str, dict[str, Any]],
     errors: list[str],
     evidence_binding: dict[str, Any] | None = None,
-    external_fact_verifier: RiskScopeExternalFactVerifier | None = None,
+    external_verifier: GitHubRiskScopeVerifier | None = None,
 ) -> None:
     """Require the fresh Risk scope gate without rewriting its historical predecessor."""
     task029 = tasks.get("TASK-029")
     if isinstance(task029, dict):
-        if task029.get("status") != "blocked":
-            errors.append("TASK-029 queue status must remain blocked")
+        if task029.get("status") not in {"blocked", "active"}:
+            errors.append("TASK-029 queue status must be blocked or human-activated active")
         if RISK_SCOPE_SUCCESSOR not in tasks:
             errors.append(f"tasks: {RISK_SCOPE_SUCCESSOR} successor gate missing for TASK-029")
         dependencies = task029.get("depends_on")
@@ -933,7 +1149,7 @@ def validate_risk_scope_successor_dependencies(
             isinstance(delivery, dict)
             and delivery.get("review_status") in {"approved", "not_required"}
             and not task051_completion_evidence_is_bound(
-                delivery, evidence_binding, external_fact_verifier
+                delivery, evidence_binding, external_verifier
             )
         ):
             errors.append("TASK-051 evidence does not match its governance binding")
@@ -976,9 +1192,8 @@ def validate_tasks(
     errors: list[str],
     *,
     today: date | None = None,
-    external_fact_verifier: RiskScopeExternalFactVerifier | None = None,
 ) -> None:
-    """Validate task metadata; TASK-051 unlocks require an out-of-repository verifier."""
+    """Validate task metadata with a fixed external verifier for closeout activation."""
     evaluation_date = today or date.today()
     tasks: dict[str, dict[str, Any]] = {}
     task_paths: dict[str, Path] = {}
@@ -1041,9 +1256,14 @@ def validate_tasks(
     risk_scope_binding = None
     if "TASK-029" in tasks or RISK_SCOPE_SUCCESSOR in tasks:
         risk_scope_binding = load_risk_scope_evidence_binding(errors)
-    validate_risk_scope_successor_dependencies(
-        tasks, errors, risk_scope_binding, external_fact_verifier
-    )
+
+    # Ordinary active queues never access the network.  A completed TASK-051
+    # closeout is the sole point at which the fixed GitHub verifier is used.
+    external_verifier = None
+    task051 = tasks.get(RISK_SCOPE_SUCCESSOR)
+    if isinstance(task051, dict) and task051.get("status") == "completed":
+        external_verifier = GitHubRiskScopeVerifier()
+    validate_risk_scope_successor_dependencies(tasks, errors, risk_scope_binding, external_verifier)
 
     bootstrap_entries = [
         waiver
@@ -1102,7 +1322,7 @@ def validate_tasks(
                         dependency_task,
                         task_id=dependency,
                         evidence_binding=risk_scope_binding,
-                        external_fact_verifier=external_fact_verifier,
+                        external_verifier=external_verifier,
                     )
                     and not bootstrap_allows_dependency(
                         dependency,

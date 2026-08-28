@@ -1,3 +1,4 @@
+from inspect import signature
 from pathlib import Path
 
 import pytest
@@ -111,7 +112,10 @@ def trusted_delivery(
             "reviewer": reviewer,
             "evidence_url": evidence_url,
             "merge_commit_sha": "89abcdef0123456789abcdef0123456789abcdef",
-            "human_authorization_evidence": "human-authorized TASK-051 closeout",
+            "human_authorization_evidence": (
+                "github-merge:qifuxiao/QuantiQmt#87:"
+                "89abcdef0123456789abcdef0123456789abcdef:qifuxiao"
+            ),
         },
     }
 
@@ -139,7 +143,10 @@ def risk_scope_evidence_binding() -> dict:
                 ),
             },
             "required_merge": {"merge_commit_sha": "89abcdef0123456789abcdef0123456789abcdef"},
-            "human_authorization_evidence": "human-authorized TASK-051 closeout",
+            "human_authorization_evidence": (
+                "github-merge:qifuxiao/QuantiQmt#87:"
+                "89abcdef0123456789abcdef0123456789abcdef:qifuxiao"
+            ),
             "external_fact_status": "recorded_after_github_and_human_verification",
             "static_validator_boundary": {
                 "verifies": [
@@ -169,8 +176,92 @@ def risk_scope_evidence_binding() -> dict:
                     "human verifies merge and authorizes active-to-completed closeout",
                 ],
             },
+            "production_external_verifier": {
+                "adapter": "fixed_github_public_api_task_051_verifier",
+                "endpoints": [
+                    "https://api.github.com/repos/qifuxiao/QuantiQmt/pulls/87",
+                    "https://api.github.com/repos/qifuxiao/QuantiQmt/pulls/87/reviews",
+                ],
+                "timeout_seconds": 2,
+                "verifies": [
+                    "closed_merged_PR_87_on_main",
+                    "exact_PR_head_and_merge_commit",
+                    "APPROVED_review_URL_reviewer_and_commit",
+                    "reviewer_independent_from_PR_author_and_implementer",
+                    "human_authorization_bound_to_merged_by_and_merge_commit",
+                    "local_git_merge_ancestry",
+                ],
+                "failure_policy": "network_timeout_rate_limit_404_invalid_json_or_mismatch_denies",
+            },
         },
     }
+
+
+class FixtureGitHubTransport:
+    """Deterministic API fixture used below the production verifier boundary."""
+
+    def __init__(self, payloads: dict[str, object], failure: Exception | None = None) -> None:
+        self.payloads = payloads
+        self.failure = failure
+        self.calls: list[tuple[str, float]] = []
+
+    def get_json(self, url: str, timeout_seconds: float) -> object:
+        self.calls.append((url, timeout_seconds))
+        if self.failure is not None:
+            raise self.failure
+        return self.payloads[url]
+
+
+class FixtureGitHubVerifier(validator.GitHubRiskScopeVerifier):
+    transport: FixtureGitHubTransport
+
+    def __init__(self, transport: FixtureGitHubTransport) -> None:
+        self.transport = transport
+        super().__init__(transport=transport)
+
+    def _verify_merge_ancestry(self, reviewed_head: str, merge_commit: str) -> bool:
+        return reviewed_head != merge_commit
+
+
+def install_fixture_verifier(
+    monkeypatch: pytest.MonkeyPatch, transport: FixtureGitHubTransport
+) -> None:
+    class BoundFixtureVerifier(FixtureGitHubVerifier):
+        def __init__(self) -> None:
+            super().__init__(transport)
+
+    monkeypatch.setattr(validator, "GitHubRiskScopeVerifier", BoundFixtureVerifier)
+
+
+def github_fixture_transport(delivery: dict) -> FixtureGitHubTransport:
+    evidence = delivery["completion_evidence"]
+    review_url = evidence["evidence_url"]
+    api_pr = "https://api.github.com/repos/qifuxiao/QuantiQmt/pulls/87"
+    api_reviews = f"{api_pr}/reviews"
+    return FixtureGitHubTransport(
+        {
+            api_pr: {
+                "html_url": "https://github.com/qifuxiao/QuantiQmt/pull/87",
+                "number": 87,
+                "state": "closed",
+                "merged": True,
+                "base": {"ref": "main", "repo": {"full_name": "qifuxiao/QuantiQmt"}},
+                "head": {"sha": evidence["reviewed_head_sha"]},
+                "merge_commit_sha": evidence["merge_commit_sha"],
+                "user": {"login": "qifuxiao", "type": "User"},
+                "merged_by": {"login": "qifuxiao", "type": "User"},
+            },
+            api_reviews: [
+                {
+                    "html_url": review_url,
+                    "pull_request_url": api_pr,
+                    "state": "APPROVED",
+                    "commit_id": evidence["reviewed_head_sha"],
+                    "user": {"login": evidence["reviewer"], "type": "User"},
+                }
+            ],
+        }
+    )
 
 
 def run_risk_scope_validate_tasks_fixture(
@@ -182,7 +273,7 @@ def run_risk_scope_validate_tasks_fixture(
     task030_delivery_overrides: dict | None = None,
     include_task030: bool = True,
     governance_binding: dict | None = None,
-    external_fact_verifier=None,
+    task029_status: str = "active",
 ) -> list[str]:
     task029_dependencies = task029_dependencies or ["TASK-015", "TASK-031", "TASK-051"]
     task051_delivery = task051_delivery or trusted_delivery()
@@ -231,7 +322,7 @@ def run_risk_scope_validate_tasks_fixture(
         "TASK-044": ("completed", [], completed_dependency),
         "TASK-051": ("completed", ["TASK-015", "TASK-031", "TASK-044"], task051_delivery),
         "TASK-029": (
-            "active",
+            task029_status,
             task029_dependencies,
             {
                 "schema_version": 1,
@@ -271,7 +362,7 @@ def run_risk_scope_validate_tasks_fixture(
 
     monkeypatch.setattr(validator, "load_yaml", fake_load_yaml)
     errors: list[str] = []
-    validate_tasks({}, errors, external_fact_verifier=external_fact_verifier)
+    validate_tasks({}, errors)
     return errors
 
 
@@ -664,31 +755,121 @@ def test_task051_simultaneous_local_binding_forgery_is_denied(
     )
 
 
-def test_task051_completed_delivery_can_use_injected_external_verifier(
+def test_task051_completed_delivery_and_human_active_task029_use_github_verifier(
     monkeypatch: pytest.MonkeyPatch,
     isolated_task_root: Path,
 ) -> None:
-    verifier_calls = []
-
-    def verifier(binding: dict, evidence: dict) -> bool:
-        verifier_calls.append((binding, evidence))
-        return (
-            binding["repository"] == "qifuxiao/QuantiQmt"
-            and binding["pull_request_number"] == 87
-            and evidence["change_pr"] == "https://github.com/qifuxiao/QuantiQmt/pull/87"
-        )
+    delivery = trusted_delivery()
+    transport = github_fixture_transport(delivery)
+    install_fixture_verifier(monkeypatch, transport)
 
     errors = run_risk_scope_validate_tasks_fixture(
         monkeypatch,
         isolated_task_root,
-        external_fact_verifier=verifier,
+        task051_delivery=delivery,
+        task029_status="active",
     )
 
     assert not any(
         "TASK-029: dependency TASK-051 lacks trusted completed delivery" in error
         for error in errors
     )
-    assert verifier_calls
+    assert transport.calls
+    assert all(
+        timeout <= validator.RISK_SCOPE_EXTERNAL_TIMEOUT_SECONDS for _, timeout in transport.calls
+    )
+
+
+def test_validate_tasks_has_no_public_boolean_verifier_injection() -> None:
+    assert "external_fact_verifier" not in signature(validate_tasks).parameters
+
+
+def test_task029_blocked_does_not_auto_activate_after_trusted_closeout(
+    monkeypatch: pytest.MonkeyPatch,
+    isolated_task_root: Path,
+) -> None:
+    delivery = trusted_delivery()
+    transport = github_fixture_transport(delivery)
+    install_fixture_verifier(monkeypatch, transport)
+    errors = run_risk_scope_validate_tasks_fixture(
+        monkeypatch,
+        isolated_task_root,
+        task051_delivery=delivery,
+        task029_status="blocked",
+    )
+    assert not any("TASK-029: dependency" in error for error in errors)
+    assert transport.calls
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [
+        OSError("network down"),
+        TimeoutError("timed out"),
+        ValueError("invalid JSON"),
+        validator.urllib.error.HTTPError("url", 404, "not found", {}, None),
+        validator.urllib.error.HTTPError("url", 429, "rate limited", {}, None),
+    ],
+)
+def test_github_verifier_external_failures_are_fail_closed(failure: Exception) -> None:
+    delivery = trusted_delivery()
+    binding = risk_scope_evidence_binding()["successor_evidence_binding"]
+    transport = FixtureGitHubTransport({}, failure=failure)
+    verifier = validator.GitHubRiskScopeVerifier(transport=transport, timeout_seconds=0.1)
+    assert not verifier.verify(binding, delivery["completion_evidence"])
+    assert transport.calls
+    assert all(timeout <= 0.1 for _, timeout in transport.calls)
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "wrong_pr",
+        "wrong_head",
+        "wrong_merge",
+        "wrong_reviewer",
+        "wrong_author",
+        "wrong_review_url",
+        "not_approved",
+        "wrong_human_authorization",
+        "ancestry",
+    ],
+)
+def test_github_verifier_rejects_external_fact_mutations(mutation: str) -> None:
+    delivery = trusted_delivery()
+    binding = risk_scope_evidence_binding()["successor_evidence_binding"]
+    transport = github_fixture_transport(delivery)
+    pull_url = validator.RISK_SCOPE_GITHUB_API_PR_URL
+    reviews_url = f"{pull_url}/reviews"
+    if mutation == "wrong_pr":
+        transport.payloads[pull_url]["number"] = 86
+    elif mutation == "wrong_head":
+        transport.payloads[pull_url]["head"]["sha"] = "f" * 40
+    elif mutation == "wrong_merge":
+        transport.payloads[pull_url]["merge_commit_sha"] = "e" * 40
+    elif mutation == "wrong_reviewer":
+        transport.payloads[reviews_url][0]["user"]["login"] = "mallory"
+    elif mutation == "wrong_author":
+        transport.payloads[pull_url]["user"]["login"] = "mallory"
+    elif mutation == "wrong_review_url":
+        transport.payloads[reviews_url][0]["html_url"] = (
+            validator.RISK_SCOPE_PR_URL + "#pullrequestreview-1"
+        )
+    elif mutation == "not_approved":
+        transport.payloads[reviews_url][0]["state"] = "CHANGES_REQUESTED"
+    elif mutation == "wrong_human_authorization":
+        binding["human_authorization_evidence"] = "local-admin-approved"
+    else:
+
+        class AncestryFailureVerifier(FixtureGitHubVerifier):
+            def _verify_merge_ancestry(self, reviewed_head: str, merge_commit: str) -> bool:
+                return False
+
+        verifier = AncestryFailureVerifier(transport)
+        assert not verifier.verify(binding, delivery["completion_evidence"])
+        return
+    verifier = FixtureGitHubVerifier(transport)
+    assert not verifier.verify(binding, delivery["completion_evidence"])
 
 
 def test_task051_boundary_must_explicitly_model_external_facts(
@@ -812,7 +993,7 @@ def test_task030_all_historical_completion_facts_are_frozen_via_validate_tasks(
     )
 
 
-def test_task029_must_remain_blocked_via_validate_tasks(
+def test_task029_human_activation_without_external_facts_is_denied(
     monkeypatch: pytest.MonkeyPatch,
     isolated_task_root: Path,
 ) -> None:
@@ -821,7 +1002,10 @@ def test_task029_must_remain_blocked_via_validate_tasks(
         isolated_task_root,
         task029_dependencies=["TASK-015", "TASK-031", "TASK-051"],
     )
-    assert any("TASK-029 queue status must remain blocked" in error for error in errors)
+    assert any(
+        "TASK-029: dependency TASK-051 lacks trusted completed delivery" in error
+        for error in errors
+    )
 
 
 @pytest.mark.parametrize("replacement", ["TASK-030", "TASK-046"])
@@ -867,7 +1051,8 @@ def test_task051_risk_scope_gate_requires_trusted_completed_delivery(
         "    evidence_url: https://github.com/qifuxiao/QuantiQmt/pull/87"
         "#pullrequestreview-99999\n"
         "    merge_commit_sha: 89abcdef0123456789abcdef0123456789abcdef\n"
-        "    human_authorization_evidence: human-authorized TASK-051 closeout\n"
+        "    human_authorization_evidence: github-merge:qifuxiao/QuantiQmt#87:"
+        "89abcdef0123456789abcdef0123456789abcdef:qifuxiao\n"
     )
     if successor_state == "active":
         successor_status = "active"
@@ -961,14 +1146,16 @@ def test_task051_risk_scope_gate_requires_trusted_completed_delivery(
             return original_load_yaml(path)
 
         monkeypatch.setattr(validator, "load_yaml", fake_load_yaml)
+        if successor_state == "trusted_completed":
+            transport = github_fixture_transport(trusted_delivery())
+
+            class StateFixtureVerifier(FixtureGitHubVerifier):
+                def __init__(self) -> None:
+                    super().__init__(transport)
+
+            monkeypatch.setattr(validator, "GitHubRiskScopeVerifier", StateFixtureVerifier)
         errors: list[str] = []
-        validate_tasks(
-            {},
-            errors,
-            external_fact_verifier=(
-                (lambda binding, evidence: True) if successor_state == "trusted_completed" else None
-            ),
-        )
+        validate_tasks({}, errors)
         denied = any(
             "TASK-029: dependency TASK-051 lacks trusted completed delivery" in error
             for error in errors
