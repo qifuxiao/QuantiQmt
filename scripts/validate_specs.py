@@ -62,8 +62,9 @@ RISK_SCOPE_REQUIRED_DEPENDENCIES = frozenset({"TASK-015", "TASK-031", "TASK-051"
 RISK_SCOPE_GOVERNANCE_PATH = (
     ROOT / "ai" / "governance" / "risk-validator-integration-scope-task-051.yaml"
 )
-RISK_SCOPE_BASE_SHA = "bfa77268941f3814d1856c59094fd8a90e3cda81"
-RISK_SCOPE_TASK050_HEAD_SHA = "132b83f2be3543a650fd86b9bbcd7aa28b4c2cf3"
+RISK_SCOPE_BASE_SHA = "c3816482f207b985a6c704a66c6c0e0a07f3632d"
+RISK_SCOPE_TASK052_HEAD_SHA = "5f193755bb03d70fe294c80b30a8a882693a74f2"
+RISK_SCOPE_TASK050_MERGE_SHA = "bfa77268941f3814d1856c59094fd8a90e3cda81"
 RISK_SCOPE_ACCEPTED_SPEC_VERSION = "0.14.0"
 RISK_SCOPE_REPOSITORY = "qifuxiao/QuantiQmt"
 RISK_SCOPE_PR_NUMBER = 87
@@ -84,6 +85,14 @@ RISK_SCOPE_MAX_REVIEW_ITEMS = 1000
 RISK_SCOPE_GITHUB_API_PR_URL = "https://api.github.com/repos/qifuxiao/QuantiQmt/pulls/87"
 RISK_SCOPE_GITHUB_API_REVIEWS_URL = f"{RISK_SCOPE_GITHUB_API_PR_URL}/reviews?per_page=100"
 RISK_SCOPE_GITHUB_API_ISSUE_URL = "https://api.github.com/repos/qifuxiao/QuantiQmt/issues/87"
+RISK_SCOPE_GITHUB_API_COMPARE_PREFIX = "https://api.github.com/repos/qifuxiao/QuantiQmt/compare"
+RISK_SCOPE_GITHUB_API_REVIEW_MERGE_COMPARE_ENDPOINT = (
+    f"{RISK_SCOPE_GITHUB_API_COMPARE_PREFIX}/"
+    "{reviewed_head_sha}...{merge_commit_sha}?per_page=1&page=1"
+)
+RISK_SCOPE_GITHUB_API_MERGE_MAIN_COMPARE_ENDPOINT = (
+    f"{RISK_SCOPE_GITHUB_API_COMPARE_PREFIX}/{{merge_commit_sha}}...main?per_page=1&page=1"
+)
 RISK_SCOPE_HEAD_REF = "codex/task-051-risk-validator-scope-successor"
 RISK_SCOPE_HUMAN_AUTHORIZERS = frozenset({"qifuxiao"})
 RISK_HISTORICAL_TASK_BLOB_OID = "4cc37f6d1805d98bc4f223bfe69d4de5c51b7f8e"
@@ -231,7 +240,7 @@ class GitHubRiskScopeVerifier:
         self._transport = transport or GitHubJsonTransport()
         self._timeout_seconds = min(max(float(timeout_seconds), 0.1), 2.0)
 
-    def _git_succeeds(self, *arguments: str) -> bool:
+    def _git_returncode(self, *arguments: str) -> int | None:
         try:
             result = subprocess.run(
                 ["git", *arguments],
@@ -241,18 +250,84 @@ class GitHubRiskScopeVerifier:
                 check=False,
             )
         except (OSError, subprocess.SubprocessError):
-            return False
-        return result.returncode == 0
+            return None
+        return result.returncode
 
-    def _verify_git_relationships(self, reviewed_head: str, merge_commit: str) -> bool:
-        return all(
-            (
-                self._git_succeeds("cat-file", "-e", f"{reviewed_head}^{{commit}}"),
-                self._git_succeeds("cat-file", "-e", f"{merge_commit}^{{commit}}"),
-                self._git_succeeds("rev-parse", "--verify", "origin/main^{commit}"),
-                self._git_succeeds("merge-base", "--is-ancestor", reviewed_head, merge_commit),
-                self._git_succeeds("merge-base", "--is-ancestor", merge_commit, "origin/main"),
+    def _local_git_relationships_do_not_contradict(
+        self, reviewed_head: str, merge_commit: str
+    ) -> bool:
+        """Use available local objects as an extra check, never as shallow-clone authority."""
+        reviewed_available = (
+            self._git_returncode("cat-file", "-e", f"{reviewed_head}^{{commit}}") == 0
+        )
+        merge_available = self._git_returncode("cat-file", "-e", f"{merge_commit}^{{commit}}") == 0
+        main_available = self._git_returncode("cat-file", "-e", "origin/main^{commit}") == 0
+        if (
+            reviewed_available
+            and merge_available
+            and self._git_returncode("merge-base", "--is-ancestor", reviewed_head, merge_commit)
+            != 0
+        ):
+            return False
+        return not (
+            merge_available
+            and main_available
+            and self._git_returncode("merge-base", "--is-ancestor", merge_commit, "origin/main")
+            != 0
+        )
+
+    @staticmethod
+    def _compare_url(base: str, head: str) -> str:
+        if SHA_RE.fullmatch(base) is None or (head != "main" and SHA_RE.fullmatch(head) is None):
+            raise ValueError("compare refs must be bound SHAs or fixed main")
+        return f"{RISK_SCOPE_GITHUB_API_COMPARE_PREFIX}/{base}...{head}?per_page=1&page=1"
+
+    def _verify_external_ancestor(self, ancestor: str, descendant: str) -> bool:
+        url = self._compare_url(ancestor, descendant)
+        response = self._transport.get_json(url, self._timeout_seconds)
+        comparison = self._response_payload(response, url)
+        if not isinstance(comparison, dict):
+            return False
+        base_commit = comparison.get("base_commit")
+        merge_base = comparison.get("merge_base_commit")
+        commits = comparison.get("commits")
+        status = comparison.get("status")
+        ahead_by = comparison.get("ahead_by")
+        behind_by = comparison.get("behind_by")
+        total_commits = comparison.get("total_commits")
+        if not (
+            status in {"ahead", "identical"}
+            and type(ahead_by) is int
+            and type(behind_by) is int
+            and type(total_commits) is int
+            and ahead_by >= 0
+            and behind_by == 0
+            and total_commits >= 0
+            and isinstance(base_commit, dict)
+            and base_commit.get("sha") == ancestor
+            and isinstance(merge_base, dict)
+            and merge_base.get("sha") == ancestor
+            and isinstance(commits, list)
+            and len(commits) <= 1
+            and all(
+                isinstance(commit, dict) and SHA_RE.fullmatch(str(commit.get("sha"))) is not None
+                for commit in commits
             )
+            and comparison.get("url") == url.split("?", maxsplit=1)[0]
+            and comparison.get("html_url")
+            == f"https://github.com/qifuxiao/QuantiQmt/compare/{ancestor}...{descendant}"
+        ):
+            return False
+        if status == "identical":
+            return ahead_by == 0 and total_commits == 0 and not commits
+        if descendant == "main":
+            return ahead_by > 0 and total_commits > 0
+        return (
+            ahead_by == 1
+            and total_commits == 1
+            and len(commits) == 1
+            and isinstance(commits[0], dict)
+            and commits[0].get("sha") == descendant
         )
 
     @staticmethod
@@ -437,6 +512,8 @@ class GitHubRiskScopeVerifier:
                 for value in (reviewer, reviewed_head, merge_commit, evidence_url)
             ):
                 return False
+            if reviewed_head == merge_commit:
+                return False
             if not isinstance(human_auth, dict):
                 return False
             review_match = re.fullmatch(
@@ -488,9 +565,13 @@ class GitHubRiskScopeVerifier:
                 identity=identity,
             ):
                 return False
+            if not self._verify_external_ancestor(reviewed_head, merge_commit):
+                return False
+            if not self._verify_external_ancestor(merge_commit, "main"):
+                return False
             return self._verify_human_authorization(
                 human_auth, reviewed_head=reviewed_head, merge_commit=merge_commit
-            ) and self._verify_git_relationships(reviewed_head, merge_commit)
+            ) and self._local_git_relationships_do_not_contradict(reviewed_head, merge_commit)
         except (
             KeyError,
             TypeError,
@@ -958,15 +1039,17 @@ def load_risk_scope_evidence_binding(errors: list[str]) -> dict[str, Any] | None
     if not isinstance(concurrent_work, dict) or any(
         concurrent_work.get(field) != expected_value
         for field, expected_value in {
-            "observed_branch": "origin/codex/task-050-closeout",
-            "observed_head_sha": RISK_SCOPE_TASK050_HEAD_SHA,
-            "observed_state": "completed_in_main",
+            "observed_branch": ("origin/codex/task-052-task-004-delivery-revalidation-activation"),
+            "observed_head_sha": RISK_SCOPE_TASK052_HEAD_SHA,
+            "observed_state": "active_in_main",
             "merged_commit_sha": RISK_SCOPE_BASE_SHA,
+            "preserved_completed_task": "TASK-050",
+            "preserved_completed_merge_sha": RISK_SCOPE_TASK050_MERGE_SHA,
         }.items()
     ):
         errors.append(
             "ai/governance/risk-validator-integration-scope-task-051.yaml: "
-            "concurrent TASK-050 observation is not the merged origin/main fact"
+            "concurrent TASK-052 observation or preserved TASK-050 fact is stale"
         )
     authority = document.get("authority")
     accepted_spec = authority.get("accepted_spec") if isinstance(authority, dict) else None
@@ -1090,6 +1173,8 @@ def load_risk_scope_evidence_binding(errors: list[str]) -> dict[str, Any] | None
             RISK_SCOPE_GITHUB_API_PR_URL,
             RISK_SCOPE_GITHUB_API_REVIEWS_URL,
             "https://api.github.com/repos/qifuxiao/QuantiQmt/issues/comments/{comment_id}",
+            RISK_SCOPE_GITHUB_API_REVIEW_MERGE_COMPARE_ENDPOINT,
+            RISK_SCOPE_GITHUB_API_MERGE_MAIN_COMPARE_ENDPOINT,
         ]
         if production_verifier.get("endpoints") != expected_endpoints:
             errors.append(

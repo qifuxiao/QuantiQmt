@@ -81,15 +81,15 @@ delivery:
 
 ## Implementation evidence
 
-- `ai/governance/risk-validator-integration-scope-task-051.yaml` 以 schema-v1 记录 accepted spec、可信依赖、TASK-030 历史边界、TASK-029 精确范围、四态 activation matrix、TASK-050 并行分支隔离与 Review 权限边界。
+- `ai/governance/risk-validator-integration-scope-task-051.yaml` 以 schema-v1 记录 accepted spec、可信依赖、TASK-030 历史边界、TASK-029 精确范围、四态 activation matrix、已合入 `origin/main` 的 TASK-052 并发投影、保留的 TASK-050 completed 事实与 Review 权限边界。
 - `successor_evidence_binding` 将 successor gate 固定到 `qifuxiao/QuantiQmt` PR #87、实现者身份和独立 GitHub Review 字段；在 Review/merge/人类收尾事实仍为 pending 时，任何 TASK-051 completion evidence 都不能解锁 TASK-029。
 - `scripts/validate_specs.py` 将通用 L4/TASK-046 gate 与 Risk/TASK-051 gate 分离：TASK-029 必须依赖 TASK-051，TASK-030/TASK-046 均不能替代；TASK-030 必须保持 completed + reported-unverified + prohibited。
-- successor validator 在 active/pending 状态保持完全离线；仅在未来 completed closeout 校验中，通过固定 GitHub API 端点有界分页获取 PR #87 Review，按 reviewer 的 `submitted_at`/`id` 计算最新有效状态，并验证精确 Review ID/URL、Head、merge、`origin/main` 祖先关系及绑定 Head/merge SHA 的人类授权 issue comment 对象。任何异常、歧义、未解除 CHANGES_REQUESTED、PENDING、缺失时间、分页越界或对象不匹配均 fail-closed。
+- successor validator 在 active/pending 状态保持完全离线；仅在未来 completed closeout 校验中，通过固定 GitHub API 端点有界分页获取 PR #87 Review，按 reviewer 的 `submitted_at`/`id` 计算最新有效状态，并用同一固定仓库的 compare API 证明 reviewed Head 是 merge commit 祖先且 merge commit 已进入 `main`。本地 Git 仅在相关对象存在时作为额外矛盾防御；Actions depth-1 缺对象不会覆盖完整的 GitHub 外部事实。任何网络/JSON/compare 异常、`behind`/`diverged`、身份不匹配、未解除 CHANGES_REQUESTED、PENDING、分页越界或本地明确非祖先均 fail-closed。
 - `COMMENTED` 不改变同一 reviewer 最近一次决定性 Review；`APPROVED`、`CHANGES_REQUESTED`、`DISMISSED` 按时间与 ID 决定最新状态。最新 `DISMISSED` 不再构成批准，任何 reviewer 的最新有效 `CHANGES_REQUESTED` 都会阻断，且至少一个独立 reviewer 的最新有效 `APPROVED` 必须绑定 exact reviewed Head。
 - TASK-030 completed 文件以不可变 Git blob `4cc37f6d1805d98bc4f223bfe69d4de5c51b7f8e` 整体冻结，标题、正文、scope、delivery 或任意字节变化均被 validator 拒绝；TASK-030 与 TASK-044 实际文件均未修改。
 - TASK-029 仅把直接依赖从 TASK-030 迁移到 TASK-051，并补充 successor 授权/forbidden scope；其 status 仍为 blocked，既有 allowed paths 和 acceptance criteria 未削弱。
-- `tests/spec/test_validate_specs.py` 覆盖 real-repository 投影、历史不可提升、错误 successor 替代，以及 active、reported-unverified、missing evidence、trusted completed 四态；测试兼容未来 TASK-051 合法 active → completed 路径迁移。
-- TASK-030 文件与 TASK-044 历史审计文件的 Git blob 分别保持 `4cc37f6d1805d98bc4f223bfe69d4de5c51b7f8e`、`9f15442f7ffc0f8db4cbc5edde8dab195b8d3072`，与最新 `origin/main` 完全一致。
+- `tests/spec/test_validate_specs.py` 覆盖 real-repository 投影、历史不可提升、错误 successor 替代、不含固定 fixture SHA 对象的 shallow Git 环境、compare `ahead`/`identical` 正例与 `behind`/`diverged`/error 拒绝、本地明确矛盾，以及 active、reported-unverified、missing evidence、trusted completed 四态；测试兼容未来 TASK-051 合法 active → completed 路径迁移。
+- TASK-030 文件与 TASK-044 历史审计文件的 Git blob 分别保持 `4cc37f6d1805d98bc4f223bfe69d4de5c51b7f8e`、`c4dfc1703c1782fdd9c062ce22fb830c2388c365`，与最新 `origin/main` 完全一致。
 
 ## Verification evidence
 
@@ -97,6 +97,11 @@ delivery:
 - 2026-08-28 修复 Review findings 后，在同一既有 Poetry 环境中重新运行：`poetry run python scripts/validate_specs.py` exit 0；`poetry run pytest tests/spec` exit 0，137 passed；`poetry build` exit 0；build 后 `poetry run pytest tests/contract` exit 0，679 passed、0 skipped；两条 focused `poetry run ruff ...` 均 exit 0。
 - 首次提交的 pre-commit hooks exit 1、随后使用 `--no-verify` 提交是保留的真实历史；根因同样是当时 Codex sandbox 无法使用用户目录中的已授权项目环境，而不是 Poetry 安装或项目依赖损坏。本次 `poetry run pre-commit run --all-files` 在 sandbox 外 exit 0，`ruff check`、`ruff format`、`validate specs and tasks` 三个 hook 全部 Passed；本次修正提交不得使用 `--no-verify`。
 - 本轮测试先行证据：Review/API/历史 blob 新回归加入后，focused spec test exit 1，19 failed、101 passed；最小实现与边界修正后 `tests/spec/test_validate_specs.py` 131 passed。
+- 2026-08-28 GitHub Actions runs `33135229535`/`33135227241` 均在 `fetch-depth: 1` 的 PR merge checkout 上复现 7 个合法 closeout 正例被本地 ancestry 对象缺失误拒；同等本地 depth-1 checkout 复现为 7 failed、124 passed。新 shallow/compare 回归在实现前为 7 failed、132 passed，最小实现后 focused validator 文件 144 passed；合入最新 `origin/main` 后完整 `tests/spec` 150 passed。
+- 并发基线已更新为 `origin/main` `c3816482f207b985a6c704a66c6c0e0a07f3632d`，保留 TASK-052 active Head `5f193755bb03d70fe294c80b30a8a882693a74f2`、TASK-050 completed merge `bfa77268941f3814d1856c59094fd8a90e3cda81`、TASK-051 active 投影和 TASK-029 blocked 状态；accepted spec 仍为 0.14.0。
+- 最新合并工作树上：`poetry check`、validator、全仓 Ruff check/format 与 Mypy 均 exit 0；`poetry build` exit 0，build 后 contract 679 passed；CI quality 同等 `tests/unit tests/property tests/spec tests/contract --cov` 在显式绑定当前 worktree `src` 后 1038 passed、coverage 82%。首次 quality 尝试的 3 个 bundle 失败是共享 Poetry venv editable install 指向另一 worktree 导致的环境错配；当前 worktree 导入路径确认后该 focused 文件 5 passed。
+- 本机 Docker daemon 不可用且 `QUANTIQMT_POSTGRES_DSN` 未设置；persistence 集合的非 PostgreSQL 部分 23 passed，22 个 PostgreSQL tests 按 fail-closed fixture 报告缺少 DSN，不声称本地 persistence CI 通过。PR 精确 Head 推送后必须以 GitHub `persistence-postgresql` service job 的完整成功结果弥补该未验证范围。
+- 全仓 pre-commit 因 hooks 包含可修改范围外文件的 `ruff --fix` 而被执行环境安全审查拒绝；随后仅对 TASK-051 的两个 allowed Python 文件运行实际 hooks，Ruff check、Ruff format 和全局 validator 全部 Passed。最终提交必须正常运行 staged hooks，不使用 `--no-verify`。
 - `git diff --check` exit 0；changed-path audit 仅包含 TASK-051 `allowed_paths`。
 
 ## Handoff boundary

@@ -40,3 +40,4 @@ tasks:
   - {id: TASK-049, path: completed/TASK-049-governance-validator-test-determinism.md, status: completed, depends_on: [TASK-043]}
   - {id: TASK-051, path: active/TASK-051-risk-validator-integration-scope-successor.md, status: active, depends_on: [TASK-015, TASK-031, TASK-044]}
   - {id: TASK-050, path: completed/TASK-050-order-registration-binding-contracts.md, status: completed, depends_on: [TASK-017]}
+  - {id: TASK-052, path: active/TASK-052-task-004-delivery-revalidation.md, status: active, depends_on: [TASK-031, TASK-043, TASK-049, TASK-050]}

@@ -25,8 +25,19 @@ import quantiqmt
 
 FIXTURE_REVIEWED_HEAD = "132b83f2be3543a650fd86b9bbcd7aa28b4c2cf3"
 FIXTURE_MERGE_COMMIT = "bfa77268941f3814d1856c59094fd8a90e3cda81"
+FIXTURE_MAIN_HEAD = "c3816482f207b985a6c704a66c6c0e0a07f3632d"
 FIXTURE_REVIEW_ID = 99999
 FIXTURE_AUTHORIZATION_ID = 88888
+
+
+@pytest.fixture(autouse=True)
+def isolate_github_verifier_from_repository_objects(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Keep verifier tests independent of whichever commits the checkout contains."""
+    git_root = tmp_path / "shallow-checkout-without-bound-objects"
+    git_root.mkdir()
+    monkeypatch.setattr(validator, "GIT_ROOT", git_root)
 
 
 @pytest.fixture
@@ -207,6 +218,14 @@ def risk_scope_evidence_binding() -> dict:
                         "https://api.github.com/repos/qifuxiao/QuantiQmt/issues/comments/"
                         "{comment_id}"
                     ),
+                    (
+                        "https://api.github.com/repos/qifuxiao/QuantiQmt/compare/"
+                        "{reviewed_head_sha}...{merge_commit_sha}?per_page=1&page=1"
+                    ),
+                    (
+                        "https://api.github.com/repos/qifuxiao/QuantiQmt/compare/"
+                        "{merge_commit_sha}...main?per_page=1&page=1"
+                    ),
                 ],
                 "timeout_seconds": 2,
                 "max_response_bytes": 524288,
@@ -221,7 +240,8 @@ def risk_scope_evidence_binding() -> dict:
                     "latest_effective_review_state_per_reviewer_without_blocking_changes",
                     "reviewer_independent_from_PR_author_and_implementer",
                     "human_closeout_authorization_issue_comment_object",
-                    "local_git_reviewed_head_merge_and_origin_main_ancestry",
+                    "github_compare_reviewed_head_merge_and_main_containment",
+                    "local_git_ancestry_contradiction_rejection_when_objects_available",
                 ],
                 "failure_policy": "network_timeout_rate_limit_404_invalid_json_or_mismatch_denies",
             },
@@ -242,6 +262,8 @@ class FixtureGitHubTransport:
         if self.failure is not None:
             raise self.failure
         payload = self.payloads[url]
+        if isinstance(payload, Exception):
+            raise payload
         if isinstance(payload, validator.GitHubJsonResponse):
             return payload
         return validator.GitHubJsonResponse(payload=payload, final_url=url, next_url=None)
@@ -262,6 +284,10 @@ def github_fixture_transport(delivery: dict) -> FixtureGitHubTransport:
         f"https://api.github.com/repos/qifuxiao/QuantiQmt/issues/comments/"
         f"{FIXTURE_AUTHORIZATION_ID}"
     )
+    reviewed_to_merge = github_compare_url(
+        evidence["reviewed_head_sha"], evidence["merge_commit_sha"]
+    )
+    merge_to_main = github_compare_url(evidence["merge_commit_sha"], "main")
     return FixtureGitHubTransport(
         {
             api_pr: {
@@ -301,8 +327,37 @@ def github_fixture_transport(delivery: dict) -> FixtureGitHubTransport:
                 ),
                 "user": {"login": "qifuxiao", "type": "User"},
             },
+            reviewed_to_merge: github_compare_payload(
+                evidence["reviewed_head_sha"], evidence["merge_commit_sha"]
+            ),
+            merge_to_main: github_compare_payload(
+                evidence["merge_commit_sha"], FIXTURE_MAIN_HEAD, head_ref="main"
+            ),
         }
     )
+
+
+def github_compare_url(base: str, head: str) -> str:
+    return (
+        f"https://api.github.com/repos/qifuxiao/QuantiQmt/compare/{base}...{head}?per_page=1&page=1"
+    )
+
+
+def github_compare_payload(base: str, head: str, *, head_ref: str | None = None) -> dict:
+    compared_head = head_ref or head
+    return {
+        "status": "ahead",
+        "ahead_by": 1,
+        "behind_by": 0,
+        "total_commits": 1,
+        "base_commit": {"sha": base},
+        "merge_base_commit": {"sha": base},
+        "commits": [{"sha": head}],
+        "url": (
+            f"https://api.github.com/repos/qifuxiao/QuantiQmt/compare/{base}...{compared_head}"
+        ),
+        "html_url": (f"https://github.com/qifuxiao/QuantiQmt/compare/{base}...{compared_head}"),
+    }
 
 
 def run_risk_scope_validate_tasks_fixture(
@@ -843,13 +898,115 @@ def test_task051_completed_delivery_and_human_active_task029_use_github_verifier
 def test_task051_legitimate_completed_delivery_uses_production_verifier_path() -> None:
     delivery = trusted_delivery()
     binding = risk_scope_evidence_binding()["successor_evidence_binding"]
-    verifier = validator.GitHubRiskScopeVerifier(transport=github_fixture_transport(delivery))
+    transport = github_fixture_transport(delivery)
+    verifier = validator.GitHubRiskScopeVerifier(transport=transport)
 
     assert delivery_is_unlockable(
         {"id": "TASK-051", "delivery": delivery},
         task_id="TASK-051",
         evidence_binding=binding,
         external_verifier=verifier,
+    )
+    assert github_compare_url(FIXTURE_REVIEWED_HEAD, FIXTURE_MERGE_COMMIT) in {
+        url for url, _ in transport.calls
+    }
+    assert github_compare_url(FIXTURE_MERGE_COMMIT, "main") in {url for url, _ in transport.calls}
+
+
+@pytest.mark.parametrize("relationship", ["reviewed_to_merge", "merge_to_main"])
+@pytest.mark.parametrize("failure", ["diverged", "behind", "error"])
+def test_github_compare_containment_failures_are_fail_closed(
+    relationship: str, failure: str
+) -> None:
+    delivery = trusted_delivery()
+    binding = risk_scope_evidence_binding()["successor_evidence_binding"]
+    transport = github_fixture_transport(delivery)
+    url = (
+        github_compare_url(FIXTURE_REVIEWED_HEAD, FIXTURE_MERGE_COMMIT)
+        if relationship == "reviewed_to_merge"
+        else github_compare_url(FIXTURE_MERGE_COMMIT, "main")
+    )
+    if failure == "error":
+        transport.payloads[url] = OSError("compare unavailable")
+    else:
+        payload = transport.payloads[url]
+        assert isinstance(payload, dict)
+        payload["status"] = failure
+        payload["behind_by"] = 1
+
+    assert not validator.GitHubRiskScopeVerifier(transport=transport).verify(
+        binding, delivery["completion_evidence"]
+    )
+
+
+@pytest.mark.parametrize("mutation", ["merge_base", "url", "commit", "over_page"])
+def test_github_compare_rejects_mismatched_response_identity(mutation: str) -> None:
+    delivery = trusted_delivery()
+    binding = risk_scope_evidence_binding()["successor_evidence_binding"]
+    transport = github_fixture_transport(delivery)
+    url = github_compare_url(FIXTURE_REVIEWED_HEAD, FIXTURE_MERGE_COMMIT)
+    payload = transport.payloads[url]
+    assert isinstance(payload, dict)
+    if mutation == "merge_base":
+        payload["merge_base_commit"]["sha"] = "0" * 40
+    elif mutation == "url":
+        payload["url"] += "/wrong"
+    elif mutation == "commit":
+        payload["commits"] = [None]
+    else:
+        payload["commits"].append({"sha": "0" * 40})
+
+    assert not validator.GitHubRiskScopeVerifier(transport=transport).verify(
+        binding, delivery["completion_evidence"]
+    )
+
+
+def test_github_compare_allows_merge_commit_equal_to_current_main() -> None:
+    delivery = trusted_delivery()
+    binding = risk_scope_evidence_binding()["successor_evidence_binding"]
+    transport = github_fixture_transport(delivery)
+    url = github_compare_url(FIXTURE_MERGE_COMMIT, "main")
+    payload = transport.payloads[url]
+    assert isinstance(payload, dict)
+    payload.update(status="identical", ahead_by=0, total_commits=0, commits=[])
+
+    assert validator.GitHubRiskScopeVerifier(transport=transport).verify(
+        binding, delivery["completion_evidence"]
+    )
+
+
+@pytest.mark.parametrize("relationship", ["reviewed_to_merge", "merge_to_main"])
+def test_local_explicit_non_ancestor_contradiction_is_rejected(
+    monkeypatch: pytest.MonkeyPatch, relationship: str
+) -> None:
+    delivery = trusted_delivery()
+    binding = risk_scope_evidence_binding()["successor_evidence_binding"]
+    transport = github_fixture_transport(delivery)
+
+    def fake_run(arguments, **kwargs):
+        del kwargs
+        command = arguments[1:]
+        contradicted = (
+            [
+                "merge-base",
+                "--is-ancestor",
+                FIXTURE_REVIEWED_HEAD,
+                FIXTURE_MERGE_COMMIT,
+            ]
+            if relationship == "reviewed_to_merge"
+            else [
+                "merge-base",
+                "--is-ancestor",
+                FIXTURE_MERGE_COMMIT,
+                "origin/main",
+            ]
+        )
+        return SimpleNamespace(returncode=(1 if command == contradicted else 0))
+
+    monkeypatch.setattr(validator.subprocess, "run", fake_run)
+
+    assert not validator.GitHubRiskScopeVerifier(transport=transport).verify(
+        binding, delivery["completion_evidence"]
     )
 
 

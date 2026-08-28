@@ -4,7 +4,7 @@ record_status: implementation_complete_pending_independent_review
 authorized_on: "2026-08-27"
 repository:
   base_branch: origin/main
-  base_sha: bfa77268941f3814d1856c59094fd8a90e3cda81
+  base_sha: c3816482f207b985a6c704a66c6c0e0a07f3632d
   implementation_branch: codex/task-051-risk-validator-scope-successor
   review_binding: exact_head_sha_required_at_handoff
 successor_evidence_binding:
@@ -46,6 +46,8 @@ successor_evidence_binding:
       - https://api.github.com/repos/qifuxiao/QuantiQmt/pulls/87
       - https://api.github.com/repos/qifuxiao/QuantiQmt/pulls/87/reviews?per_page=100
       - https://api.github.com/repos/qifuxiao/QuantiQmt/issues/comments/{comment_id}
+      - "https://api.github.com/repos/qifuxiao/QuantiQmt/compare/{reviewed_head_sha}...{merge_commit_sha}?per_page=1&page=1"
+      - "https://api.github.com/repos/qifuxiao/QuantiQmt/compare/{merge_commit_sha}...main?per_page=1&page=1"
     timeout_seconds: 2
     max_response_bytes: 524288
     max_review_pages: 10
@@ -59,16 +61,19 @@ successor_evidence_binding:
       - latest_effective_review_state_per_reviewer_without_blocking_changes
       - reviewer_independent_from_PR_author_and_implementer
       - human_closeout_authorization_issue_comment_object
-      - local_git_reviewed_head_merge_and_origin_main_ancestry
+      - github_compare_reviewed_head_merge_and_main_containment
+      - local_git_ancestry_contradiction_rejection_when_objects_available
     failure_policy: network_timeout_rate_limit_404_invalid_json_or_mismatch_denies
 concurrent_work:
-  observed_branch: origin/codex/task-050-closeout
-  observed_head_sha: 132b83f2be3543a650fd86b9bbcd7aa28b4c2cf3
-  observed_state: completed_in_main
-  merged_commit_sha: bfa77268941f3814d1856c59094fd8a90e3cda81
-  domain_overlap: none
+  observed_branch: origin/codex/task-052-task-004-delivery-revalidation-activation
+  observed_head_sha: 5f193755bb03d70fe294c80b30a8a882693a74f2
+  observed_state: active_in_main
+  merged_commit_sha: c3816482f207b985a6c704a66c6c0e0a07f3632d
+  preserved_completed_task: TASK-050
+  preserved_completed_merge_sha: bfa77268941f3814d1856c59094fd8a90e3cda81
+  domain_overlap: governance_projection_only
   shared_projection_paths: [tasks/active/README.md, tasks/index.yaml]
-  merge_requirement: preserve_TASK_050_completed_and_TASK_051_active_projections
+  merge_requirement: preserve_TASK_050_completed_and_TASK_051_TASK_052_active_projections
 authority:
   human_authorization: >-
     2026-08-27 explicit authorization to create, activate and implement TASK-051 as a
