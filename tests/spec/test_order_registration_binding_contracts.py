@@ -146,7 +146,10 @@ def test_manifest_and_task_handoff_record_spec_change() -> None:
 
     index = _text("tasks/index.yaml")
     assert "id: TASK-050" in index
-    assert "status: active" in index.split("id: TASK-050", maxsplit=1)[1].splitlines()[0]
+    task_050_entry = index.split("id: TASK-050", maxsplit=1)[1].splitlines()[0]
+    assert "path: completed/TASK-050-order-registration-binding-contracts.md" in task_050_entry
+    assert "status: completed" in task_050_entry
+    assert "path: active/TASK-050-order-registration-binding-contracts.md" not in task_050_entry
     task_048 = _text("tasks/backlog/TASK-048-order-registration-broker-capability-binding.md")
     assert "depends_on: [TASK-004, TASK-017, TASK-050]" in task_048
     assert "TASK-048 期间 legacy `(null, null)` 永久保持 `UNBOUND`" in task_048
