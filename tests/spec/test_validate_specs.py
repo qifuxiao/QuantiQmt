@@ -641,6 +641,44 @@ def test_l4_queue_and_risk_scope_use_independent_successor_gates() -> None:
         assert delivery_is_unlockable(task051)
 
 
+def test_task051_tracks_latest_main_concurrent_governance_projection() -> None:
+    task051 = extract_front_matter(indexed_task_path("TASK-051"))
+    task052_path = indexed_task_path("TASK-052")
+    task052 = extract_front_matter(task052_path)
+    task053 = extract_front_matter(indexed_task_path("TASK-053"))
+    governance = validator.load_yaml(validator.RISK_SCOPE_GOVERNANCE_PATH)
+    concurrent_work = governance["concurrent_work"]
+
+    assert task051["status"] == "active"
+    assert task052["status"] == "blocked"
+    assert task052_path.parent.name == "backlog"
+    assert task053["status"] == "active"
+    assert governance["repository"]["base_sha"] == validator.RISK_SCOPE_BASE_SHA
+    assert concurrent_work == {
+        "observed_branch": "origin/codex/task-053-dependency-sequencing-activation",
+        "observed_head_sha": validator.RISK_SCOPE_TASK053_HEAD_SHA,
+        "observed_state": "active_in_main",
+        "merged_commit_sha": validator.RISK_SCOPE_BASE_SHA,
+        "paused_task": "TASK-052",
+        "paused_task_path": "tasks/backlog/TASK-052-task-004-delivery-revalidation.md",
+        "paused_task_state": "blocked_in_backlog",
+        "paused_task_previous_merge_sha": validator.RISK_SCOPE_TASK052_MERGE_SHA,
+        "preserved_completed_task": "TASK-050",
+        "preserved_completed_merge_sha": validator.RISK_SCOPE_TASK050_MERGE_SHA,
+        "domain_overlap": "governance_projection_only",
+        "shared_projection_paths": ["tasks/active/README.md", "tasks/index.yaml"],
+        "merge_requirement": (
+            "preserve_TASK_050_completed_TASK_052_blocked_and_TASK_051_TASK_053_active_projections"
+        ),
+    }
+
+    endpoints = governance["successor_evidence_binding"]["production_external_verifier"][
+        "endpoints"
+    ]
+    assert validator.RISK_SCOPE_GITHUB_API_REVIEW_MERGE_COMPARE_ENDPOINT in endpoints
+    assert validator.RISK_SCOPE_GITHUB_API_MERGE_MAIN_COMPARE_ENDPOINT in endpoints
+
+
 def test_indexed_task_path_supports_active_successor(tmp_path: Path) -> None:
     entry = {"id": "TASK-017", "path": "active/TASK-017.md", "status": "active"}
     fixture_root = tmp_path / "task047-index-fixture"

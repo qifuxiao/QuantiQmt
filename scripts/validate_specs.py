@@ -62,8 +62,9 @@ RISK_SCOPE_REQUIRED_DEPENDENCIES = frozenset({"TASK-015", "TASK-031", "TASK-051"
 RISK_SCOPE_GOVERNANCE_PATH = (
     ROOT / "ai" / "governance" / "risk-validator-integration-scope-task-051.yaml"
 )
-RISK_SCOPE_BASE_SHA = "c3816482f207b985a6c704a66c6c0e0a07f3632d"
-RISK_SCOPE_TASK052_HEAD_SHA = "5f193755bb03d70fe294c80b30a8a882693a74f2"
+RISK_SCOPE_BASE_SHA = "63b4c26c3da18b531bfa41f09a624d70dbddecdd"
+RISK_SCOPE_TASK053_HEAD_SHA = "89b784116816cf9ac96d59d0a3b52918ae686e1b"
+RISK_SCOPE_TASK052_MERGE_SHA = "c3816482f207b985a6c704a66c6c0e0a07f3632d"
 RISK_SCOPE_TASK050_MERGE_SHA = "bfa77268941f3814d1856c59094fd8a90e3cda81"
 RISK_SCOPE_ACCEPTED_SPEC_VERSION = "0.14.0"
 RISK_SCOPE_REPOSITORY = "qifuxiao/QuantiQmt"
@@ -1039,17 +1040,21 @@ def load_risk_scope_evidence_binding(errors: list[str]) -> dict[str, Any] | None
     if not isinstance(concurrent_work, dict) or any(
         concurrent_work.get(field) != expected_value
         for field, expected_value in {
-            "observed_branch": ("origin/codex/task-052-task-004-delivery-revalidation-activation"),
-            "observed_head_sha": RISK_SCOPE_TASK052_HEAD_SHA,
+            "observed_branch": "origin/codex/task-053-dependency-sequencing-activation",
+            "observed_head_sha": RISK_SCOPE_TASK053_HEAD_SHA,
             "observed_state": "active_in_main",
             "merged_commit_sha": RISK_SCOPE_BASE_SHA,
+            "paused_task": "TASK-052",
+            "paused_task_path": "tasks/backlog/TASK-052-task-004-delivery-revalidation.md",
+            "paused_task_state": "blocked_in_backlog",
+            "paused_task_previous_merge_sha": RISK_SCOPE_TASK052_MERGE_SHA,
             "preserved_completed_task": "TASK-050",
             "preserved_completed_merge_sha": RISK_SCOPE_TASK050_MERGE_SHA,
         }.items()
     ):
         errors.append(
             "ai/governance/risk-validator-integration-scope-task-051.yaml: "
-            "concurrent TASK-052 observation or preserved TASK-050 fact is stale"
+            "concurrent TASK-053/TASK-052 projection or preserved TASK-050 fact is stale"
         )
     authority = document.get("authority")
     accepted_spec = authority.get("accepted_spec") if isinstance(authority, dict) else None
