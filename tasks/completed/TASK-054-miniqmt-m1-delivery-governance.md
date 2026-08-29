@@ -1,7 +1,7 @@
 ---
 id: TASK-054
 title: Re-anchor delivery on mandatory MiniQMT simulation-account M1
-status: active
+status: completed
 depends_on: []
 spec_refs:
   - INV-TRADING
@@ -64,10 +64,29 @@ verification:
 delivery:
   schema_version: 1
   contract_status: not_applicable
-  implementation_status: in_progress
+  implementation_status: merged
   acceptance_status: passed
-  review_status: pending
+  review_status: approved
   release_status: prohibited
+  completion_evidence:
+    mode: governance_closeout_after_independent_review
+    change_pr: https://github.com/qifuxiao/QuantiQmt/pull/91
+    reviewed_head_sha: 499864b3b5ea2df7f897c6ee8bb63ceeaaee1861
+    review_verdict: APPROVE
+    reviewer: qifuxiao
+    evidence_url: https://github.com/qifuxiao/QuantiQmt/pull/91
+    merge_commit_sha: 1848625eb8743ef28d08fc165e90ed442d4c31d6
+    review_submitted_at: '2026-08-29T07:40:59Z'
+    reviewed_commit_sha: 499864b3b5ea2df7f897c6ee8bb63ceeaaee1861
+    reviewer_association: OWNER
+    review_api_evidence: https://api.github.com/repos/qifuxiao/QuantiQmt/pulls/91/reviews
+    merge_completed_at: '2026-08-29T07:41:14Z'
+    ci_evidence: >-
+      4/4 GitHub checks succeeded on the reviewed Head: two quality and two
+      persistence-postgresql jobs from workflow runs 33182966111 and 33183099511.
+    human_authorization_evidence: >-
+      2026-08-29 user explicitly authorized closing TASK-054 and creating,
+      activating and implementing TASK-055 Mini QMT read-only environment probe.
 ---
 
 # Objective
@@ -144,8 +163,23 @@ delivery:
   均属于后续独立实现 task，不得从文档/测试通过推断为已交付。
 - Python 3.12 与本机 Mini QMT/xtquant 的实际兼容性、券商权限、客户端路径和模拟账号
   类型仍需后续只读环境探针验证。
-- 独立 Review、GitHub CI、merge 与 closeout 尚未发生，`review_status` 保持 pending，
-  `release_status` 保持 prohibited。
+- 实现交接时独立 Review、GitHub CI、merge 与 closeout 尚未发生；该历史边界现由下方
+  final evidence 闭合。`release_status` 始终保持 prohibited。
+
+## Final Review and closeout evidence
+
+- PR #91 author `qfxyyy` delivered exact Head
+  `499864b3b5ea2df7f897c6ee8bb63ceeaaee1861`.
+- Different-author OWNER reviewer `qifuxiao` submitted formal `APPROVED` Review
+  `PRR_kwDOTKo0088AAAABLXBRDg` on that exact Head at `2026-08-29T07:40:59Z`:
+  https://github.com/qifuxiao/QuantiQmt/pull/91
+- The exact Head passed 4/4 GitHub checks: two `quality` and two
+  `persistence-postgresql` jobs.
+- PR #91 merged to `main` as `1848625eb8743ef28d08fc165e90ed442d4c31d6`
+  at `2026-08-29T07:41:14Z`.
+- 2026-08-29 human authorization explicitly closes TASK-054 and authorizes creating,
+  activating and implementing TASK-055. Release remains prohibited; this closeout
+  does not claim any Mini QMT runtime connection or trading implementation.
 
 ## Review focus
 
