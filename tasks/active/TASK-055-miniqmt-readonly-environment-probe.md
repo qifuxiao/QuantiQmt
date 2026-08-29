@@ -42,7 +42,7 @@ delivery:
   schema_version: 1
   contract_status: not_applicable
   implementation_status: in_progress
-  acceptance_status: not_run
+  acceptance_status: passed
   review_status: pending
   release_status: prohibited
 ---
@@ -85,14 +85,14 @@ delivery:
 
 ## Acceptance criteria
 
-- [ ] 配置矩阵覆盖安全默认值、模拟确认、account allowlist、路径、session 与 timeout。
-- [ ] 没有 xtquant、非 Windows、路径无效时稳定 fail-closed，模块仍可导入测试。
-- [ ] fake vendor 测试证明只调用连接、订阅和五类只读查询/清理，不调用交易 API。
-- [ ] timeout 测试证明 worker 被终止，结果不声明连接或查询成功。
-- [ ] 输出脱敏测试证明原始 account ID、查询对象和完整路径不会进入 JSON/日志。
-- [ ] 集成验证记录本机 Python/xtquant、userdata_mini、客户端连接、模拟账号订阅和
+- [x] 配置矩阵覆盖安全默认值、模拟确认、account allowlist、路径、session 与 timeout。
+- [x] 没有 xtquant、非 Windows、路径无效时稳定 fail-closed，模块仍可导入测试。
+- [x] fake vendor 测试证明只调用连接、订阅和五类只读查询/清理，不调用交易 API。
+- [x] timeout 测试证明 worker 被终止，结果不声明连接或查询成功。
+- [x] 输出脱敏测试证明原始 account ID、查询对象和完整路径不会进入 JSON/日志。
+- [x] 集成验证记录本机 Python/xtquant、userdata_mini、客户端连接、模拟账号订阅和
   asset/positions/orders/trades 查询结果；缺少本地配置时不得伪造通过。
-- [ ] 所有 verification commands 通过；规范、业务代码、migration、依赖和 CI 未变。
+- [x] 所有 verification commands 通过；规范、业务代码、migration、依赖和 CI 未变。
 
 ## Expected demonstration
 
@@ -116,3 +116,17 @@ poetry run python scripts/probe_miniqmt_readonly.py --env-file .env
   修改 Python baseline 规避。
 - vendor 查询 API 也可能阻塞；isolated process 是本任务的有界回滚边界。
 - 回滚删除本任务新增 probe/test 文件并恢复配置模板；无数据库或 Broker 状态需回滚。
+
+## Implementation evidence
+
+- 2026-08-29 在 Windows 11、Python 3.12.10、xtquant 250516.1.1 与本机
+  `userdata_mini` 上完成真实只读探针；结果为 `PROBE_OK`。
+- 连接、精确模拟账号订阅、account status、asset、positions、orders、trades 查询均成功；
+  公共结果仅记录布尔值和集合计数，positions/orders/trades 计数均为 0。
+- 23 个 unit tests 与 2 个本机 integration tests 通过；mypy、ruff check、ruff format、
+  `scripts/validate_specs.py` 全部通过；M1 delivery governance 5 个测试通过。
+- 机器扫描与窄 facade 证明实现未调用 vendor order/cancel API；启动、连接、订阅、查询、
+  cleanup、worker 创建和 deadline 失败均转换为脱敏 reason code。
+- 运行限制：同一个 Mini QMT session ID 不得并发使用；stop 后立即复用可能暂时返回连接
+  失败，必须等待客户端释放或由操作者配置另一个唯一正整数 session，不进行自动重试。
+- Review 尚未完成；本任务保持 active，release 继续 prohibited。
