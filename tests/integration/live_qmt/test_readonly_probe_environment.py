@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from quantiqmt.live.qmt.readonly_probe import (
-    PROFILE_KEY,
+    PROBE_ENV_KEYS,
     ProbeConfigError,
     ReadonlyProbeConfig,
     detect_runtime_identity,
@@ -15,7 +15,8 @@ from quantiqmt.live.qmt.readonly_probe import (
 
 
 def require_explicit_live_config() -> ReadonlyProbeConfig:
-    if PROFILE_KEY not in os.environ:
+    configured_probe_keys = PROBE_ENV_KEYS.intersection(os.environ)
+    if not configured_probe_keys:
         pytest.skip("requires explicit TASK-055 Mini QMT simulation environment")
     try:
         return ReadonlyProbeConfig.from_environment(os.environ)

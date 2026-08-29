@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import ast
 import json
+import subprocess
+import sys
 from collections.abc import Mapping
 from pathlib import Path
 from types import SimpleNamespace
@@ -8,6 +11,7 @@ from typing import Any
 
 import pytest
 
+import quantiqmt.live.qmt.readonly_probe as probe_module
 from quantiqmt.live.qmt.readonly_probe import (
     ProbeConfigError,
     ReadonlyProbeConfig,
@@ -54,6 +58,7 @@ def valid_environment(userdata_path: Path) -> dict[str, str]:
             "CONFIG_SIMULATION_CONFIRMATION_REQUIRED",
         ),
         ({"QUANTIQMT_QMT_ACCOUNT_TYPE": ""}, "CONFIG_ACCOUNT_TYPE_REQUIRED"),
+        ({"QUANTIQMT_QMT_ACCOUNT_TYPE": "CREDIT"}, "CONFIG_ACCOUNT_TYPE_FORBIDDEN"),
         ({"QUANTIQMT_QMT_SESSION_ID": "0"}, "CONFIG_SESSION_INVALID"),
         ({"QUANTIQMT_QMT_SESSION_ID": "not-an-int"}, "CONFIG_SESSION_INVALID"),
         ({"QUANTIQMT_QMT_PROBE_TIMEOUT_SECONDS": "0"}, "CONFIG_TIMEOUT_INVALID"),
@@ -89,8 +94,18 @@ def test_configuration_requires_userdata_directory(tmp_path: Path) -> None:
 
 
 class FakeReadonlyFacade:
-    def __init__(self, account_id: str = ACCOUNT_ID) -> None:
+    def __init__(
+        self,
+        account_id: str = ACCOUNT_ID,
+        *,
+        account_type: int = 2,
+        account_status: int = 0,
+        extra_statuses: list[object] | None = None,
+    ) -> None:
         self.account_id = account_id
+        self.account_type = account_type
+        self.account_status = account_status
+        self.extra_statuses = extra_statuses or []
         self.calls: list[str] = []
 
     def start(self) -> None:
@@ -106,7 +121,14 @@ class FakeReadonlyFacade:
 
     def query_account_status(self) -> list[object]:
         self.calls.append("query_account_status")
-        return [SimpleNamespace(account_id=self.account_id)]
+        return [
+            SimpleNamespace(
+                account_id=self.account_id,
+                account_type=self.account_type,
+                status=self.account_status,
+            ),
+            *self.extra_statuses,
+        ]
 
     def query_asset(self) -> object:
         self.calls.append("query_asset")
@@ -214,6 +236,33 @@ def test_account_identity_mismatch_fails_closed_and_cleans_up(tmp_path: Path) ->
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize(
+    ("facade", "reason_code"),
+    [
+        (FakeReadonlyFacade(account_type=3), "QUERY_ACCOUNT_TYPE_MISMATCH"),
+        (FakeReadonlyFacade(account_status=3), "QUERY_ACCOUNT_STATUS_UNHEALTHY"),
+        (
+            FakeReadonlyFacade(
+                extra_statuses=[SimpleNamespace(account_id="other", account_type=2, status=0)]
+            ),
+            "QUERY_ACCOUNT_IDENTITY_AMBIGUOUS",
+        ),
+    ],
+)
+def test_account_status_must_be_exact_and_healthy(
+    tmp_path: Path, facade: FakeReadonlyFacade, reason_code: str
+) -> None:
+    userdata_path = tmp_path / "userdata_mini"
+    userdata_path.mkdir()
+    config = ReadonlyProbeConfig.from_environment(valid_environment(userdata_path))
+
+    report = run_probe(config, lambda _: facade, runtime=windows_runtime())
+
+    assert report.passed is False
+    assert report.reason_code == reason_code
+
+
+@pytest.mark.unit
 def test_public_json_redacts_account_objects_exceptions_and_full_path(tmp_path: Path) -> None:
     userdata_path = tmp_path / "secret-parent" / "userdata_mini"
     userdata_path.mkdir(parents=True)
@@ -251,6 +300,9 @@ class FakeProcess:
     def terminate(self) -> None:
         self.terminated = True
 
+    def kill(self) -> None:
+        self.terminated = True
+
 
 class EmptyQueue:
     def get(self, *, timeout: float) -> Any:
@@ -280,7 +332,9 @@ def test_worker_timeout_terminates_process_and_reports_no_success(tmp_path: Path
 
     assert context.process.started is True
     assert context.process.terminated is True
-    assert context.process.join_timeouts == [10.0, 1.0]
+    assert len(context.process.join_timeouts) == 2
+    assert 0 < context.process.join_timeouts[0] <= 10.0
+    assert context.process.join_timeouts[1] == 1.0
     assert report.passed is False
     assert report.reason_code == "PROBE_DEADLINE_EXCEEDED"
     assert report.connected is False
@@ -306,6 +360,104 @@ def test_worker_start_failure_is_redacted(tmp_path: Path) -> None:
     assert report.reason_code == "PROBE_WORKER_START_FAILED"
     assert ACCOUNT_ID not in encoded
     assert "forbidden-pipe-path" not in encoded
+
+
+class StubbornProcess(FakeProcess):
+    def __init__(self) -> None:
+        super().__init__()
+        self.killed = False
+
+    def terminate(self) -> None:
+        return
+
+    def kill(self) -> None:
+        self.killed = True
+        self.terminated = True
+
+
+class StubbornContext(TimeoutContext):
+    def __init__(self) -> None:
+        self.process = StubbornProcess()
+
+
+@pytest.mark.unit
+def test_timeout_escalates_to_kill_and_confirms_worker_death(tmp_path: Path) -> None:
+    userdata_path = tmp_path / "userdata_mini"
+    userdata_path.mkdir()
+    config = ReadonlyProbeConfig.from_environment(valid_environment(userdata_path))
+    context = StubbornContext()
+
+    report = run_probe_isolated(config, context=context)
+
+    assert context.process.killed is True
+    assert context.process.is_alive() is False
+    assert report.reason_code == "PROBE_DEADLINE_EXCEEDED"
+
+
+@pytest.mark.unit
+def test_session_mutex_conflict_fails_before_process_start(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    userdata_path = tmp_path / "userdata_mini"
+    userdata_path.mkdir()
+    config = ReadonlyProbeConfig.from_environment(valid_environment(userdata_path))
+    context = TimeoutContext()
+
+    def conflict(_: ReadonlyProbeConfig) -> object:
+        raise probe_module.SessionMutexError("PROBE_SESSION_IN_USE")
+
+    monkeypatch.setattr(probe_module, "_acquire_session_mutex", conflict)
+    report = run_probe_isolated(config, context=context)
+
+    assert report.reason_code == "PROBE_SESSION_IN_USE"
+    assert context.process.started is False
+
+
+@pytest.mark.unit
+@pytest.mark.skipif(sys.platform != "win32", reason="Mini QMT mutex is Windows-only")
+def test_windows_named_mutex_rejects_same_userdata_and_session(tmp_path: Path) -> None:
+    userdata_path = tmp_path / "userdata_mini"
+    userdata_path.mkdir()
+    config = ReadonlyProbeConfig.from_environment(valid_environment(userdata_path))
+    mutex = probe_module._acquire_session_mutex(config)
+
+    try:
+        with pytest.raises(probe_module.SessionMutexError) as exc_info:
+            probe_module._acquire_session_mutex(config)
+        assert exc_info.value.reason_code == "PROBE_SESSION_IN_USE"
+    finally:
+        mutex.release()
+
+
+@pytest.mark.unit
+def test_real_probe_factory_has_no_public_default() -> None:
+    assert run_probe.__defaults__ is None
+
+
+@pytest.mark.unit
+def test_child_process_output_is_suppressed_at_file_descriptor_level() -> None:
+    sensitive = f"{ACCOUNT_ID}-native-output"
+    code = (
+        "import os,sys; "
+        "from quantiqmt.live.qmt.readonly_probe import _isolate_worker_output; "
+        "sink=_isolate_worker_output(); "
+        "sys.stdout.write(" + repr(sensitive) + "); sys.stdout.flush(); "
+        "sys.stderr.write(" + repr(sensitive) + "); sys.stderr.flush(); "
+        "os.write(1," + repr(sensitive.encode()) + "); "
+        "os.write(2," + repr(sensitive.encode()) + "); "
+        "os._exit(0)"
+    )
+
+    completed = subprocess.run(
+        [sys.executable, "-c", code],
+        cwd=Path(__file__).parents[3],
+        check=False,
+        capture_output=True,
+    )
+
+    assert completed.returncode == 0
+    assert sensitive.encode() not in completed.stdout
+    assert sensitive.encode() not in completed.stderr
 
 
 @pytest.mark.unit
@@ -341,16 +493,41 @@ def test_env_file_rejects_unknown_qmt_and_secret_keys(tmp_path: Path) -> None:
 
 @pytest.mark.unit
 def test_probe_source_contains_no_vendor_trading_calls() -> None:
-    source = (
+    source_path = (
         Path(__file__).parents[3] / "src" / "quantiqmt" / "live" / "qmt" / "readonly_probe.py"
-    ).read_text(encoding="utf-8")
-    forbidden_fragments = (
-        ".order_stock(",
-        ".order_stock_async(",
-        ".cancel_order_stock(",
-        ".cancel_order_stock_async(",
-        ".cancel_order_stock_sysid(",
-        ".cancel_order_stock_sysid_async(",
     )
+    tree = ast.parse(source_path.read_text(encoding="utf-8"))
+    trader_calls = {
+        node.func.attr
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and isinstance(node.func.value, ast.Attribute)
+        and isinstance(node.func.value.value, ast.Name)
+        and node.func.value.value.id == "self"
+        and node.func.value.attr == "_trader"
+    }
 
-    assert all(fragment not in source for fragment in forbidden_fragments)
+    assert trader_calls == {
+        "start",
+        "connect",
+        "subscribe",
+        "query_account_status",
+        "query_stock_asset",
+        "query_stock_positions",
+        "query_stock_orders",
+        "query_stock_trades",
+        "unsubscribe",
+        "stop",
+    }
+    assert not any(
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id in {"getattr", "setattr"}
+        and node.args
+        and isinstance(node.args[0], ast.Attribute)
+        and isinstance(node.args[0].value, ast.Name)
+        and node.args[0].value.id == "self"
+        and node.args[0].attr == "_trader"
+        for node in ast.walk(tree)
+    )

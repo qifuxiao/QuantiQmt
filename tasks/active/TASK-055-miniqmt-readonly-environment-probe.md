@@ -43,7 +43,7 @@ delivery:
   contract_status: not_applicable
   implementation_status: in_progress
   acceptance_status: passed
-  review_status: pending
+  review_status: changes_requested
   release_status: prohibited
 ---
 
@@ -123,10 +123,14 @@ poetry run python scripts/probe_miniqmt_readonly.py --env-file .env
   `userdata_mini` 上完成真实只读探针；结果为 `PROBE_OK`。
 - 连接、精确模拟账号订阅、account status、asset、positions、orders、trades 查询均成功；
   公共结果仅记录布尔值和集合计数，positions/orders/trades 计数均为 0。
-- 23 个 unit tests 与 2 个本机 integration tests 通过；mypy、ruff check、ruff format、
+- 32 个 unit tests 与 2 个本机 integration tests 通过；mypy、ruff check、ruff format、
   `scripts/validate_specs.py` 全部通过；M1 delivery governance 5 个测试通过。
 - 机器扫描与窄 facade 证明实现未调用 vendor order/cancel API；启动、连接、订阅、查询、
   cleanup、worker 创建和 deadline 失败均转换为脱敏 reason code。
 - 运行限制：同一个 Mini QMT session ID 不得并发使用；stop 后立即复用可能暂时返回连接
   失败，必须等待客户端释放或由操作者配置另一个唯一正整数 session，不进行自动重试。
-- Review 尚未完成；本任务保持 active，release 继续 prohibited。
+- 独立 Review 会话 `01a04c97-7560-78a3-8b4d-09aa0b5fa869` 对 head `f644b53` 提出
+  5 个 P1 和 2 个 P2；后续修订增加精确 `STOCK`/健康状态/唯一身份校验、worker fd 输出
+  隔离、仅 worker 可达的真实 factory、全程 deadline 与 terminate/kill 确认、Windows named
+  mutex、部分配置 fail 和 AST vendor call allowlist。等待新 head 独立复审；本任务保持
+  active，release 继续 prohibited。

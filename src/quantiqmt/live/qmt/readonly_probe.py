@@ -6,6 +6,8 @@ facade that has no order or cancellation methods.
 
 from __future__ import annotations
 
+import ctypes
+import hashlib
 import importlib
 import importlib.metadata
 import multiprocessing
@@ -13,14 +15,19 @@ import os
 import platform
 import queue
 import sys
+import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any, Protocol, cast
+from typing import Any, Protocol, TextIO, cast
 
 READONLY_PROFILE = "MINIQMT_SIM_READONLY"
 MIN_TIMEOUT_SECONDS = 1.0
 MAX_TIMEOUT_SECONDS = 300.0
+SUPPORTED_ACCOUNT_TYPE = "STOCK"
+STOCK_ACCOUNT_TYPE_CODE = 2
+HEALTHY_ACCOUNT_STATUS_CODE = 0
+ERROR_ALREADY_EXISTS = 183
 
 PROFILE_KEY = "QUANTIQMT_PROFILE"
 USERDATA_PATH_KEY = "QUANTIQMT_QMT_USERDATA_PATH"
@@ -88,6 +95,8 @@ class ReadonlyProbeConfig:
         account_type = environment.get(ACCOUNT_TYPE_KEY, "").strip().upper()
         if not account_type:
             raise ProbeConfigError("CONFIG_ACCOUNT_TYPE_REQUIRED")
+        if account_type != SUPPORTED_ACCOUNT_TYPE:
+            raise ProbeConfigError("CONFIG_ACCOUNT_TYPE_FORBIDDEN")
 
         allowlist_parts = [
             item.strip() for item in environment.get(ACCOUNT_ALLOWLIST_KEY, "").split(",")
@@ -234,7 +243,7 @@ class ReadonlyVendorFacade(Protocol):
 
     def subscribe(self) -> int: ...
 
-    def query_account_status(self) -> Sequence[object] | None: ...
+    def query_account_status(self) -> Sequence[VendorAccountStatus] | None: ...
 
     def query_asset(self) -> object | None: ...
 
@@ -247,6 +256,13 @@ class ReadonlyVendorFacade(Protocol):
     def unsubscribe(self) -> None: ...
 
     def stop(self) -> None: ...
+
+
+@dataclass(frozen=True, repr=False)
+class VendorAccountStatus:
+    account_id: str
+    account_type: int
+    status: int
 
 
 class _XtQuantReadonlyFacade:
@@ -265,8 +281,18 @@ class _XtQuantReadonlyFacade:
     def subscribe(self) -> int:
         return int(self._trader.subscribe(self._account))
 
-    def query_account_status(self) -> Sequence[object] | None:
-        return cast(Sequence[object] | None, self._trader.query_account_status())
+    def query_account_status(self) -> Sequence[VendorAccountStatus] | None:
+        raw_statuses = self._trader.query_account_status()
+        if raw_statuses is None:
+            return None
+        return [
+            VendorAccountStatus(
+                account_id=str(raw_status.account_id),
+                account_type=int(raw_status.account_type),
+                status=int(raw_status.status),
+            )
+            for raw_status in raw_statuses
+        ]
 
     def query_asset(self) -> object | None:
         return cast(object | None, self._trader.query_stock_asset(self._account))
@@ -287,7 +313,7 @@ class _XtQuantReadonlyFacade:
         self._trader.stop()
 
 
-def create_xtquant_readonly_facade(config: ReadonlyProbeConfig) -> ReadonlyVendorFacade:
+def _create_xtquant_readonly_facade(config: ReadonlyProbeConfig) -> ReadonlyVendorFacade:
     """Import and construct the native vendor client inside the isolated worker."""
 
     trader_module = importlib.import_module("xtquant.xttrader")
@@ -307,9 +333,7 @@ class _ProbeFailure(Exception):
 
 def run_probe(
     config: ReadonlyProbeConfig,
-    facade_factory: Callable[[ReadonlyProbeConfig], ReadonlyVendorFacade] = (
-        create_xtquant_readonly_facade
-    ),
+    facade_factory: Callable[[ReadonlyProbeConfig], ReadonlyVendorFacade],
     *,
     runtime: RuntimeIdentity | None = None,
 ) -> ProbeReport:
@@ -375,10 +399,15 @@ def run_probe(
             if statuses is None:
                 raise _ProbeFailure("QUERY_ACCOUNT_STATUS_FAILED")
             status_queried = True
-            if not any(
-                getattr(status, "account_id", None) == config.account_id for status in statuses
-            ):
+            if len(statuses) != 1:
+                raise _ProbeFailure("QUERY_ACCOUNT_IDENTITY_AMBIGUOUS")
+            status = statuses[0]
+            if status.account_id != config.account_id:
                 raise _ProbeFailure("QUERY_ACCOUNT_IDENTITY_MISMATCH")
+            if status.account_type != STOCK_ACCOUNT_TYPE_CODE:
+                raise _ProbeFailure("QUERY_ACCOUNT_TYPE_MISMATCH")
+            if status.status != HEALTHY_ACCOUNT_STATUS_CODE:
+                raise _ProbeFailure("QUERY_ACCOUNT_STATUS_UNHEALTHY")
         except _ProbeFailure:
             raise
         except Exception as exc:
@@ -460,7 +489,7 @@ def run_probe(
 
 
 def _required_sequence(value: Sequence[object] | None, reason_code: str) -> Sequence[object]:
-    if value is None or isinstance(value, (str, bytes)):
+    if value is None or isinstance(value, str | bytes):
         raise _ProbeFailure(reason_code)
     return value
 
@@ -477,12 +506,97 @@ def _query_stage_failure(
     return "PROBE_INTERNAL_FAILED"
 
 
+def _isolate_worker_output() -> TextIO:
+    """Redirect Python and native fd 1/2 output before importing the vendor package."""
+
+    sink = open(os.devnull, "w", encoding="utf-8")  # noqa: SIM115 - owned until worker exit
+    try:
+        os.dup2(sink.fileno(), 1)
+        os.dup2(sink.fileno(), 2)
+        sys.stdout = sink
+        sys.stderr = sink
+    except BaseException:
+        sink.close()
+        raise
+    return sink
+
+
 def _probe_worker(config: ReadonlyProbeConfig, output_queue: Any) -> None:
     try:
-        report = run_probe(config)
+        sink = _isolate_worker_output()
     except BaseException:
-        report = failure_report("PROBE_WORKER_FAILED", userdata_leaf=config.userdata_path.name)
-    output_queue.put(report)
+        output_queue.put(
+            failure_report("PROBE_OUTPUT_ISOLATION_FAILED", userdata_leaf=config.userdata_path.name)
+        )
+        return
+    try:
+        try:
+            report = run_probe(config, _create_xtquant_readonly_facade)
+        except BaseException:
+            report = failure_report("PROBE_WORKER_FAILED", userdata_leaf=config.userdata_path.name)
+        output_queue.put(report)
+    finally:
+        # The worker process owns this descriptor until exit; closing it early would leave
+        # sys.stdout/sys.stderr referencing a closed stream during interpreter shutdown.
+        _ = sink
+
+
+class SessionMutexError(RuntimeError):
+    def __init__(self, reason_code: str) -> None:
+        self.reason_code = reason_code
+        super().__init__(reason_code)
+
+
+class _SessionMutex(Protocol):
+    def release(self) -> None: ...
+
+
+class _NoopSessionMutex:
+    def release(self) -> None:
+        return
+
+
+class _WindowsSessionMutex:
+    def __init__(self, kernel32: Any, handle: int) -> None:
+        self._kernel32 = kernel32
+        self._handle = handle
+
+    def release(self) -> None:
+        if self._handle == 0:
+            return
+        handle = self._handle
+        self._handle = 0
+        if not self._kernel32.CloseHandle(handle):
+            raise SessionMutexError("PROBE_SESSION_LOCK_RELEASE_FAILED")
+
+
+def _acquire_session_mutex(config: ReadonlyProbeConfig) -> _SessionMutex:
+    if platform.system() != "Windows":
+        return _NoopSessionMutex()
+
+    identity = f"{str(config.userdata_path).casefold()}\0{config.session_id}"
+    digest = hashlib.sha256(identity.encode("utf-8")).hexdigest()
+    mutex_name = f"Local\\QuantiQmt.ReadonlyProbe.{digest}"
+    try:
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        create_mutex = kernel32.CreateMutexW
+        create_mutex.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_wchar_p]
+        create_mutex.restype = ctypes.c_void_p
+        close_handle = kernel32.CloseHandle
+        close_handle.argtypes = [ctypes.c_void_p]
+        close_handle.restype = ctypes.c_int
+        handle_value = create_mutex(None, 0, mutex_name)
+        error_code = ctypes.get_last_error()
+    except Exception as exc:
+        raise SessionMutexError("PROBE_SESSION_LOCK_FAILED") from exc
+
+    if not handle_value:
+        raise SessionMutexError("PROBE_SESSION_LOCK_FAILED")
+    handle = int(handle_value)
+    if error_code == ERROR_ALREADY_EXISTS:
+        close_handle(handle)
+        raise SessionMutexError("PROBE_SESSION_IN_USE")
+    return _WindowsSessionMutex(kernel32, handle)
 
 
 def run_probe_isolated(
@@ -492,41 +606,104 @@ def run_probe_isolated(
 ) -> ProbeReport:
     """Run in a spawned process and forcibly terminate it at the configured deadline."""
 
+    deadline = time.monotonic() + config.timeout_seconds
+    try:
+        session_mutex = _acquire_session_mutex(config)
+    except SessionMutexError as exc:
+        return failure_report(exc.reason_code, userdata_leaf=config.userdata_path.name)
+
+    try:
+        report = _run_probe_isolated_locked(config, deadline=deadline, context=context)
+    finally:
+        try:
+            session_mutex.release()
+        except SessionMutexError:
+            report = failure_report(
+                "PROBE_SESSION_LOCK_RELEASE_FAILED", userdata_leaf=config.userdata_path.name
+            )
+    return report
+
+
+def _run_probe_isolated_locked(
+    config: ReadonlyProbeConfig, *, deadline: float, context: Any | None
+) -> ProbeReport:
     process_context = context or multiprocessing.get_context("spawn")
     process: Any | None = None
+    output_queue: Any | None = None
     try:
         output_queue = process_context.Queue()
         process = process_context.Process(target=_probe_worker, args=(config, output_queue))
         process.start()
     except Exception:
-        _terminate_process_safely(process)
+        stopped = _force_stop_process(process)
+        _close_process_resources(process, output_queue)
+        reason_code = "PROBE_WORKER_START_FAILED" if stopped else "PROBE_TERMINATION_FAILED"
+        return failure_report(reason_code, userdata_leaf=config.userdata_path.name)
+
+    if process is None:
+        _close_process_resources(process, output_queue)
         return failure_report("PROBE_WORKER_START_FAILED", userdata_leaf=config.userdata_path.name)
 
-    process.join(config.timeout_seconds)
-    if process.is_alive():
+    try:
+        remaining = deadline - time.monotonic()
+        if remaining > 0:
+            process.join(remaining)
+        if process.is_alive():
+            stopped = _force_stop_process(process)
+            reason_code = "PROBE_DEADLINE_EXCEEDED" if stopped else "PROBE_TERMINATION_FAILED"
+            return failure_report(reason_code, userdata_leaf=config.userdata_path.name)
+
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return failure_report(
+                "PROBE_DEADLINE_EXCEEDED", userdata_leaf=config.userdata_path.name
+            )
+        try:
+            result = output_queue.get(timeout=remaining)
+        except (queue.Empty, LookupError):
+            return failure_report("PROBE_WORKER_NO_RESULT", userdata_leaf=config.userdata_path.name)
+        if not isinstance(result, ProbeReport):
+            return failure_report(
+                "PROBE_WORKER_INVALID_RESULT", userdata_leaf=config.userdata_path.name
+            )
+        return result
+    except Exception:
+        stopped = _force_stop_process(process)
+        reason_code = "PROBE_PROCESS_CONTROL_FAILED" if stopped else "PROBE_TERMINATION_FAILED"
+        return failure_report(reason_code, userdata_leaf=config.userdata_path.name)
+    finally:
+        _close_process_resources(process, output_queue)
+
+
+def _force_stop_process(process: Any | None) -> bool:
+    if process is None:
+        return True
+    try:
+        if not process.is_alive():
+            return True
         process.terminate()
         process.join(1.0)
-        return failure_report("PROBE_DEADLINE_EXCEEDED", userdata_leaf=config.userdata_path.name)
-    try:
-        result = output_queue.get(timeout=1.0)
-    except (queue.Empty, LookupError):
-        return failure_report("PROBE_WORKER_NO_RESULT", userdata_leaf=config.userdata_path.name)
-    if not isinstance(result, ProbeReport):
-        return failure_report(
-            "PROBE_WORKER_INVALID_RESULT", userdata_leaf=config.userdata_path.name
-        )
-    return result
-
-
-def _terminate_process_safely(process: Any | None) -> None:
-    if process is None:
-        return
-    try:
         if process.is_alive():
-            process.terminate()
+            process.kill()
             process.join(1.0)
+        return not bool(process.is_alive())
     except Exception:
-        return
+        return False
+
+
+def _close_process_resources(process: Any | None, output_queue: Any | None) -> None:
+    if output_queue is not None:
+        try:
+            output_queue.cancel_join_thread()
+            output_queue.close()
+        except Exception:
+            pass
+    if process is not None:
+        try:
+            if not process.is_alive():
+                process.close()
+        except Exception:
+            pass
 
 
 def load_probe_environment(
