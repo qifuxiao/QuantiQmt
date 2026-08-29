@@ -18,10 +18,9 @@ def _yaml(relative_path: str) -> dict[str, object]:
     return value
 
 
-def test_task_054_is_completed_task_055_is_active_and_task_053_is_paused() -> None:
+def test_tasks_054_and_055_are_completed_and_task_053_is_paused() -> None:
     active = sorted((ROOT / "tasks" / "active").glob("TASK-*.md"))
-    assert [path.name for path in active] == ["TASK-055-miniqmt-readonly-environment-probe.md"]
-    assert extract_front_matter(active[0])["status"] == "active"
+    assert active == []
 
     completed = ROOT / "tasks/completed/TASK-054-miniqmt-m1-delivery-governance.md"
     task_054 = extract_front_matter(completed)
@@ -29,6 +28,14 @@ def test_task_054_is_completed_task_055_is_active_and_task_053_is_paused() -> No
     assert task_054["delivery"]["implementation_status"] == "merged"
     assert task_054["delivery"]["acceptance_status"] == "passed"
     assert task_054["delivery"]["review_status"] == "approved"
+
+    task_055_path = ROOT / "tasks/completed/TASK-055-miniqmt-readonly-environment-probe.md"
+    task_055 = extract_front_matter(task_055_path)
+    assert task_055["status"] == "completed"
+    assert task_055["delivery"]["implementation_status"] == "merged"
+    assert task_055["delivery"]["acceptance_status"] == "passed"
+    assert task_055["delivery"]["review_status"] == "approved"
+    assert task_055["delivery"]["release_status"] == "prohibited"
 
     paused = ROOT / "tasks/backlog/TASK-053-dependency-sequencing-governance.md"
     assert extract_front_matter(paused)["status"] == "blocked"
@@ -40,8 +47,8 @@ def test_task_054_is_completed_task_055_is_active_and_task_053_is_paused() -> No
     assert indexed["TASK-053"]["status"] == "blocked"
     assert indexed["TASK-054"]["path"].startswith("completed/")
     assert indexed["TASK-054"]["status"] == "completed"
-    assert indexed["TASK-055"]["path"].startswith("active/")
-    assert indexed["TASK-055"]["status"] == "active"
+    assert indexed["TASK-055"]["path"].startswith("completed/")
+    assert indexed["TASK-055"]["status"] == "completed"
 
 
 def test_product_rules_make_miniqmt_simulation_account_mandatory_for_m1() -> None:
