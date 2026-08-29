@@ -42,7 +42,7 @@ delivery:
   schema_version: 1
   contract_status: not_applicable
   implementation_status: in_progress
-  acceptance_status: partial
+  acceptance_status: passed
   review_status: changes_requested
   release_status: prohibited
 ---
@@ -139,7 +139,11 @@ poetry run python scripts/probe_miniqmt_readonly.py --env-file .env
   分段保护，增加 daemon launch watchdog 与 worker launch gate，并让成功报告在 IPC/process
   句柄清理失败时降级；等待再次独立复审。
 - 最新修订将 late-start cleanup 持有 session mutex 直至 worker 终止与资源关闭，并将非交易日
-  `ACCOUNT_STATUS_CLOSED` 视为只读安全状态；其他 vendor 状态映射为脱敏 reason code。2026-08-29
-  最后一次本机探针报告 `QUERY_ACCOUNT_STATUS_CONNECTING`，在 asset/positions/orders/trades 前
-  fail-closed。需操作者在 Mini QMT 界面恢复模拟账号为正常/已连接后重跑，故 acceptance 暂为
-  partial，不得把此前 head 的环境结果冒充当前 head 通过。
+  `ACCOUNT_STATUS_CLOSED` 视为只读安全状态；其他 vendor 状态映射为脱敏 reason code。操作者在
+  Mini QMT 界面恢复模拟账号连接后，2026-08-29 在实现 head `2b8cc03` 重跑真实只读探针，结果为
+  `PROBE_OK`；connected/subscribed/account status/asset/positions/orders/trades 均为 true，且不输出
+  账号、资产或完整路径。
+- 同一环境随后执行 `tests/integration/live_qmt/test_readonly_probe_environment.py`，2 项测试通过；
+  36 项 unit tests、5 项 M1 delivery governance tests、mypy、ruff check、ruff format check 与
+  `scripts/validate_specs.py` 均通过。acceptance 恢复为 passed；仍等待最终 head 独立复审，故
+  review 保持 changes_requested、任务保持 active、release 保持 prohibited。
