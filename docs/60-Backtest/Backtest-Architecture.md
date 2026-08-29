@@ -42,6 +42,16 @@ flowchart TB
 
 数据进入回测前执行 schema、交易日历、复权、重复、缺失和单调性检查。原始价格、复权价格和可交易价格不得混用；缺失数据不能默认前值填充后继续交易。
 
+Mini QMT 可以是历史数据来源，但只能在运行前完成下载/导出和受控 ingestion。数据必须
+冻结为包含 dataset/partition version、availability policy 与 checksum 的不可变 manifest；
+回测运行期间不得再次读取变化中的 Mini QMT 数据。Historical Market 只能释放
+`available_at <= VirtualClock` 的事实，防止未来数据泄漏。
+
+回测与 Mini QMT 模拟实盘共享 Strategy artifact、OrderIntent、TargetResolver、OMS、
+Risk、Execution request、Ledger/Portfolio 和审计语义；不共享外部假设。回测使用
+VirtualClock、Deterministic Scheduler 和 Execution Simulator，模拟实盘保留网络延迟、
+断连、异步回报和 UNKNOWN/reconciliation。
+
 ## 模拟执行
 
 Simulator 接收与 Live Execution 相同的命令契约，输出相同的 BrokerReport 契约。禁止策略访问未来 Bar、当根 Bar 完整 OHLC 或尚未发生的成交量。成交模型必须声明流动性上限和撮合时点。

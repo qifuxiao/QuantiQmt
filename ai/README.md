@@ -12,6 +12,11 @@ ai/
 
 任何工具适配文件都必须指向根 `AGENTS.md`、`spec/README.md` 和 active task，不复制契约正文。
 
+Codex 入口见 [adapters/codex.md](adapters/codex.md)，Cline 入口见
+[adapters/cline.md](adapters/cline.md)。Mini QMT M1 task 可使用
+[prompts/miniqmt-m1-task.md](prompts/miniqmt-m1-task.md)；模板不能替代 task 激活或扩展
+`allowed_paths`。
+
 ## 团队协作
 
 多成员、多 Codex 会话协作遵守 [workflows/team-collaboration.md](workflows/team-collaboration.md)。该文档定义协调会话、开发会话和 Review 会话的职责边界，以及跨成员 Review 的最小交接格式。

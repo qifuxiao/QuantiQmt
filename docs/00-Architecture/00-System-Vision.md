@@ -1,11 +1,15 @@
 # 系统愿景
 
 > Status: Proposed  
-> Updated: 2026-07-01
+> Updated: 2026-08-28
 
 ## 定位
 
 QuantiQmt 是 Python 实现的、面向 MiniQMT 起步并可扩展至多 Broker 的企业级量化交易系统。系统负责行情接入、策略运行、统一风控、订单管理、执行、账户持仓、对账恢复、审计和运维。
+
+首个可运行里程碑必须连接 Mini QMT 模拟账号并完成受控端到端闭环；Broker Simulator
+不能替代该验收。该交付优先级不得削弱 OrderIntent、OMS、Risk、Execution、UNKNOWN、
+恢复屏障、持久化和审计不变量，真实资金交易仍需独立准入。
 
 它不以 Notebook、因子研究或快速拼装策略为核心目标。研究工具可以接入，但不得削弱生产交易的控制边界。
 

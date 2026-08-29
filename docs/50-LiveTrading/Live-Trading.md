@@ -6,6 +6,17 @@
 
 Broker Adapter 只负责连接、请求转换、回报标准化、错误翻译、限速和关联 ID；不得包含风控或订单状态机。SDK 回调数据必须复制为内部不可变 DTO，不能把 SDK 对象泄漏到 Domain。
 
+M1 必须连接 Mini QMT 模拟账号。客户端由操作者先登录；adapter 使用受控配置中的
+`userdata_mini`、唯一 session ID、账号 ID 和账号类型连接/订阅。密码不得出现在 Git、
+Prompt、task、fixture 或日志；如果券商版本确需 secret，只保存 secret reference。
+
+M1 只允许 `MINIQMT_SIM_READONLY` 与显式门禁后的 `MINIQMT_SIM_TRADING`。账号必须与
+精确 allowlist 匹配；无法可靠确认模拟环境时保持 SAFE。默认禁止下单、默认 Kill Switch
+生效。真实资金账号和普通 `LIVE` profile 不能通过配置自行解锁。
+
+启动顺序为：加载安全默认值 → 校验路径/API 兼容性 → 连接 → 订阅与只读查询 → 校验
+账号/能力绑定 → 对账 → 健康窗口 → 审批恢复屏障。任何失败均不得打开下单能力。
+
 ## 心跳与健康
 
 健康状态分为 `STARTING/HEALTHY/DEGRADED/UNHEALTHY`，分别检查进程存活、最近回调、主动查询、行情新鲜度和请求成功率。TCP 连接存在不代表服务可用。

@@ -7,6 +7,8 @@ QuantiQmt 是面向长期生产运行的量化交易系统，不是策略研究�
 ## 阅读顺序
 
 1. [系统愿景](00-Architecture/00-System-Vision.md)
+   - [Product North Star](00-Architecture/06-Product-North-Star.md)
+   - [M1 Mini QMT Simulation Delivery](00-Architecture/07-M1-MiniQMT-Simulation-Delivery.md)
 2. [架构原则](00-Architecture/01-Architecture-Principles.md)
 3. [系统架构](00-Architecture/02-System-Architecture.md)
 4. [领域与分层](00-Architecture/03-Domain-And-Layers.md)

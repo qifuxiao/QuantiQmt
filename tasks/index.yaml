@@ -40,4 +40,5 @@ tasks:
   - {id: TASK-049, path: completed/TASK-049-governance-validator-test-determinism.md, status: completed, depends_on: [TASK-043]}
   - {id: TASK-050, path: completed/TASK-050-order-registration-binding-contracts.md, status: completed, depends_on: [TASK-017]}
   - {id: TASK-052, path: backlog/TASK-052-task-004-delivery-revalidation.md, status: blocked, depends_on: [TASK-031, TASK-043, TASK-049, TASK-050]}
-  - {id: TASK-053, path: active/TASK-053-dependency-sequencing-governance.md, status: active, depends_on: [TASK-031, TASK-043, TASK-049, TASK-050]}
+  - {id: TASK-053, path: backlog/TASK-053-dependency-sequencing-governance.md, status: blocked, depends_on: [TASK-031, TASK-043, TASK-049, TASK-050]}
+  - {id: TASK-054, path: active/TASK-054-miniqmt-m1-delivery-governance.md, status: active, depends_on: []}
