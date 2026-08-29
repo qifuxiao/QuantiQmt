@@ -4,7 +4,10 @@ import ast
 import json
 import subprocess
 import sys
+import threading
+import time
 from collections.abc import Mapping
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -303,11 +306,31 @@ class FakeProcess:
     def kill(self) -> None:
         self.terminated = True
 
+    def close(self) -> None:
+        return
+
 
 class EmptyQueue:
     def get(self, *, timeout: float) -> Any:
         assert timeout == 1.0
         raise LookupError
+
+    def cancel_join_thread(self) -> None:
+        return
+
+    def close(self) -> None:
+        return
+
+
+class FakeLaunchGate:
+    def __init__(self) -> None:
+        self.open = False
+
+    def set(self) -> None:
+        self.open = True
+
+    def wait(self, timeout: float) -> bool:
+        return self.open
 
 
 class TimeoutContext:
@@ -316,6 +339,9 @@ class TimeoutContext:
 
     def Queue(self) -> EmptyQueue:
         return EmptyQueue()
+
+    def Event(self) -> FakeLaunchGate:
+        return FakeLaunchGate()
 
     def Process(self, **_: object) -> FakeProcess:
         return self.process
@@ -380,6 +406,16 @@ class StubbornContext(TimeoutContext):
         self.process = StubbornProcess()
 
 
+class TerminateErrorProcess(StubbornProcess):
+    def terminate(self) -> None:
+        raise OSError("terminate failed with sensitive process detail")
+
+
+class TerminateErrorContext(TimeoutContext):
+    def __init__(self) -> None:
+        self.process = TerminateErrorProcess()
+
+
 @pytest.mark.unit
 def test_timeout_escalates_to_kill_and_confirms_worker_death(tmp_path: Path) -> None:
     userdata_path = tmp_path / "userdata_mini"
@@ -392,6 +428,89 @@ def test_timeout_escalates_to_kill_and_confirms_worker_death(tmp_path: Path) -> 
     assert context.process.killed is True
     assert context.process.is_alive() is False
     assert report.reason_code == "PROBE_DEADLINE_EXCEEDED"
+
+
+@pytest.mark.unit
+def test_terminate_error_still_escalates_to_kill(tmp_path: Path) -> None:
+    userdata_path = tmp_path / "userdata_mini"
+    userdata_path.mkdir()
+    config = ReadonlyProbeConfig.from_environment(valid_environment(userdata_path))
+    context = TerminateErrorContext()
+
+    report = run_probe_isolated(config, context=context)
+
+    assert context.process.killed is True
+    assert context.process.is_alive() is False
+    assert report.reason_code == "PROBE_DEADLINE_EXCEEDED"
+
+
+class SlowStartProcess(FakeProcess):
+    def __init__(self) -> None:
+        super().__init__()
+        self.stop_observed = threading.Event()
+
+    def start(self) -> None:
+        time.sleep(0.2)
+        self.started = True
+
+    def terminate(self) -> None:
+        super().terminate()
+        self.stop_observed.set()
+
+    def kill(self) -> None:
+        super().kill()
+        self.stop_observed.set()
+
+
+class SlowStartContext(TimeoutContext):
+    def __init__(self) -> None:
+        self.process = SlowStartProcess()
+
+
+@pytest.mark.unit
+def test_blocked_process_start_is_bounded_and_late_worker_is_killed(tmp_path: Path) -> None:
+    userdata_path = tmp_path / "userdata_mini"
+    userdata_path.mkdir()
+    base_config = ReadonlyProbeConfig.from_environment(valid_environment(userdata_path))
+    config = replace(base_config, timeout_seconds=0.05)
+    context = SlowStartContext()
+    started_at = time.monotonic()
+
+    report = run_probe_isolated(config, context=context)
+    elapsed = time.monotonic() - started_at
+
+    assert elapsed < 0.15
+    assert report.reason_code == "PROBE_DEADLINE_EXCEEDED"
+    assert context.process.stop_observed.wait(timeout=1.0)
+    assert context.process.is_alive() is False
+
+
+class CloseFailureQueue(EmptyQueue):
+    def __init__(self) -> None:
+        self.close_called = False
+
+    def cancel_join_thread(self) -> None:
+        raise OSError("queue cleanup failed with sensitive detail")
+
+    def close(self) -> None:
+        self.close_called = True
+
+
+@pytest.mark.unit
+def test_resource_cleanup_failure_downgrades_success_report(tmp_path: Path) -> None:
+    userdata_path = tmp_path / "userdata_mini"
+    userdata_path.mkdir()
+    config = ReadonlyProbeConfig.from_environment(valid_environment(userdata_path))
+    success = run_probe(config, lambda _: FakeReadonlyFacade(), runtime=windows_runtime())
+    process = FakeProcess()
+    process.terminated = True
+    output_queue = CloseFailureQueue()
+
+    report = probe_module._finalize_process_report(success, process, output_queue)
+
+    assert report.passed is False
+    assert report.reason_code == "PROBE_RESOURCE_CLEANUP_FAILED"
+    assert output_queue.close_called is True
 
 
 @pytest.mark.unit
@@ -453,6 +572,7 @@ def test_child_process_output_is_suppressed_at_file_descriptor_level() -> None:
         cwd=Path(__file__).parents[3],
         check=False,
         capture_output=True,
+        timeout=5.0,
     )
 
     assert completed.returncode == 0

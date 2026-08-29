@@ -15,8 +15,10 @@ import os
 import platform
 import queue
 import sys
+import threading
 import time
 from collections.abc import Callable, Mapping, Sequence
+from contextlib import suppress
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Protocol, TextIO, cast
@@ -541,6 +543,12 @@ def _probe_worker(config: ReadonlyProbeConfig, output_queue: Any) -> None:
         _ = sink
 
 
+def _gated_probe_worker(config: ReadonlyProbeConfig, output_queue: Any, launch_gate: Any) -> None:
+    if not launch_gate.wait(config.timeout_seconds):
+        return
+    _probe_worker(config, output_queue)
+
+
 class SessionMutexError(RuntimeError):
     def __init__(self, reason_code: str) -> None:
         self.reason_code = reason_code
@@ -632,17 +640,39 @@ def _run_probe_isolated_locked(
     output_queue: Any | None = None
     try:
         output_queue = process_context.Queue()
-        process = process_context.Process(target=_probe_worker, args=(config, output_queue))
-        process.start()
+        launch_gate = process_context.Event()
+        process = process_context.Process(
+            target=_gated_probe_worker, args=(config, output_queue, launch_gate)
+        )
     except Exception:
         stopped = _force_stop_process(process)
-        _close_process_resources(process, output_queue)
         reason_code = "PROBE_WORKER_START_FAILED" if stopped else "PROBE_TERMINATION_FAILED"
-        return failure_report(reason_code, userdata_leaf=config.userdata_path.name)
+        return _finalize_process_report(
+            failure_report(reason_code, userdata_leaf=config.userdata_path.name),
+            process,
+            output_queue,
+        )
 
     if process is None:
-        _close_process_resources(process, output_queue)
-        return failure_report("PROBE_WORKER_START_FAILED", userdata_leaf=config.userdata_path.name)
+        return _finalize_process_report(
+            failure_report("PROBE_WORKER_START_FAILED", userdata_leaf=config.userdata_path.name),
+            process,
+            output_queue,
+        )
+
+    start_status = _start_process_with_deadline(
+        process, launch_gate, deadline=deadline, output_queue=output_queue
+    )
+    if start_status == "timeout":
+        return failure_report("PROBE_DEADLINE_EXCEEDED", userdata_leaf=config.userdata_path.name)
+    if start_status == "failed":
+        stopped = _force_stop_process(process)
+        reason_code = "PROBE_WORKER_START_FAILED" if stopped else "PROBE_TERMINATION_FAILED"
+        return _finalize_process_report(
+            failure_report(reason_code, userdata_leaf=config.userdata_path.name),
+            process,
+            output_queue,
+        )
 
     try:
         remaining = deadline - time.monotonic()
@@ -651,28 +681,86 @@ def _run_probe_isolated_locked(
         if process.is_alive():
             stopped = _force_stop_process(process)
             reason_code = "PROBE_DEADLINE_EXCEEDED" if stopped else "PROBE_TERMINATION_FAILED"
-            return failure_report(reason_code, userdata_leaf=config.userdata_path.name)
+            return _finalize_process_report(
+                failure_report(reason_code, userdata_leaf=config.userdata_path.name),
+                process,
+                output_queue,
+            )
 
         remaining = deadline - time.monotonic()
         if remaining <= 0:
-            return failure_report(
-                "PROBE_DEADLINE_EXCEEDED", userdata_leaf=config.userdata_path.name
+            return _finalize_process_report(
+                failure_report("PROBE_DEADLINE_EXCEEDED", userdata_leaf=config.userdata_path.name),
+                process,
+                output_queue,
             )
         try:
             result = output_queue.get(timeout=remaining)
         except (queue.Empty, LookupError):
-            return failure_report("PROBE_WORKER_NO_RESULT", userdata_leaf=config.userdata_path.name)
-        if not isinstance(result, ProbeReport):
-            return failure_report(
-                "PROBE_WORKER_INVALID_RESULT", userdata_leaf=config.userdata_path.name
+            return _finalize_process_report(
+                failure_report("PROBE_WORKER_NO_RESULT", userdata_leaf=config.userdata_path.name),
+                process,
+                output_queue,
             )
-        return result
+        if not isinstance(result, ProbeReport):
+            return _finalize_process_report(
+                failure_report(
+                    "PROBE_WORKER_INVALID_RESULT", userdata_leaf=config.userdata_path.name
+                ),
+                process,
+                output_queue,
+            )
+        return _finalize_process_report(result, process, output_queue)
     except Exception:
         stopped = _force_stop_process(process)
         reason_code = "PROBE_PROCESS_CONTROL_FAILED" if stopped else "PROBE_TERMINATION_FAILED"
-        return failure_report(reason_code, userdata_leaf=config.userdata_path.name)
-    finally:
-        _close_process_resources(process, output_queue)
+        return _finalize_process_report(
+            failure_report(reason_code, userdata_leaf=config.userdata_path.name),
+            process,
+            output_queue,
+        )
+
+
+def _start_process_with_deadline(
+    process: Any, launch_gate: Any, *, deadline: float, output_queue: Any
+) -> str:
+    start_done = threading.Event()
+    decision = threading.Event()
+    state = {"allowed": False, "failed": False, "timed_out": False}
+
+    def launch() -> None:
+        try:
+            process.start()
+        except BaseException:
+            state["failed"] = True
+        finally:
+            start_done.set()
+        decision.wait()
+        if state["allowed"]:
+            launch_gate.set()
+        elif state["timed_out"]:
+            _force_stop_process(process)
+            _close_process_resources(process, output_queue)
+
+    launch_thread = threading.Thread(target=launch, daemon=True, name="qmt-probe-launch")
+    launch_thread.start()
+    remaining = max(0.0, deadline - time.monotonic())
+    if not start_done.wait(remaining):
+        state["timed_out"] = True
+        decision.set()
+        return "timeout"
+    if state["failed"]:
+        decision.set()
+        launch_thread.join(0.1)
+        return "failed"
+    if time.monotonic() >= deadline:
+        state["timed_out"] = True
+        decision.set()
+        return "timeout"
+    state["allowed"] = True
+    decision.set()
+    launch_thread.join(0.1)
+    return "started"
 
 
 def _force_stop_process(process: Any | None) -> bool:
@@ -681,29 +769,72 @@ def _force_stop_process(process: Any | None) -> bool:
     try:
         if not process.is_alive():
             return True
+    except Exception:
+        return False
+    with suppress(Exception):
         process.terminate()
+    with suppress(Exception):
         process.join(1.0)
-        if process.is_alive():
-            process.kill()
-            process.join(1.0)
+    try:
+        if not process.is_alive():
+            return True
+    except Exception:
+        return False
+    try:
+        process.kill()
+    except Exception:
+        return False
+    try:
+        process.join(1.0)
         return not bool(process.is_alive())
     except Exception:
         return False
 
 
-def _close_process_resources(process: Any | None, output_queue: Any | None) -> None:
+def _finalize_process_report(
+    report: ProbeReport, process: Any | None, output_queue: Any | None
+) -> ProbeReport:
+    cleanup_succeeded = _close_process_resources(process, output_queue)
+    if report.passed and not cleanup_succeeded:
+        return failure_report(
+            "PROBE_RESOURCE_CLEANUP_FAILED",
+            userdata_leaf=report.userdata_leaf,
+            runtime=RuntimeIdentity(
+                platform=report.platform,
+                python_version=report.python_version,
+                xtquant_version=report.xtquant_version,
+            ),
+            connected=report.connected,
+            subscribed=report.subscribed,
+            account_status_queried=report.account_status_queried,
+            asset_queried=report.asset_queried,
+            positions_queried=report.positions_queried,
+            orders_queried=report.orders_queried,
+            trades_queried=report.trades_queried,
+        )
+    return report
+
+
+def _close_process_resources(process: Any | None, output_queue: Any | None) -> bool:
+    cleanup_succeeded = True
     if output_queue is not None:
         try:
             output_queue.cancel_join_thread()
+        except Exception:
+            cleanup_succeeded = False
+        try:
             output_queue.close()
         except Exception:
-            pass
+            cleanup_succeeded = False
     if process is not None:
         try:
-            if not process.is_alive():
+            if process.is_alive():
+                cleanup_succeeded = False
+            else:
                 process.close()
         except Exception:
-            pass
+            cleanup_succeeded = False
+    return cleanup_succeeded
 
 
 def load_probe_environment(

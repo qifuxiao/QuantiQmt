@@ -123,7 +123,7 @@ poetry run python scripts/probe_miniqmt_readonly.py --env-file .env
   `userdata_mini` 上完成真实只读探针；结果为 `PROBE_OK`。
 - 连接、精确模拟账号订阅、account status、asset、positions、orders、trades 查询均成功；
   公共结果仅记录布尔值和集合计数，positions/orders/trades 计数均为 0。
-- 32 个 unit tests 与 2 个本机 integration tests 通过；mypy、ruff check、ruff format、
+- 35 个 unit tests 与 2 个本机 integration tests 通过；mypy、ruff check、ruff format、
   `scripts/validate_specs.py` 全部通过；M1 delivery governance 5 个测试通过。
 - 机器扫描与窄 facade 证明实现未调用 vendor order/cancel API；启动、连接、订阅、查询、
   cleanup、worker 创建和 deadline 失败均转换为脱敏 reason code。
@@ -134,3 +134,7 @@ poetry run python scripts/probe_miniqmt_readonly.py --env-file .env
   隔离、仅 worker 可达的真实 factory、全程 deadline 与 terminate/kill 确认、Windows named
   mutex、部分配置 fail 和 AST vendor call allowlist。等待新 head 独立复审；本任务保持
   active，release 继续 prohibited。
+- 对 head `105a7f6` 的首次复审确认六项修复有效，但发现 `terminate()` 异常会阻止
+  `kill()` 以及同步 `process.start()` 不受 deadline 约束。后续修订将 terminate/join/kill
+  分段保护，增加 daemon launch watchdog 与 worker launch gate，并让成功报告在 IPC/process
+  句柄清理失败时降级；等待再次独立复审。
