@@ -28,7 +28,18 @@ MIN_TIMEOUT_SECONDS = 1.0
 MAX_TIMEOUT_SECONDS = 300.0
 SUPPORTED_ACCOUNT_TYPE = "STOCK"
 STOCK_ACCOUNT_TYPE_CODE = 2
-HEALTHY_ACCOUNT_STATUS_CODE = 0
+READONLY_SAFE_ACCOUNT_STATUS_CODES = frozenset({0, 6})
+ACCOUNT_STATUS_FAILURE_REASONS = {
+    -1: "QUERY_ACCOUNT_STATUS_INVALID",
+    1: "QUERY_ACCOUNT_STATUS_CONNECTING",
+    2: "QUERY_ACCOUNT_STATUS_LOGGING_IN",
+    3: "QUERY_ACCOUNT_STATUS_FAILED",
+    4: "QUERY_ACCOUNT_STATUS_INITIALIZING",
+    5: "QUERY_ACCOUNT_STATUS_CORRECTING",
+    7: "QUERY_ACCOUNT_STATUS_ASSIST_LINK_FAILED",
+    8: "QUERY_ACCOUNT_STATUS_DISABLED_BY_SYSTEM",
+    9: "QUERY_ACCOUNT_STATUS_DISABLED_BY_USER",
+}
 ERROR_ALREADY_EXISTS = 183
 
 PROFILE_KEY = "QUANTIQMT_PROFILE"
@@ -408,8 +419,12 @@ def run_probe(
                 raise _ProbeFailure("QUERY_ACCOUNT_IDENTITY_MISMATCH")
             if status.account_type != STOCK_ACCOUNT_TYPE_CODE:
                 raise _ProbeFailure("QUERY_ACCOUNT_TYPE_MISMATCH")
-            if status.status != HEALTHY_ACCOUNT_STATUS_CODE:
-                raise _ProbeFailure("QUERY_ACCOUNT_STATUS_UNHEALTHY")
+            if status.status not in READONLY_SAFE_ACCOUNT_STATUS_CODES:
+                raise _ProbeFailure(
+                    ACCOUNT_STATUS_FAILURE_REASONS.get(
+                        status.status, "QUERY_ACCOUNT_STATUS_UNKNOWN"
+                    )
+                )
         except _ProbeFailure:
             raise
         except Exception as exc:
@@ -621,19 +636,33 @@ def run_probe_isolated(
         return failure_report(exc.reason_code, userdata_leaf=config.userdata_path.name)
 
     try:
-        report = _run_probe_isolated_locked(config, deadline=deadline, context=context)
+        deferred_mutex_release = [False]
+        report = _run_probe_isolated_locked(
+            config,
+            deadline=deadline,
+            context=context,
+            session_mutex=session_mutex,
+            deferred_mutex_release=deferred_mutex_release,
+        )
     finally:
-        try:
-            session_mutex.release()
-        except SessionMutexError:
-            report = failure_report(
-                "PROBE_SESSION_LOCK_RELEASE_FAILED", userdata_leaf=config.userdata_path.name
-            )
+        if not deferred_mutex_release[0]:
+            try:
+                session_mutex.release()
+            except SessionMutexError:
+                report = failure_report(
+                    "PROBE_SESSION_LOCK_RELEASE_FAILED",
+                    userdata_leaf=config.userdata_path.name,
+                )
     return report
 
 
 def _run_probe_isolated_locked(
-    config: ReadonlyProbeConfig, *, deadline: float, context: Any | None
+    config: ReadonlyProbeConfig,
+    *,
+    deadline: float,
+    context: Any | None,
+    session_mutex: _SessionMutex,
+    deferred_mutex_release: list[bool],
 ) -> ProbeReport:
     process_context = context or multiprocessing.get_context("spawn")
     process: Any | None = None
@@ -661,7 +690,12 @@ def _run_probe_isolated_locked(
         )
 
     start_status = _start_process_with_deadline(
-        process, launch_gate, deadline=deadline, output_queue=output_queue
+        process,
+        launch_gate,
+        deadline=deadline,
+        output_queue=output_queue,
+        session_mutex=session_mutex,
+        deferred_mutex_release=deferred_mutex_release,
     )
     if start_status == "timeout":
         return failure_report("PROBE_DEADLINE_EXCEEDED", userdata_leaf=config.userdata_path.name)
@@ -722,7 +756,13 @@ def _run_probe_isolated_locked(
 
 
 def _start_process_with_deadline(
-    process: Any, launch_gate: Any, *, deadline: float, output_queue: Any
+    process: Any,
+    launch_gate: Any,
+    *,
+    deadline: float,
+    output_queue: Any,
+    session_mutex: _SessionMutex,
+    deferred_mutex_release: list[bool],
 ) -> str:
     start_done = threading.Event()
     decision = threading.Event()
@@ -739,13 +779,18 @@ def _start_process_with_deadline(
         if state["allowed"]:
             launch_gate.set()
         elif state["timed_out"]:
-            _force_stop_process(process)
-            _close_process_resources(process, output_queue)
+            try:
+                _force_stop_process(process)
+                _close_process_resources(process, output_queue)
+            finally:
+                with suppress(SessionMutexError):
+                    session_mutex.release()
 
     launch_thread = threading.Thread(target=launch, daemon=True, name="qmt-probe-launch")
     launch_thread.start()
     remaining = max(0.0, deadline - time.monotonic())
     if not start_done.wait(remaining):
+        deferred_mutex_release[0] = True
         state["timed_out"] = True
         decision.set()
         return "timeout"
@@ -754,6 +799,7 @@ def _start_process_with_deadline(
         launch_thread.join(0.1)
         return "failed"
     if time.monotonic() >= deadline:
+        deferred_mutex_release[0] = True
         state["timed_out"] = True
         decision.set()
         return "timeout"

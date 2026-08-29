@@ -42,7 +42,7 @@ delivery:
   schema_version: 1
   contract_status: not_applicable
   implementation_status: in_progress
-  acceptance_status: passed
+  acceptance_status: partial
   review_status: changes_requested
   release_status: prohibited
 ---
@@ -123,7 +123,7 @@ poetry run python scripts/probe_miniqmt_readonly.py --env-file .env
   `userdata_mini` 上完成真实只读探针；结果为 `PROBE_OK`。
 - 连接、精确模拟账号订阅、account status、asset、positions、orders、trades 查询均成功；
   公共结果仅记录布尔值和集合计数，positions/orders/trades 计数均为 0。
-- 35 个 unit tests 与 2 个本机 integration tests 通过；mypy、ruff check、ruff format、
+- 36 个 unit tests 与 2 个历史本机 integration tests 通过；mypy、ruff check、ruff format、
   `scripts/validate_specs.py` 全部通过；M1 delivery governance 5 个测试通过。
 - 机器扫描与窄 facade 证明实现未调用 vendor order/cancel API；启动、连接、订阅、查询、
   cleanup、worker 创建和 deadline 失败均转换为脱敏 reason code。
@@ -138,3 +138,8 @@ poetry run python scripts/probe_miniqmt_readonly.py --env-file .env
   `kill()` 以及同步 `process.start()` 不受 deadline 约束。后续修订将 terminate/join/kill
   分段保护，增加 daemon launch watchdog 与 worker launch gate，并让成功报告在 IPC/process
   句柄清理失败时降级；等待再次独立复审。
+- 最新修订将 late-start cleanup 持有 session mutex 直至 worker 终止与资源关闭，并将非交易日
+  `ACCOUNT_STATUS_CLOSED` 视为只读安全状态；其他 vendor 状态映射为脱敏 reason code。2026-08-29
+  最后一次本机探针报告 `QUERY_ACCOUNT_STATUS_CONNECTING`，在 asset/positions/orders/trades 前
+  fail-closed。需操作者在 Mini QMT 界面恢复模拟账号为正常/已连接后重跑，故 acceptance 暂为
+  partial，不得把此前 head 的环境结果冒充当前 head 通过。

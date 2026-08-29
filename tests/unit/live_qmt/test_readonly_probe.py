@@ -243,7 +243,7 @@ def test_account_identity_mismatch_fails_closed_and_cleans_up(tmp_path: Path) ->
     ("facade", "reason_code"),
     [
         (FakeReadonlyFacade(account_type=3), "QUERY_ACCOUNT_TYPE_MISMATCH"),
-        (FakeReadonlyFacade(account_status=3), "QUERY_ACCOUNT_STATUS_UNHEALTHY"),
+        (FakeReadonlyFacade(account_status=3), "QUERY_ACCOUNT_STATUS_FAILED"),
         (
             FakeReadonlyFacade(
                 extra_statuses=[SimpleNamespace(account_id="other", account_type=2, status=0)]
@@ -263,6 +263,20 @@ def test_account_status_must_be_exact_and_healthy(
 
     assert report.passed is False
     assert report.reason_code == reason_code
+
+
+@pytest.mark.unit
+def test_closed_market_account_status_is_safe_for_readonly_queries(tmp_path: Path) -> None:
+    userdata_path = tmp_path / "userdata_mini"
+    userdata_path.mkdir()
+    config = ReadonlyProbeConfig.from_environment(valid_environment(userdata_path))
+    facade = FakeReadonlyFacade(account_status=6)
+
+    report = run_probe(config, lambda _: facade, runtime=windows_runtime())
+
+    assert report.passed is True
+    assert report.asset_queried is True
+    assert report.positions_queried is True
 
 
 @pytest.mark.unit
@@ -481,8 +495,24 @@ def test_blocked_process_start_is_bounded_and_late_worker_is_killed(tmp_path: Pa
 
     assert elapsed < 0.15
     assert report.reason_code == "PROBE_DEADLINE_EXCEEDED"
+    if sys.platform == "win32":
+        with pytest.raises(probe_module.SessionMutexError) as exc_info:
+            probe_module._acquire_session_mutex(config)
+        assert exc_info.value.reason_code == "PROBE_SESSION_IN_USE"
     assert context.process.stop_observed.wait(timeout=1.0)
     assert context.process.is_alive() is False
+    if sys.platform == "win32":
+        release_deadline = time.monotonic() + 1.0
+        while True:
+            try:
+                mutex = probe_module._acquire_session_mutex(config)
+                break
+            except probe_module.SessionMutexError as exc:
+                assert exc.reason_code == "PROBE_SESSION_IN_USE"
+                if time.monotonic() >= release_deadline:
+                    pytest.fail("late-start cleanup did not release the session mutex")
+                time.sleep(0.01)
+        mutex.release()
 
 
 class CloseFailureQueue(EmptyQueue):
