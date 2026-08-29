@@ -574,6 +574,19 @@ class _SessionMutex(Protocol):
     def release(self) -> None: ...
 
 
+_QUARANTINED_SESSION_MUTEXES: list[_SessionMutex] = []
+
+
+def _quarantine_session_mutex(
+    session_mutex: _SessionMutex, deferred_mutex_release: list[bool]
+) -> None:
+    """Retain the lock for this process lifetime when worker death is uncertain."""
+
+    deferred_mutex_release[0] = True
+    if not any(item is session_mutex for item in _QUARANTINED_SESSION_MUTEXES):
+        _QUARANTINED_SESSION_MUTEXES.append(session_mutex)
+
+
 class _NoopSessionMutex:
     def release(self) -> None:
         return
@@ -635,8 +648,9 @@ def run_probe_isolated(
     except SessionMutexError as exc:
         return failure_report(exc.reason_code, userdata_leaf=config.userdata_path.name)
 
+    deferred_mutex_release = [False]
+    report = failure_report("PROBE_PROCESS_CONTROL_FAILED", userdata_leaf=config.userdata_path.name)
     try:
-        deferred_mutex_release = [False]
         report = _run_probe_isolated_locked(
             config,
             deadline=deadline,
@@ -644,6 +658,8 @@ def run_probe_isolated(
             session_mutex=session_mutex,
             deferred_mutex_release=deferred_mutex_release,
         )
+    except BaseException:
+        _quarantine_session_mutex(session_mutex, deferred_mutex_release)
     finally:
         if not deferred_mutex_release[0]:
             try:
@@ -675,6 +691,8 @@ def _run_probe_isolated_locked(
         )
     except Exception:
         stopped = _force_stop_process(process)
+        if not stopped:
+            _quarantine_session_mutex(session_mutex, deferred_mutex_release)
         reason_code = "PROBE_WORKER_START_FAILED" if stopped else "PROBE_TERMINATION_FAILED"
         return _finalize_process_report(
             failure_report(reason_code, userdata_leaf=config.userdata_path.name),
@@ -689,18 +707,27 @@ def _run_probe_isolated_locked(
             output_queue,
         )
 
-    start_status = _start_process_with_deadline(
-        process,
-        launch_gate,
-        deadline=deadline,
-        output_queue=output_queue,
-        session_mutex=session_mutex,
-        deferred_mutex_release=deferred_mutex_release,
-    )
+    try:
+        start_status = _start_process_with_deadline(
+            process,
+            launch_gate,
+            deadline=deadline,
+            output_queue=output_queue,
+            session_mutex=session_mutex,
+            deferred_mutex_release=deferred_mutex_release,
+        )
+    except BaseException:
+        _quarantine_session_mutex(session_mutex, deferred_mutex_release)
+        stopped = _force_stop_process(process)
+        if stopped:
+            _close_process_resources(process, output_queue)
+        return failure_report("PROBE_WORKER_START_FAILED", userdata_leaf=config.userdata_path.name)
     if start_status == "timeout":
         return failure_report("PROBE_DEADLINE_EXCEEDED", userdata_leaf=config.userdata_path.name)
     if start_status == "failed":
         stopped = _force_stop_process(process)
+        if not stopped:
+            _quarantine_session_mutex(session_mutex, deferred_mutex_release)
         reason_code = "PROBE_WORKER_START_FAILED" if stopped else "PROBE_TERMINATION_FAILED"
         return _finalize_process_report(
             failure_report(reason_code, userdata_leaf=config.userdata_path.name),
@@ -714,6 +741,8 @@ def _run_probe_isolated_locked(
             process.join(remaining)
         if process.is_alive():
             stopped = _force_stop_process(process)
+            if not stopped:
+                _quarantine_session_mutex(session_mutex, deferred_mutex_release)
             reason_code = "PROBE_DEADLINE_EXCEEDED" if stopped else "PROBE_TERMINATION_FAILED"
             return _finalize_process_report(
                 failure_report(reason_code, userdata_leaf=config.userdata_path.name),
@@ -747,6 +776,8 @@ def _run_probe_isolated_locked(
         return _finalize_process_report(result, process, output_queue)
     except Exception:
         stopped = _force_stop_process(process)
+        if not stopped:
+            _quarantine_session_mutex(session_mutex, deferred_mutex_release)
         reason_code = "PROBE_PROCESS_CONTROL_FAILED" if stopped else "PROBE_TERMINATION_FAILED"
         return _finalize_process_report(
             failure_report(reason_code, userdata_leaf=config.userdata_path.name),
@@ -779,15 +810,25 @@ def _start_process_with_deadline(
         if state["allowed"]:
             launch_gate.set()
         elif state["timed_out"]:
-            try:
-                _force_stop_process(process)
+            stopped = _force_stop_process(process)
+            if stopped:
                 _close_process_resources(process, output_queue)
-            finally:
                 with suppress(SessionMutexError):
                     session_mutex.release()
+            else:
+                _quarantine_session_mutex(session_mutex, deferred_mutex_release)
 
     launch_thread = threading.Thread(target=launch, daemon=True, name="qmt-probe-launch")
-    launch_thread.start()
+    try:
+        launch_thread.start()
+    except BaseException:
+        _quarantine_session_mutex(session_mutex, deferred_mutex_release)
+        state["timed_out"] = True
+        decision.set()
+        stopped = _force_stop_process(process)
+        if stopped:
+            _close_process_resources(process, output_queue)
+        return "failed"
     remaining = max(0.0, deadline - time.monotonic())
     if not start_done.wait(remaining):
         deferred_mutex_release[0] = True

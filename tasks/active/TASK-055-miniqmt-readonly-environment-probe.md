@@ -123,7 +123,7 @@ poetry run python scripts/probe_miniqmt_readonly.py --env-file .env
   `userdata_mini` 上完成真实只读探针；结果为 `PROBE_OK`。
 - 连接、精确模拟账号订阅、account status、asset、positions、orders、trades 查询均成功；
   公共结果仅记录布尔值和集合计数，positions/orders/trades 计数均为 0。
-- 36 个 unit tests 与 2 个历史本机 integration tests 通过；mypy、ruff check、ruff format、
+- 38 个 unit tests 与 2 个本机 integration tests 通过；mypy、ruff check、ruff format、
   `scripts/validate_specs.py` 全部通过；M1 delivery governance 5 个测试通过。
 - 机器扫描与窄 facade 证明实现未调用 vendor order/cancel API；启动、连接、订阅、查询、
   cleanup、worker 创建和 deadline 失败均转换为脱敏 reason code。
@@ -144,6 +144,11 @@ poetry run python scripts/probe_miniqmt_readonly.py --env-file .env
   `PROBE_OK`；connected/subscribed/account status/asset/positions/orders/trades 均为 true，且不输出
   账号、资产或完整路径。
 - 同一环境随后执行 `tests/integration/live_qmt/test_readonly_probe_environment.py`，2 项测试通过；
-  36 项 unit tests、5 项 M1 delivery governance tests、mypy、ruff check、ruff format check 与
+  38 项 unit tests、5 项 M1 delivery governance tests、mypy、ruff check、ruff format check 与
   `scripts/validate_specs.py` 均通过。acceptance 恢复为 passed；仍等待最终 head 独立复审，故
   review 保持 changes_requested、任务保持 active、release 保持 prohibited。
+- 新独立 Review 任务 `01a04de1-6edd-7d20-a4f7-63c487de9daf` 对 head `808181a` 提出 1 个 P1
+  与 1 个 P2：未确认 worker 死亡时 mutex 仍会释放，以及 launch watchdog 启动异常可能泄露
+  traceback。后续修订在 worker 死亡不确定时将 mutex 隔离保留至父进程退出，并将 watchdog
+  构造/启动异常转换为脱敏失败报告；新增两个失败注入测试。修订后真实只读探针再次返回
+  `PROBE_OK`，2 项本机 integration tests 再次通过；等待新 head 独立复审。

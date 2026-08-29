@@ -515,6 +515,86 @@ def test_blocked_process_start_is_bounded_and_late_worker_is_killed(tmp_path: Pa
         mutex.release()
 
 
+class RecordingMutex:
+    def __init__(self) -> None:
+        self.release_count = 0
+
+    def release(self) -> None:
+        self.release_count += 1
+
+
+class UnstoppableProcess(FakeProcess):
+    def is_alive(self) -> bool:
+        return True
+
+    def terminate(self) -> None:
+        raise OSError("terminate failed with sensitive process detail")
+
+    def kill(self) -> None:
+        raise OSError("kill failed with sensitive process detail")
+
+
+class UnstoppableContext(TimeoutContext):
+    def __init__(self) -> None:
+        self.process = UnstoppableProcess()
+
+
+@pytest.mark.unit
+def test_unconfirmed_worker_death_quarantines_session_mutex(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    userdata_path = tmp_path / "secret-parent" / "userdata_mini"
+    userdata_path.mkdir(parents=True)
+    config = ReadonlyProbeConfig.from_environment(valid_environment(userdata_path))
+    context = UnstoppableContext()
+    mutex = RecordingMutex()
+    quarantined: list[object] = []
+    monkeypatch.setattr(probe_module, "_acquire_session_mutex", lambda _: mutex)
+    monkeypatch.setattr(probe_module, "_QUARANTINED_SESSION_MUTEXES", quarantined)
+
+    report = run_probe_isolated(config, context=context)
+    encoded = json.dumps(report.to_public_dict())
+
+    assert report.reason_code == "PROBE_TERMINATION_FAILED"
+    assert mutex.release_count == 0
+    assert quarantined == [mutex]
+    assert ACCOUNT_ID not in encoded
+    assert str(userdata_path) not in encoded
+
+
+class LaunchThreadStartError:
+    def __init__(self, **_: object) -> None:
+        return
+
+    def start(self) -> None:
+        raise RuntimeError(f"{ACCOUNT_ID} launch failed from secret path")
+
+
+@pytest.mark.unit
+def test_launch_watchdog_start_error_is_redacted_and_quarantines_mutex(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    userdata_path = tmp_path / "secret-parent" / "userdata_mini"
+    userdata_path.mkdir(parents=True)
+    config = ReadonlyProbeConfig.from_environment(valid_environment(userdata_path))
+    context = TimeoutContext()
+    mutex = RecordingMutex()
+    quarantined: list[object] = []
+    monkeypatch.setattr(probe_module, "_acquire_session_mutex", lambda _: mutex)
+    monkeypatch.setattr(probe_module, "_QUARANTINED_SESSION_MUTEXES", quarantined)
+    monkeypatch.setattr(probe_module.threading, "Thread", LaunchThreadStartError)
+
+    report = run_probe_isolated(config, context=context)
+    encoded = json.dumps(report.to_public_dict())
+
+    assert report.reason_code == "PROBE_WORKER_START_FAILED"
+    assert mutex.release_count == 0
+    assert quarantined == [mutex]
+    assert ACCOUNT_ID not in encoded
+    assert str(userdata_path) not in encoded
+    assert "secret path" not in encoded
+
+
 class CloseFailureQueue(EmptyQueue):
     def __init__(self) -> None:
         self.close_called = False
