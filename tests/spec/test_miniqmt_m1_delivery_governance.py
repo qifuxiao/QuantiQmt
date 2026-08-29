@@ -18,10 +18,17 @@ def _yaml(relative_path: str) -> dict[str, object]:
     return value
 
 
-def test_task_054_is_the_only_active_task_and_task_053_is_paused() -> None:
+def test_task_054_is_completed_task_055_is_active_and_task_053_is_paused() -> None:
     active = sorted((ROOT / "tasks" / "active").glob("TASK-*.md"))
-    assert [path.name for path in active] == ["TASK-054-miniqmt-m1-delivery-governance.md"]
+    assert [path.name for path in active] == ["TASK-055-miniqmt-readonly-environment-probe.md"]
     assert extract_front_matter(active[0])["status"] == "active"
+
+    completed = ROOT / "tasks/completed/TASK-054-miniqmt-m1-delivery-governance.md"
+    task_054 = extract_front_matter(completed)
+    assert task_054["status"] == "completed"
+    assert task_054["delivery"]["implementation_status"] == "merged"
+    assert task_054["delivery"]["acceptance_status"] == "passed"
+    assert task_054["delivery"]["review_status"] == "approved"
 
     paused = ROOT / "tasks/backlog/TASK-053-dependency-sequencing-governance.md"
     assert extract_front_matter(paused)["status"] == "blocked"
@@ -31,8 +38,10 @@ def test_task_054_is_the_only_active_task_and_task_053_is_paused() -> None:
     indexed = {entry["id"]: entry for entry in entries}
     assert indexed["TASK-053"]["path"].startswith("backlog/")
     assert indexed["TASK-053"]["status"] == "blocked"
-    assert indexed["TASK-054"]["path"].startswith("active/")
-    assert indexed["TASK-054"]["status"] == "active"
+    assert indexed["TASK-054"]["path"].startswith("completed/")
+    assert indexed["TASK-054"]["status"] == "completed"
+    assert indexed["TASK-055"]["path"].startswith("active/")
+    assert indexed["TASK-055"]["status"] == "active"
 
 
 def test_product_rules_make_miniqmt_simulation_account_mandatory_for_m1() -> None:

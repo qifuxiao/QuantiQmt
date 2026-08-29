@@ -1,13 +1,12 @@
 # Active Tasks
 
-当前 active task: TASK-054
+当前 active task: TASK-055
 
-TASK-054 is a documentation-and-development-governance task that records the
-human-approved product north star, mandatory Mini QMT simulation-account M1,
-fail-closed local configuration, and shared Codex/Cline development entry. It
-does not authorize business implementation, real-money trading, deployment,
-release, spec changes, or edits outside its exact allowed paths.
+TASK-055 implements a fail-closed Mini QMT read-only environment probe. It may
+validate Windows/Python/xtquant compatibility, userdata_mini, connection,
+simulation-account subscription and asset/positions/orders/trades queries.
+Order, cancel, real-money accounts, business-contract changes and TASK-026
+adapter implementation are strictly forbidden.
 
-TASK-053 is paused unchanged in backlog/blocked while TASK-054 is active. This
-reprioritization does not complete, waive, or lower TASK-053, TASK-052, TASK-048,
-or TASK-004 delivery and safety gates.
+TASK-054 is independently approved, merged and closed. TASK-053 remains paused
+unchanged in backlog/blocked; TASK-055 does not complete or waive it.
