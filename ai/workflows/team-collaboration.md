@@ -39,6 +39,33 @@
 
 实现 PR 合并不等于任务完成。任务只有在独立 Review 通过，并由人类或授权流程把 task 从 `tasks/active/` 移入 `tasks/completed/` 后，才算 completed。
 
+## 交接物与 PR 生命周期
+
+### 三类交接物
+
+| 交接物 | 生产者 | 消费者 | 内容 |
+|---|---|---|---|
+| **Implementation Packet** | Codex | Cline | 精确 Implementation Base SHA、设计、文件计划、测试映射、失败设计、PLAN_BLOCKED 条件 |
+| **Implementation Report** | Cline | Codex Review / 人类 | Base/Head SHA、branch/PR、changed files、逐项 acceptance 证据、命令退出码、未验证范围、风险、spec deviations、path audit 结论 |
+| **Repair Packet** | Codex | Cline | 基于精确 Head Review 的修复指令，限定 allowed_paths |
+
+### 两 PR 生命周期
+
+**Implementation PR** 与 **Closeout PR** 必须分离：
+
+1. **Implementation PR**：Cline 推送实现变更。独立 Codex Review 会话只读审查
+   **精确 Head SHA**，结论仅限 `APPROVE`、`REQUEST_CHANGES` 或 `BLOCKED`。
+   Head SHA 改变后旧 Review 自动失效（invalidated），必须重新 Review。
+2. **Closeout PR**：在 Implementation PR 合并后，由人类或授权流程创建，
+   核验独立 Review 结论、CI 结果、merge commit 和人类授权，将 task 从
+   `tasks/active/` 移入 `tasks/completed/` 并更新 `tasks/index.yaml`。
+
+### Path audit
+
+Implementation Report 必须包含以 Implementation Base 为左端的完整
+`git diff --name-only --no-renames <Base>...HEAD` **path audit**（路径审计），
+确认所有变更路径属于 task `allowed_paths` 且未命中 `forbidden_paths`。
+
 ## 开发指令最小模板
 
 ```text
