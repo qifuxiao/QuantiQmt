@@ -18,9 +18,13 @@ def _yaml(relative_path: str) -> dict[str, object]:
     return value
 
 
-def test_tasks_054_and_055_are_completed_and_task_053_is_paused() -> None:
+def test_tasks_054_and_055_are_completed_task_053_paused_and_056_active() -> None:
     active = sorted((ROOT / "tasks" / "active").glob("TASK-*.md"))
-    assert active == []
+    assert [path.name for path in active] == ["TASK-056-codex-cline-collaboration.md"]
+    task_056 = extract_front_matter(active[0])
+    assert task_056["status"] == "active"
+    assert task_056["delivery"]["implementation_status"] == "not_started"
+    assert task_056["delivery"]["release_status"] == "prohibited"
 
     completed = ROOT / "tasks/completed/TASK-054-miniqmt-m1-delivery-governance.md"
     task_054 = extract_front_matter(completed)
@@ -49,6 +53,8 @@ def test_tasks_054_and_055_are_completed_and_task_053_is_paused() -> None:
     assert indexed["TASK-054"]["status"] == "completed"
     assert indexed["TASK-055"]["path"].startswith("completed/")
     assert indexed["TASK-055"]["status"] == "completed"
+    assert indexed["TASK-056"]["path"].startswith("active/")
+    assert indexed["TASK-056"]["status"] == "active"
 
 
 def test_product_rules_make_miniqmt_simulation_account_mandatory_for_m1() -> None:
