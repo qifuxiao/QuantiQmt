@@ -181,3 +181,84 @@ def test_clinerules_reference_not_copy_business_contracts() -> None:
         assert "order_registered" not in content
         assert "order_evaluated" not in content
         assert "AGENTS" in content or "spec" in content
+
+
+# ── Repair v1: .clinerules must be reference-only (no business terms) ──
+
+
+BUSINESS_TERMS = ("xtquant", "OrderIntent", "Kill Switch", "OMS", "UNKNOWN")
+
+
+def test_clinerules_no_business_terms() -> None:
+    """.clinerules/*.md must not contain trading/business architecture terms."""
+    for path in sorted((ROOT / ".clinerules").glob("*.md")):
+        content = path.read_text(encoding="utf-8")
+        for term in BUSINESS_TERMS:
+            assert term not in content, (
+                f"{path.name} contains business term {term!r}; refer to AGENTS.md / spec/ instead"
+            )
+
+
+# ── Repair v1: Review must use three-dot diff ─────────────────────────
+
+
+def test_review_uses_three_dot_diff() -> None:
+    """Review instructions must use three-dot (Base...Head), not two-dot."""
+    wf = _text("ai/workflows/team-collaboration.md")
+    assert "..." in wf or "Base...Head" in wf, "must use three-dot diff"
+    # Two-dot for diff review is rejected (main..branch is two-dot)
+    assert "origin/main..origin/" not in wf, "two-dot diff is forbidden"
+
+
+# ── Repair v1: Review must have exactly three verdicts ─────────────────
+
+
+def test_review_has_exactly_three_verdicts() -> None:
+    """Review template must list APPROVE, REQUEST_CHANGES, and BLOCKED.
+    Must NOT use two-verdict alternatives."""
+    wf = _text("ai/workflows/team-collaboration.md")
+    # The Review template section must contain all three
+    assert "APPROVE" in wf
+    assert "REQUEST_CHANGES" in wf
+    assert "BLOCKED" in wf
+    # Must not have old two-verdict pattern: "APPROVE 或 REQUEST_CHANGES" without BLOCKED
+    assert "APPROVE 或 REQUEST_CHANGES\n" not in wf, (
+        "two-verdict pattern (without BLOCKED) is rejected"
+    )
+
+
+# ── Repair v1: Review must require PR OPEN and exact Head ─────────────
+
+
+def test_review_requires_pr_open_and_head_verification() -> None:
+    """Review must require PR OPEN and verify beginning/end Head SHA."""
+    wf = _text("ai/workflows/team-collaboration.md")
+    assert "OPEN" in wf, "Review must require PR status OPEN"
+    assert "Beginning Head" in wf or "Beginning head" in wf, "Review must record Beginning Head SHA"
+    assert "Ending Head" in wf or "Ending head" in wf, "Review must record Ending Head SHA"
+
+
+# ── Repair v1: Human-only authorization ───────────────────────────────
+
+
+def test_human_only_authorization_explicit() -> None:
+    """Workflow must explicitly state that activation, merge, closeout are
+    human-only and Reviewer cannot authorize closeout."""
+    wf = _text("ai/workflows/team-collaboration.md")
+    assert "人类独占" in wf or "human-only" in wf.lower(), (
+        "must explicitly state human-only authorization"
+    )
+    assert "不能授权 closeout" in wf or "cannot authorize closeout" in wf.lower(), (
+        "must state Reviewer cannot authorize closeout"
+    )
+
+
+# ── Repair v1: AGENTS.md must also state three verdicts ───────────────
+
+
+def test_agents_md_has_three_verdicts() -> None:
+    """AGENTS.md role section must list all three review verdicts."""
+    agents = _text("AGENTS.md")
+    assert "APPROVE" in agents
+    assert "REQUEST_CHANGES" in agents
+    assert "BLOCKED" in agents

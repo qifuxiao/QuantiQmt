@@ -10,12 +10,8 @@ Before any work:
    `verification.commands`.
 
 Do not implement when there is no active task. Do not activate, widen, complete or waive a task.
-Do not copy business contracts into this file; `spec/` is authoritative.
-
-For Mini QMT work, M1 requires an allowlisted simulation account, defaults to read-only with the Kill
-Switch engaged, and forbids real-money trading. Strategy cannot call xtquant. Preserve
-`OrderIntent → OMS registration → Risk → OMS transition → Execution`; UNKNOWN outcomes require
-same-identity reconciliation without blind retry.
+Do not copy business contracts into this file; `spec/` and `AGENTS.md` are the sole authority
+for trading invariants, architecture, and safety constraints.
 
 Use `/ai/workflows/implement-task.md` for implementation evidence and `/ai/workflows/review-task.md`
 for independent Review. Run every task `verification.commands` command before handoff.
