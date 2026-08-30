@@ -19,10 +19,13 @@ Read in order before any modification:
 1. Run `git fetch origin --prune`.
 2. Confirm the worktree is **clean** (`git status --porcelain` must be empty).
    A **dirty** worktree is a `PLAN_BLOCKED` condition.
-3. Confirm the exact **Implementation Base SHA** recorded in the task matches
-   `git merge-base origin/main HEAD`.
-4. Confirm the **Planning Base SHA** is an ancestor of the Implementation Base
-   (`git merge-base --is-ancestor <Planning Base> <Implementation Base>` exit 0).
+3. Read the **Codex-authored Handoff Record** (the YAML file referenced by the
+   repair context). The `expected_base_sha` in the Handoff Record is the sole
+   authoritative Implementation/Repair Base SHA. Cline may verify that a ref
+   (e.g. `origin/main`) **resolves to** that frozen SHA, but Cline must not
+   derive, infer, or write the value from `origin/main` or the task file.
+4. Confirm the **Planning Base SHA** (from the task Plan section) is an ancestor
+   of the Implementation Base (`git merge-base --is-ancestor <Planning Base> <Implementation Base>` exit 0).
 5. Confirm the branch was created from the exact Implementation Base.
 6. If any check fails, return **PLAN_BLOCKED** with the failing command, exit code,
    and evidence. Do not proceed, improvise, or modify task / spec to work around the
@@ -77,7 +80,8 @@ containing all of the following:
 - **No force-push.**
 - **No self-approve.** Cline cannot approve its own PR.
 - **No merge.** Only a human may merge.
-- **No closeout.** Moving a task to `completed` is a human or independent Review
-  decision, not an implementer decision.
+- **No closeout.** Moving a task to `completed` is a **human-only** decision.
+  A Review Agent records a verdict but cannot authorize closeout or task state
+  transition.
 - **No modification of task, spec, or activation status.**
 - **No modification of `.github/` or branch protection.**

@@ -87,16 +87,21 @@ Implementation Report 必须包含以 Implementation Base 为左端的完整
 你是独立 Review Agent。请只读审查 PR #NN / TASK-XXX，不要修改任何文件。
 
 前置条件（不满足则返回 BLOCKED）：
-- PR 状态必须为 OPEN
-- 记录 Beginning Head SHA（`git rev-parse origin/<branch>`）
-- Base 必须等于 Implementation Packet / Repair Packet 中的 expected_base_sha
+- PR 状态必须为 OPEN（Review 开始和结束时各检查一次）
+- 记录 Beginning Head SHA（`gh pr view NN --json headRefOid --jq .headRefOid`）
+- 记录 GitHub PR Base SHA（`gh pr view NN --json baseRefOid --jq .baseRefOid`）
+- Base 必须等于 Handoff Record 中的 expected_base_sha
+- 将 GitHub PR Base 以 `--pr-base` 传入 validator
+- 证明 expected_base_sha == PR Base SHA == merge-base(expected_base, head)
+- 证明 Planning Base 是 Implementation Base 的祖先
 - 审查范围必须是精确 Base...Head 三段 diff（`git diff --name-only --no-renames <Base>...<Head>`）
 
 请读取 AGENTS.md、ai/review/**、spec/README.md、spec/manifest.yaml、tasks/active/TASK-XXX.md，以及 TASK-XXX 的全部 spec_refs。
 
-请运行 TASK-XXX verification.commands，并额外检查 allowed_paths、forbidden_paths、交易安全、幂等、恢复、金额精度和越权依赖。
+请运行 TASK-XXX verification.commands（含 --pr-base），并额外检查 allowed_paths、forbidden_paths、交易安全、幂等、恢复、金额精度和越权依赖。
 
-完成后记录 Ending Head SHA，必须等于 Beginning Head SHA；否则结论为 BLOCKED。
+完成后重新读取 Ending Head SHA（`gh pr view NN --json headRefOid --jq .headRefOid`），
+必须等于 Beginning Head SHA；否则结论为 BLOCKED。
 
 输出格式：
 - Findings，按 P0/P1/P2/P3 排序

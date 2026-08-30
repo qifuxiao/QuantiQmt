@@ -25,8 +25,7 @@ One observable outcome.
 
 - Plan version: `TASK-XXX-PLAN-vX`
 - Planning Base SHA: `<full SHA of main when Codex formed the plan>`
-- Implementation Base SHA: `<resolved after Activation PR merge; Cline records
-  git rev-parse origin/main before creating the branch>`
+- Implementation Base SHA: `<provided by Codex in the Handoff Record as expected_base_sha; Cline must not derive this from origin/main>`
 
 ### Design
 

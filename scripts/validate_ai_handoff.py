@@ -2,14 +2,16 @@
 """Validate AI Handoff Records against git state.
 
 Checks (all fail-closed):
-  1. Schema: required fields, SHA format, allowed_paths non-empty list.
+  1. Schema: required fields, SHA format, allowed_paths non-empty list,
+     codex_only_paths non-empty list, expected_base == expected_pr_base.
   2. Base: --base-ref resolves to expected_base_sha; merge-base == expected_base_sha.
-  3. PR base: --pr-base (if given) equals expected_pr_base_sha.
+  3. PR base: --pr-base (if given) equals expected_pr_base_sha == expected_base_sha.
   4. Planning ancestry: planning_base_sha is ancestor of expected_base_sha.
-  5. Task blob: frozen at expected_base_sha AND unchanged at HEAD.
-  6. Handoff immutability: Handoff Record not modified after introduction.
-  7. Path audit: all changed paths within allowed_paths, none in forbidden_paths.
-  8. Rename detection: both sides of renames must be in allowed_paths.
+  5. Task blob: frozen at expected_base_sha AND unchanged at supplied head.
+  6. Handoff immutability: Record introduced exactly once in base..head, blob unchanged at head.
+  7. Path audit: all changed paths within Handoff allowed_paths AND task allowed_paths,
+     none in forbidden_paths.
+  8. Rename detection: both sides of renames must be in both allowed sets.
 
 Usage:
     python scripts/validate_ai_handoff.py \\
@@ -26,6 +28,7 @@ import re
 import subprocess
 import sys
 from pathlib import Path
+from typing import Any
 
 import yaml
 
@@ -41,6 +44,7 @@ REQUIRED_FIELDS = (
     "expected_pr_base_sha",
     "task_blob_sha",
     "allowed_paths",
+    "codex_only_paths",
 )
 
 SHA_FIELDS = ("planning_base_sha", "expected_base_sha", "expected_pr_base_sha", "task_blob_sha")
@@ -84,6 +88,12 @@ def git_is_ancestor(ancestor: str, descendant: str, cwd: Path) -> bool:
     return result.returncode == 0
 
 
+def git_log_commits_touching(base: str, head: str, path: str, cwd: Path) -> list[str]:
+    """Get all commit SHAs in base..head that touched the given path."""
+    output = git("log", "--format=%H", f"{base}..{head}", "--", path, cwd=cwd)
+    return [line for line in output.splitlines() if line]
+
+
 def git_diff_name_only(base: str, head: str, cwd: Path) -> list[str]:
     """Get changed file names (no rename detection)."""
     output = git("diff", "--name-only", "--no-renames", f"{base}...{head}", cwd=cwd)
@@ -106,7 +116,7 @@ def git_diff_name_status(base: str, head: str, cwd: Path) -> list[tuple[str, str
     return results
 
 
-def load_handoff(path: Path) -> dict:
+def load_handoff(path: Path) -> dict[str, Any]:
     """Load and parse the Handoff Record YAML."""
     with path.open(encoding="utf-8") as f:
         data = yaml.safe_load(f)
@@ -115,7 +125,7 @@ def load_handoff(path: Path) -> dict:
     return data
 
 
-def extract_task_front_matter(path: Path) -> dict:
+def extract_task_front_matter(path: Path) -> dict[str, Any]:
     """Extract YAML front matter from a task markdown file."""
     text = path.read_text(encoding="utf-8")
     match = re.match(r"\A---\s*\r?\n(.*?)\r?\n---\s*\r?\n", text, re.DOTALL)
@@ -124,8 +134,8 @@ def extract_task_front_matter(path: Path) -> dict:
     return yaml.safe_load(match.group(1)) or {}
 
 
-def validate_schema(handoff: dict) -> list[str]:
-    """Validate required fields and SHA format. Returns list of errors."""
+def validate_schema(handoff: dict[str, Any]) -> list[str]:
+    """Validate required fields, SHA format, and structural invariants."""
     errors: list[str] = []
     for field in REQUIRED_FIELDS:
         if field not in handoff:
@@ -139,10 +149,26 @@ def validate_schema(handoff: dict) -> list[str]:
         ap = handoff["allowed_paths"]
         if not isinstance(ap, list) or not ap:
             errors.append("allowed_paths must be a non-empty list")
+    if "codex_only_paths" in handoff:
+        cop = handoff["codex_only_paths"]
+        if not isinstance(cop, list) or not cop:
+            errors.append("codex_only_paths must be a non-empty list")
+        elif not all(isinstance(p, str) for p in cop):
+            errors.append("codex_only_paths must contain only strings")
+    # Identity: expected_base_sha must equal expected_pr_base_sha
+    if (
+        "expected_base_sha" in handoff
+        and "expected_pr_base_sha" in handoff
+        and str(handoff["expected_base_sha"]) != str(handoff["expected_pr_base_sha"])
+    ):
+        errors.append(
+            f"expected_base_sha {handoff['expected_base_sha']} != "
+            f"expected_pr_base_sha {handoff['expected_pr_base_sha']}"
+        )
     return errors
 
 
-def validate_base(base_ref: str, head: str, handoff: dict, cwd: Path) -> list[str]:
+def validate_base(base_ref: str, head: str, handoff: dict[str, Any], cwd: Path) -> list[str]:
     """Check base-ref resolves to expected_base_sha and merge-base matches."""
     errors: list[str] = []
     expected_base = str(handoff["expected_base_sha"])
@@ -166,15 +192,19 @@ def validate_base(base_ref: str, head: str, handoff: dict, cwd: Path) -> list[st
     return errors
 
 
-def validate_pr_base(pr_base: str, handoff: dict) -> list[str]:
-    """Check PR base SHA matches expected_pr_base_sha."""
-    expected = str(handoff.get("expected_pr_base_sha", handoff.get("expected_base_sha", "")))
-    if pr_base != expected:
-        return [f"PR base {pr_base} does not match expected_pr_base_sha {expected}"]
-    return []
+def validate_pr_base(pr_base: str, handoff: dict[str, Any]) -> list[str]:
+    """Check PR base SHA matches expected_pr_base_sha AND expected_base_sha."""
+    expected_pr = str(handoff.get("expected_pr_base_sha", ""))
+    expected_base = str(handoff.get("expected_base_sha", ""))
+    errors: list[str] = []
+    if pr_base != expected_pr:
+        errors.append(f"PR base {pr_base} does not match expected_pr_base_sha {expected_pr}")
+    if pr_base != expected_base:
+        errors.append(f"PR base {pr_base} does not match expected_base_sha {expected_base}")
+    return errors
 
 
-def validate_planning_ancestor(handoff: dict, cwd: Path) -> list[str]:
+def validate_planning_ancestor(handoff: dict[str, Any], cwd: Path) -> list[str]:
     """Check planning_base_sha is an ancestor of expected_base_sha."""
     planning = str(handoff["planning_base_sha"])
     base = str(handoff["expected_base_sha"])
@@ -183,11 +213,16 @@ def validate_planning_ancestor(handoff: dict, cwd: Path) -> list[str]:
     return []
 
 
-def validate_task_blob(handoff: dict, task_path: Path, cwd: Path) -> list[str]:
-    """Check task blob at expected_base and at HEAD match the frozen blob."""
+def validate_task_blob(
+    handoff: dict[str, Any],
+    task_path: Path,
+    base: str,
+    head: str,
+    cwd: Path,
+) -> list[str]:
+    """Check task blob at expected_base and at supplied head match the frozen blob."""
     errors: list[str] = []
     expected_blob = str(handoff["task_blob_sha"])
-    base = str(handoff["expected_base_sha"])
     rel_task = str(task_path.relative_to(cwd))
 
     try:
@@ -200,48 +235,95 @@ def validate_task_blob(handoff: dict, task_path: Path, cwd: Path) -> list[str]:
         errors.append(f"task file {rel_task} not found at base {base}")
 
     try:
-        blob_at_head = git_blob_at("HEAD", rel_task, cwd)
+        blob_at_head = git_blob_at(head, rel_task, cwd)
         if blob_at_head != expected_blob:
-            errors.append(f"task blob drift: HEAD has {blob_at_head}, frozen is {expected_blob}")
+            errors.append(f"task blob drift: {head} has {blob_at_head}, frozen is {expected_blob}")
     except subprocess.CalledProcessError:
-        errors.append(f"task file {rel_task} not found at HEAD")
+        errors.append(f"task file {rel_task} not found at {head}")
 
     return errors
 
 
-def validate_handoff_immutable(handoff_path: Path, base: str, cwd: Path) -> list[str]:
-    """Check Handoff Record was not modified after introduction."""
-    errors: list[str] = []
+def validate_handoff_immutable(
+    handoff_path: Path,
+    base: str,
+    head: str,
+    cwd: Path,
+) -> list[str]:
+    """Check Handoff Record was introduced exactly once in base..head and unchanged at head."""
     rel_handoff = str(handoff_path.relative_to(cwd))
 
+    # Discover all commits in base..head that touched the handoff file
     try:
-        blob_at_head = git_blob_at("HEAD", rel_handoff, cwd)
-    except subprocess.CalledProcessError:
-        return [f"handoff file {rel_handoff} not found at HEAD"]
+        commits = git_log_commits_touching(base, head, rel_handoff, cwd)
+    except subprocess.CalledProcessError as e:
+        return [f"failed to discover handoff introduction for {rel_handoff}: {e}"]
 
+    if not commits:
+        return [
+            f"handoff record {rel_handoff} has no introduction commit in {base}..{head}; "
+            "it must be introduced after the expected Base"
+        ]
+    if len(commits) > 1:
+        return [
+            f"handoff record {rel_handoff} has ambiguous introduction: "
+            f"{len(commits)} commits touch it in {base}..{head} "
+            "(possible deletion + reintroduction or modification)"
+        ]
+
+    intro_commit = commits[0]
+
+    # Blob at introduction commit
     try:
-        blob_at_base = git_blob_at(base, rel_handoff, cwd)
-        if blob_at_base != blob_at_head:
-            errors.append(
-                f"handoff file modified: base blob {blob_at_base} != HEAD blob {blob_at_head}"
-            )
+        blob_at_intro = git_blob_at(intro_commit, rel_handoff, cwd)
     except subprocess.CalledProcessError:
-        # File didn't exist at base — it was newly added, which is expected
-        pass
+        return [f"handoff record {rel_handoff} not readable at introduction commit {intro_commit}"]
 
+    # Blob at supplied head
+    try:
+        blob_at_head = git_blob_at(head, rel_handoff, cwd)
+    except subprocess.CalledProcessError:
+        return [f"handoff record {rel_handoff} not found at head {head} (deleted?)"]
+
+    if blob_at_intro != blob_at_head:
+        return [
+            f"handoff record {rel_handoff} modified after introduction: "
+            f"blob at {intro_commit[:8]} = {blob_at_intro[:8]}, "
+            f"blob at {head[:8]} = {blob_at_head[:8]}"
+        ]
+
+    return []
+
+
+def _is_path_allowed(
+    path: str,
+    handoff_allowed: set[str],
+    task_allowed: set[str],
+    forbidden: list[str],
+) -> list[str]:
+    """Check a single path against both allowed sets and forbidden patterns."""
+    errors: list[str] = []
+    if path not in handoff_allowed:
+        errors.append(f"path {path!r} not in Handoff allowed_paths")
+    if path not in task_allowed:
+        errors.append(f"path {path!r} not in task allowed_paths")
+    for pattern in forbidden:
+        if fnmatch.fnmatchcase(path, pattern):
+            errors.append(f"path {path!r} matches forbidden pattern {pattern!r}")
     return errors
 
 
 def validate_paths(
     base: str,
     head: str,
-    handoff: dict,
-    task_fm: dict,
+    handoff: dict[str, Any],
+    task_fm: dict[str, Any],
     cwd: Path,
 ) -> list[str]:
-    """Check all changed paths are within allowed and not forbidden."""
+    """Check all changed paths against Handoff AND task allowed/forbidden."""
     errors: list[str] = []
-    allowed = set(str(p) for p in handoff["allowed_paths"])
+    handoff_allowed = set(str(p) for p in handoff["allowed_paths"])
+    task_allowed = set(str(p) for p in task_fm.get("allowed_paths", []))
     forbidden: list[str] = [str(p) for p in task_fm.get("forbidden_paths", [])]
 
     # No-rename diff
@@ -250,75 +332,76 @@ def validate_paths(
     except subprocess.CalledProcessError as e:
         return [f"failed to get diff name-only: {e}"]
 
-    outside = sorted(p for p in changed if p not in allowed)
-    if outside:
-        errors.append(f"paths outside allowed_paths: {outside}")
-
     for path in sorted(changed):
-        for pattern in forbidden:
-            if fnmatch.fnmatchcase(path, pattern):
-                errors.append(f"path {path!r} matches forbidden pattern {pattern!r}")
+        errors.extend(_is_path_allowed(path, handoff_allowed, task_allowed, forbidden))
 
     # Rename-aware diff: check both sides
     try:
         statuses = git_diff_name_status(base, head, cwd)
     except subprocess.CalledProcessError as e:
         return [*errors, f"failed to get diff name-status: {e}"]
-
     for status, old, new in statuses:
         if status != "R":
             continue
         for side, p in (("old", old), ("new", new)):
-            if p not in allowed:
-                errors.append(f"rename {side} path {p!r} not in allowed_paths")
-            for pattern in forbidden:
-                if fnmatch.fnmatchcase(p, pattern):
-                    errors.append(f"rename {side} path {p!r} matches forbidden pattern {pattern!r}")
+            for err in _is_path_allowed(p, handoff_allowed, task_allowed, forbidden):
+                errors.append(f"rename {side}: {err}")
 
     return errors
 
 
 def run_validation(
     task_path: Path,
-    handoff: dict,
+    handoff: dict[str, Any],
     base_ref: str,
     head: str,
     pr_base: str | None,
     cwd: Path,
-    task_fm: dict,
+    task_fm: dict[str, Any],
     handoff_path: Path | None = None,
 ) -> list[str]:
     """Run all validation checks. Returns list of errors (empty = pass)."""
     errors: list[str] = []
 
-    # 1. Schema
+    # 1. Schema (includes codex_only_paths and base/PR-base identity)
     schema_errors = validate_schema(handoff)
     if schema_errors:
         return schema_errors  # Cannot proceed without valid schema
-    errors.extend(schema_errors)
+
+    # 1b. codex_only_paths must contain the handoff record itself
+    if handoff_path is not None:
+        rel_handoff = str(handoff_path.relative_to(cwd))
+        codex_only = [str(p) for p in handoff.get("codex_only_paths", [])]
+        if rel_handoff not in codex_only:
+            return [
+                f"codex_only_paths does not contain the handoff record itself: "
+                f"{rel_handoff!r} not in {codex_only}"
+            ]
 
     # 2. Base validation
     errors.extend(validate_base(base_ref, head, handoff, cwd))
 
-    # 3. PR base
+    # 3. PR base (if supplied)
     if pr_base:
         errors.extend(validate_pr_base(pr_base, handoff))
 
     # 4. Planning ancestry
     errors.extend(validate_planning_ancestor(handoff, cwd))
 
-    # 5. Task blob (at base and at HEAD)
+    # 5. Task blob (at base and at supplied head)
     if not task_path.exists():
         errors.append(f"task file not found: {task_path}")
     else:
-        errors.extend(validate_task_blob(handoff, task_path, cwd))
+        base = str(handoff["expected_base_sha"])
+        errors.extend(validate_task_blob(handoff, task_path, base, head, cwd))
 
-    # 6. Handoff immutability
-    base = str(handoff["expected_base_sha"])
+    # 6. Handoff immutability (introduced once, unchanged at supplied head)
     if handoff_path is not None:
-        errors.extend(validate_handoff_immutable(handoff_path, base, cwd))
+        base = str(handoff["expected_base_sha"])
+        errors.extend(validate_handoff_immutable(handoff_path, base, head, cwd))
 
-    # 7+8. Path audit
+    # 7. Path audit (Handoff allowed_paths AND task allowed_paths AND forbidden)
+    base = str(handoff["expected_base_sha"])
     errors.extend(validate_paths(base, head, handoff, task_fm, cwd))
 
     return errors

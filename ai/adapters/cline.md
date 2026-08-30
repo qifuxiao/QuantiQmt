@@ -15,8 +15,11 @@ the same repository authority chain used by other agents:
 Event, Command, DTO, state machine, Repository, Workflow, task scope or safety invariant.
 
 Before implementing, Cline must read the **Codex Plan** embedded in the active task
-(Plan version, Planning Base SHA, Implementation Base SHA, design, file-level plan,
-test mapping, failure design, PLAN_BLOCKED conditions). After implementation, Cline
+(Plan version, Planning Base SHA, design, file-level plan, test mapping, failure
+design, PLAN_BLOCKED conditions). The **Implementation/Repair Base SHA** comes
+exclusively from the Codex-authored Handoff Record (`expected_base_sha`). Cline may
+verify that a ref resolves to it but must not derive or write the value from
+`origin/main` or the task file. After implementation, Cline
 must produce an **Implementation Report** in the format defined by
 `.clinerules/10-codex-handoff.md`.
 

@@ -262,3 +262,69 @@ def test_agents_md_has_three_verdicts() -> None:
     assert "APPROVE" in agents
     assert "REQUEST_CHANGES" in agents
     assert "BLOCKED" in agents
+
+
+# ── ADDENDUM-1: Implementation Base from Handoff Record only ──────────
+
+
+def test_cline_rules_base_from_handoff_not_origin_main() -> None:
+    """.clinerules must state Implementation Base comes from Handoff Record,
+    not from origin/main or the task."""
+    rules = _text(".clinerules/10-codex-handoff.md")
+    assert "Handoff Record" in rules, (
+        "Cline rules must reference the Handoff Record as Base authority"
+    )
+    assert "must not" in rules or "不得" in rules, (
+        "Cline rules must prohibit Cline from deriving Base"
+    )
+    # Must NOT say Cline records origin/main as the Implementation Base
+    assert "Cline records\ngit rev-parse origin/main" not in rules, (
+        "Cline rules must not let Cline derive Implementation Base from origin/main"
+    )
+
+
+def test_cline_adapter_base_from_handoff() -> None:
+    """ai/adapters/cline.md must state Implementation Base comes from Handoff Record."""
+    adapter = _text("ai/adapters/cline.md")
+    assert "Handoff Record" in adapter, (
+        "Cline adapter must reference the Handoff Record for Implementation Base"
+    )
+    assert "must not derive" in adapter or "must not" in adapter, (
+        "Cline adapter must prohibit deriving Base from origin/main"
+    )
+
+
+def test_task_template_base_from_handoff() -> None:
+    """tasks/templates/task-template.md must state Implementation Base is
+    provided by Codex in the Handoff Record, not derived by Cline."""
+    template = _text("tasks/templates/task-template.md")
+    assert "Handoff Record" in template, (
+        "Task template must reference the Handoff Record for Implementation Base"
+    )
+    assert "Cline records" not in template or "git rev-parse origin/main" not in template, (
+        "Task template must not let Cline derive Base from origin/main"
+    )
+
+
+# ── ADDENDUM-1: Closeout is human-only (no "or Review") ───────────────
+
+
+def test_closeout_human_only_no_reviewer() -> None:
+    """.clinerules must state closeout is human-only, not 'human or Review'."""
+    rules = _text(".clinerules/10-codex-handoff.md")
+    # Must NOT contain the old ambiguous wording
+    assert "human or independent Review" not in rules, (
+        "closeout must not be 'human or independent Review decision'"
+    )
+    # Must contain human-only language
+    assert "human-only" in rules or "human only" in rules.lower(), (
+        "closeout must be explicitly human-only"
+    )
+
+
+def test_team_collab_review_binds_github_facts() -> None:
+    """Review template must bind to GitHub PR Base and Head explicitly."""
+    wf = _text("ai/workflows/team-collaboration.md")
+    assert "baseRefOid" in wf or "PR Base" in wf, "Review must read GitHub PR Base SHA"
+    assert "headRefOid" in wf or "Beginning Head" in wf, "Review must read GitHub PR Head SHA"
+    assert "--pr-base" in wf, "Review must pass --pr-base to validator"
