@@ -86,6 +86,17 @@ def test_mypy_passes() -> None:
 
 def test_validator_passes_on_frozen_handoff() -> None:
     """Validator must pass on the real frozen Handoff Record in this repo."""
+    # Skip if origin/main is not available (shallow CI checkout)
+    probe = subprocess.run(
+        ["git", "rev-parse", "origin/main"],
+        capture_output=True,
+        text=True,
+        cwd=ROOT,
+    )
+    if probe.returncode != 0:
+        import pytest
+
+        pytest.skip("origin/main not available (shallow clone)")
     result = subprocess.run(
         [
             sys.executable,
