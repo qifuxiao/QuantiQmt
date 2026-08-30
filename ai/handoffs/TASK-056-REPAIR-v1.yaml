@@ -1,0 +1,46 @@
+schema_version: 1
+task_id: TASK-056
+packet_version: TASK-056-REPAIR-v1
+plan_version: TASK-056-PLAN-v3
+planning_base_sha: 0d9f8e879b2029c23ba955364080667d2efa50ed
+expected_base_sha: d0700f2ed67f2e53f55445c87444346c23bb6318
+expected_pr_base_sha: d0700f2ed67f2e53f55445c87444346c23bb6318
+task_blob_sha: db20c01a61aad776251db4cefab4cbbb994c35ff
+
+allowed_paths:
+  - AGENTS.md
+  - .clinerules/00-quantiqmt-project.md
+  - .clinerules/10-codex-handoff.md
+  - ai/adapters/cline.md
+  - ai/handoffs/TASK-056-REPAIR-v1.yaml
+  - ai/workflows/team-collaboration.md
+  - scripts/validate_ai_handoff.py
+  - tasks/templates/task-template.md
+  - tests/spec/test_codex_cline_collaboration_governance.py
+  - tests/spec/test_validate_ai_handoff.py
+
+codex_only_paths:
+  - ai/handoffs/TASK-056-REPAIR-v1.yaml
+
+repair_context:
+  implementation_pr: 95
+  superseded_head_sha: 53112fd3e518e51ebebbefe6b1dbe869cbcfd7cc
+  prior_verdict: REQUEST_CHANGES
+  amendment_pr: 96
+  amendment_merge_sha: d0700f2ed67f2e53f55445c87444346c23bb6318
+
+required_outcome:
+  - Remove business and trading contract text from Cline tool rules; retain only authority references.
+  - Bind implementation and review to the frozen Base, PR Base, task blob, and immutable Handoff Record.
+  - Define exact Base-to-Head review with APPROVE, REQUEST_CHANGES, and BLOCKED verdicts.
+  - Reserve activation, merge, and closeout authorization exclusively for humans.
+  - Add fail-closed validator and governance tests for Base, blob, path, rename, and drift failures.
+
+execution_constraints:
+  implementation_pr_must_remain_open: true
+  direct_push_to_main: forbidden
+  force_push: forbidden
+  self_approve: forbidden
+  merge: forbidden
+  closeout: forbidden
+  modify_handoff_record: forbidden
