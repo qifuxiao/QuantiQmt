@@ -223,7 +223,7 @@ def validate_task_blob(
     """Check task blob at expected_base and at supplied head match the frozen blob."""
     errors: list[str] = []
     expected_blob = str(handoff["task_blob_sha"])
-    rel_task = str(task_path.relative_to(cwd))
+    rel_task = task_path.relative_to(cwd).as_posix()
 
     try:
         blob_at_base = git_blob_at(base, rel_task, cwd)
@@ -251,7 +251,7 @@ def validate_handoff_immutable(
     cwd: Path,
 ) -> list[str]:
     """Check Handoff Record was introduced exactly once in base..head and unchanged at head."""
-    rel_handoff = str(handoff_path.relative_to(cwd))
+    rel_handoff = handoff_path.relative_to(cwd).as_posix()
 
     # Discover all commits in base..head that touched the handoff file
     try:
@@ -370,7 +370,7 @@ def run_validation(
 
     # 1b. codex_only_paths must contain the handoff record itself
     if handoff_path is not None:
-        rel_handoff = str(handoff_path.relative_to(cwd))
+        rel_handoff = handoff_path.relative_to(cwd).as_posix()
         codex_only = [str(p) for p in handoff.get("codex_only_paths", [])]
         if rel_handoff not in codex_only:
             return [
