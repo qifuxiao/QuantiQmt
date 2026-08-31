@@ -87,10 +87,10 @@ def _checkout_smoke_skip_reason(
     expected_base: str,
     frozen_task_exists: bool,
 ) -> str | None:
-    if origin_main != expected_base:
-        return "origin/main no longer matches the frozen Handoff base"
     if not frozen_task_exists:
         return "the frozen active-task path has been closed out"
+    if origin_main != expected_base:
+        return "origin/main no longer matches the frozen Handoff base"
     return None
 
 
@@ -105,6 +105,12 @@ def _checkout_smoke_skip_reason(
         ),
         (
             SHA_A,
+            SHA_A,
+            False,
+            "the frozen active-task path has been closed out",
+        ),
+        (
+            "",
             SHA_A,
             False,
             "the frozen active-task path has been closed out",
@@ -136,6 +142,14 @@ def test_optional_checkout_smoke_validator_passes_on_frozen_handoff() -> None:
     # frozen implementation Base and the task remains at its implementation path.
     # The non-skipping real-Git topology tests below remain the CI gate after
     # implementation merge and task closeout.
+    handoff = yaml.safe_load(HANDOFF.read_text(encoding="utf-8"))
+    assert isinstance(handoff, dict)
+    expected_base = handoff["expected_base_sha"]
+    assert isinstance(expected_base, str)
+    if not FROZEN_ACTIVE_TASK.exists():
+        skip_reason = _checkout_smoke_skip_reason("", expected_base, False)
+        assert skip_reason is not None
+        pytest.skip(skip_reason)
     probe = subprocess.run(
         ["git", "rev-parse", "origin/main"],
         capture_output=True,
@@ -143,14 +157,10 @@ def test_optional_checkout_smoke_validator_passes_on_frozen_handoff() -> None:
         cwd=ROOT,
     )
     assert probe.returncode == 0, f"origin/main is not readable: {probe.stderr}"
-    handoff = yaml.safe_load(HANDOFF.read_text(encoding="utf-8"))
-    assert isinstance(handoff, dict)
-    expected_base = handoff["expected_base_sha"]
-    assert isinstance(expected_base, str)
     skip_reason = _checkout_smoke_skip_reason(
         probe.stdout.strip(),
         expected_base,
-        FROZEN_ACTIVE_TASK.exists(),
+        True,
     )
     if skip_reason is not None:
         pytest.skip(skip_reason)
