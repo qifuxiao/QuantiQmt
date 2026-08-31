@@ -10,7 +10,7 @@
 |---|---|---|
 | 项目协调会话 | 项目进展分析、任务拆分、指令生成、冲突判断、合并后收尾规划 | 默认不写 |
 | 开发会话 | 执行一个 active task，按 allowed_paths 实现、验证、提交、推送 PR | 是 |
-| Review 会话 | 只读审查他人 PR，运行验证，输出 P0/P1/P2/P3 与 `APPROVE` 或 `REQUEST_CHANGES` | 否 |
+| Review 会话 | 只读审查他人 PR，运行验证，输出 P0/P1/P2/P3 与 `APPROVE`、`REQUEST_CHANGES` 或 `BLOCKED` | 否 |
 
 会话开头必须声明角色、任务 ID、允许路径、禁止路径和是否可以写文件。
 
@@ -21,7 +21,8 @@
 - 成员 A 的开发 PR 由成员 B 的 Review 会话审查；成员 B 的开发 PR 由成员 A 的 Review 会话审查。
 - 开发者不得自己批准自己的 PR。
 - Review Agent 不得修改文件；发现问题后输出可复现证据和修复方向。
-- 人类负责点击 GitHub Merge、批准任务激活和任务 completed 收尾。
+- **任务激活、PR 合并（merge）、closeout 授权、和任务状态转移（active → completed）
+  均为人类独占操作。Review Agent 仅记录结论，不具备授权权。**
 
 ## 标准流程
 
@@ -29,15 +30,44 @@
 协调会话判断下一任务
 → 生成开发指令
 → 开发会话实现并推送 PR
-→ 对方 Review 会话只读审查
-→ REQUEST_CHANGES 则开发会话修复
+→ 对方 Review 会话只读审查（APPROVE / REQUEST_CHANGES / BLOCKED）
+→ REQUEST_CHANGES 则开发会话修复后重新 Review
 → APPROVE 后人类合并 PR
-→ 协调会话检查 main
-→ 创建/执行 completion PR
+→ 人类单独记录并授权 closeout：协调会话仅机械检查 main、创建/执行 completion PR
 → 再选择下一任务
 ```
 
-实现 PR 合并不等于任务完成。任务只有在独立 Review 通过，并由人类或授权流程把 task 从 `tasks/active/` 移入 `tasks/completed/` 后，才算 completed。
+实现 PR 合并不等于任务完成。独立 Review 只提供完成证据；只有人类可以授权 task 从
+`tasks/active/` 移入 `tasks/completed/`。自动化只能机械执行已经单独记录且可核验的人类授权，
+不能作为替代授权者。
+
+## 交接物与 PR 生命周期
+
+### 三类交接物
+
+| 交接物 | 生产者 | 消费者 | 内容 |
+|---|---|---|---|
+| **Implementation Packet** | Codex | Cline | 精确 Implementation Base SHA、设计、文件计划、测试映射、失败设计、PLAN_BLOCKED 条件 |
+| **Implementation Report** | Cline | Codex Review / 人类 | Base/Head SHA、branch/PR、changed files、逐项 acceptance 证据、命令退出码、未验证范围、风险、spec deviations、path audit 结论 |
+| **Repair Packet** | Codex | Cline | 基于精确 Head Review 的修复指令，限定 allowed_paths |
+
+### 两 PR 生命周期
+
+**Implementation PR** 与 **Closeout PR** 必须分离：
+
+1. **Implementation PR**：Cline 推送实现变更。独立 Codex Review 会话只读审查
+   **精确 Head SHA**，结论仅限 `APPROVE`、`REQUEST_CHANGES` 或 `BLOCKED`。
+   Head SHA 改变后旧 Review 自动失效（invalidated），必须重新 Review。
+2. **Closeout PR**：在 Implementation PR 合并后且人类授权已经单独记录并可核验时创建，
+   核验独立 Review 结论、CI 结果、merge commit 和人类授权，将 task 从
+   `tasks/active/` 移入 `tasks/completed/` 并更新 `tasks/index.yaml`。自动化只能机械执行该
+   人类授权，不能自行授权创建 Closeout PR 或状态迁移。
+
+### Path audit
+
+Implementation Report 必须包含以 Implementation Base 为左端的完整
+`git diff --name-only --no-renames <Base>...HEAD` **path audit**（路径审计），
+确认所有变更路径属于 task `allowed_paths` 且未命中 `forbidden_paths`。
 
 ## 开发指令最小模板
 
@@ -59,18 +89,32 @@
 ```text
 你是独立 Review Agent。请只读审查 PR #NN / TASK-XXX，不要修改任何文件。
 
+前置条件（不满足则返回 BLOCKED）：
+- PR 状态必须为 OPEN（Review 开始和结束时各检查一次）
+- 记录 Beginning Head SHA（`gh pr view NN --json headRefOid --jq .headRefOid`）
+- 记录 GitHub PR Base SHA（`gh pr view NN --json baseRefOid --jq .baseRefOid`）
+- Base 必须等于 Handoff Record 中的 expected_base_sha
+- 将 GitHub PR Base 以 `--pr-base` 传入 validator
+- 证明 expected_base_sha == PR Base SHA == merge-base(expected_base, head)
+- 证明 Planning Base 是 Implementation Base 的祖先
+- 审查范围必须是精确 Base...Head 三段 diff（`git diff --name-only --no-renames <Base>...<Head>`）
+
 请读取 AGENTS.md、ai/review/**、spec/README.md、spec/manifest.yaml、tasks/active/TASK-XXX.md，以及 TASK-XXX 的全部 spec_refs。
 
-审查 origin/main..origin/<branch>。
+请运行 TASK-XXX verification.commands（含 --pr-base），并额外检查 allowed_paths、forbidden_paths、交易安全、幂等、恢复、金额精度和越权依赖。
 
-请运行 TASK-XXX verification.commands，并额外检查 allowed_paths、forbidden_paths、交易安全、幂等、恢复、金额精度和越权依赖。
+完成后重新读取 Ending Head SHA（`gh pr view NN --json headRefOid --jq .headRefOid`），
+必须等于 Beginning Head SHA；否则结论为 BLOCKED。
 
 输出格式：
 - Findings，按 P0/P1/P2/P3 排序
 - 已确认通过的部分
 - 验证结果
-- 最终结论只能是 APPROVE 或 REQUEST_CHANGES
+- 最终结论只能是 APPROVE、REQUEST_CHANGES 或 BLOCKED
 ```
+
+Review 结论由 Review Agent 记录，但**不能授权 closeout**。任务激活、PR 合并、
+和任务状态转移（active → completed）仅由人类授权。
 
 ## 环境门槛
 

@@ -75,6 +75,18 @@
 - Task Prompt 必须写明目标、非目标、allowed/forbidden paths、验收、验证命令、失败路径
   和预期演示；可使用 `ai/prompts/miniqmt-m1-task.md` 模板。
 - 没有 active 实现 task 时，Agent 只能报告并请求人类激活精确 task，不得自行开始代码。
+- Codex-Cline 跨服务器协作遵循四角色边界（详见 `ai/workflows/team-collaboration.md`
+  和 `.clinerules/10-codex-handoff.md`）：
+  - **Codex**：任务选择、规范/架构设计、Implementation Packet / Repair Packet 和精确
+    Head 独立 Review（结论仅 APPROVE、REQUEST_CHANGES 或 BLOCKED）。
+  - **Cline**：测试先行、最小实现、验证、commit、push 和 Implementation PR。Cline 必须
+    读取 active task 内 Codex Plan；无 active task、Base 不匹配、dirty worktree 或设计
+    缺口时 fail-closed（返回 PLAN_BLOCKED），不得自行修改 task/spec 或替代设计。
+  - **独立 Codex Review 会话**：只读审查精确 Head；Head 改变后旧 Review 自动失效。
+  - **人类**：任务激活、GitHub Approval/merge 和 closeout 授权。
+- GitHub commit、branch、PR、CI、Review 和精确 SHA 是跨服务器唯一事实来源，不以聊天
+  摘要代替。Implementation PR 与 Closeout PR 必须分离；Cline 不得 self-approve、merge
+  或 closeout。
 
 ## 完成与证据
 
@@ -83,7 +95,8 @@
 1. 执行 task 中所有 `verification.commands`。
 2. 检查每条 acceptance criterion，并记录证据。
 3. 报告修改文件、测试结果、未解决风险和规范偏差。
-4. 不得自行把任务从 active 移到 completed；由人类或独立 Review Agent 验收后移动。
+4. 不得自行把任务从 active 移到 completed；独立 Review 只提供完成证据，只有人类可以
+   授权 active → completed 状态迁移。自动化只能机械执行已经单独记录且可核验的人类授权。
 
 测试无法执行时不得声称完成，必须说明阻塞原因和未验证范围。
 

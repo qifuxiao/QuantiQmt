@@ -1,0 +1,51 @@
+schema_version: 1
+task_id: TASK-056
+packet_version: TASK-056-REPAIR-v2
+plan_version: TASK-056-PLAN-v4
+planning_base_sha: d0700f2ed67f2e53f55445c87444346c23bb6318
+expected_base_sha: 794a553804d5bc5dc7c0581f49c51cc7e3df370c
+expected_pr_base_sha: 794a553804d5bc5dc7c0581f49c51cc7e3df370c
+task_blob_sha: bb8cef229600a90aeecf2abe170558d7ee33cd56
+
+allowed_paths:
+  - AGENTS.md
+  - .clinerules/00-quantiqmt-project.md
+  - .clinerules/10-codex-handoff.md
+  - ai/adapters/cline.md
+  - ai/handoffs/TASK-056-REPAIR-v1.yaml
+  - ai/handoffs/TASK-056-REPAIR-v2.yaml
+  - ai/workflows/team-collaboration.md
+  - scripts/validate_ai_handoff.py
+  - tasks/AGENTS.md
+  - tasks/templates/task-template.md
+  - tests/spec/test_codex_cline_collaboration_governance.py
+  - tests/spec/test_validate_ai_handoff.py
+
+codex_only_paths:
+  - ai/handoffs/TASK-056-REPAIR-v1.yaml
+  - ai/handoffs/TASK-056-REPAIR-v2.yaml
+
+repair_context:
+  implementation_pr: 95
+  superseded_head_sha: bc6d762b1d770d962593c7d88e945852d50b9481
+  prior_verdict: REQUEST_CHANGES
+  amendment_pr: 97
+  amendment_merge_sha: 794a553804d5bc5dc7c0581f49c51cc7e3df370c
+  prior_handoff_commit: 8b2eb4ea1f13b0c3ed661a9d9d963da4dfca6e96
+  prior_handoff_blob_sha: 4003dbfc420c4c31036ae761a75e354b1abc709f
+
+required_outcome:
+  - Reject every supplied-Head ancestry state after v2 introduction unless the frozen Record blob is continuously present and unchanged, including merge-only deletion and restoration histories.
+  - Bind schema_version, task_id, packet_version, and plan_version to the supported schema, active task, Handoff filename identity, and frozen task Plan.
+  - Remove Reviewer authority over completed from tasks/AGENTS.md and include that file in fail-closed persistent collaboration governance scans.
+
+execution_constraints:
+  implementation_pr_must_remain_open: true
+  direct_push_to_main: forbidden
+  rebase: forbidden
+  force_push: forbidden
+  self_approve: forbidden
+  merge: forbidden
+  closeout: forbidden
+  modify_handoff_record: forbidden
+  modify_prior_handoff_record: forbidden

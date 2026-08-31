@@ -21,6 +21,33 @@ delivery:
 
 One observable outcome.
 
+## Codex Implementation Plan
+
+- Plan version: `TASK-XXX-PLAN-vX`
+- Planning Base SHA: `<full SHA of main when Codex formed the plan>`
+- Implementation Base SHA: `<provided by Codex in the Handoff Record as expected_base_sha; Cline must not derive this from origin/main>`
+
+### Design
+
+Observable outcome and key architectural decisions.
+
+### File-level change plan
+
+- `path/to/file`: what changes and why.
+
+### Acceptance-to-test mapping
+
+- Acceptance criterion → test function.
+
+### Failure and recovery design
+
+- Conditions that trigger `PLAN_BLOCKED`.
+- Recovery or repair path for each failure mode.
+
+### PLAN_BLOCKED conditions
+
+- Conditions under which Cline must stop and return `PLAN_BLOCKED`.
+
 ## Non-goals
 
 - Explicitly excluded work.
