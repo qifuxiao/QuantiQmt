@@ -90,9 +90,18 @@ def git_is_ancestor(ancestor: str, descendant: str, cwd: Path) -> bool:
 
 
 def git_log_commits_touching(base: str, head: str, path: str, cwd: Path) -> list[str]:
-    """Get all commit SHAs in base..head that touched the given path."""
-    output = git("log", "--format=%H", f"{base}..{head}", "--", path, cwd=cwd)
-    return [line for line in output.splitlines() if line]
+    """Get every commit in base..head that touched path, without merge simplification."""
+    output = git(
+        "log",
+        "--full-history",
+        "--format=%H",
+        f"{base}..{head}",
+        "--",
+        path,
+        cwd=cwd,
+    )
+    candidates = [line for line in output.splitlines() if line]
+    return [commit for commit in candidates if git_commit_authored_path_change(commit, path, cwd)]
 
 
 def git_commit_parents(commit: str, cwd: Path) -> list[str]:
@@ -102,6 +111,30 @@ def git_commit_parents(commit: str, cwd: Path) -> list[str]:
     if not parts or parts[0] != commit:
         raise subprocess.CalledProcessError(128, ["git", "rev-list", commit])
     return parts[1:]
+
+
+def git_optional_blob_at(ref: str, path: str, cwd: Path) -> str | None:
+    """Return a path blob, or None when the path is absent at the exact ref."""
+    try:
+        return git_blob_at(ref, path, cwd)
+    except subprocess.CalledProcessError:
+        return None
+
+
+def git_commit_authored_path_change(commit: str, path: str, cwd: Path) -> bool:
+    """True when commit content for path differs from every parent.
+
+    A synchronization merge may differ from its first parent while exactly
+    preserving the Handoff parent's blob. It propagates existing content and
+    is not a new Record touch. A merge resolution that differs from every
+    parent is an authored touch and must fail immutability validation.
+    """
+    parents = git_commit_parents(commit, cwd)
+    blob = git_optional_blob_at(commit, path, cwd)
+    if not parents:
+        return blob is not None
+    parent_blobs = [git_optional_blob_at(parent, path, cwd) for parent in parents]
+    return all(blob != parent_blob for parent_blob in parent_blobs)
 
 
 def git_path_status(commit: str, path: str, cwd: Path) -> list[str]:

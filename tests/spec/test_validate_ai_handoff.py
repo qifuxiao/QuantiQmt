@@ -234,6 +234,23 @@ forbidden_paths:
     elif scenario == "path_violation":
         _write(repo, "forbidden/rogue.txt", "out of scope\n")
         _commit_all(repo, "forbidden path")
+    elif scenario == "merge_tamper_restore":
+        original = (repo / handoff_rel).read_text(encoding="utf-8")
+        _git(repo, "checkout", "-b", "record-tamper-side")
+        with (repo / handoff_rel).open("a", encoding="utf-8") as stream:
+            stream.write("tampered: true\n")
+        _commit_all(repo, "tamper handoff on side branch")
+        _write(repo, handoff_rel, original)
+        _commit_all(repo, "restore handoff blob on side branch")
+        _git(repo, "checkout", "superseded")
+        _git(
+            repo,
+            "merge",
+            "--no-ff",
+            "record-tamper-side",
+            "-m",
+            "merge restored handoff side branch",
+        )
 
     return {
         "repo": repo,
@@ -328,6 +345,35 @@ def test_real_git_topology_binds_all_queries_to_supplied_head(tmp_path: Path) ->
     result = _run_real_git_cli(topology, topology["base"])
     assert topology["head"] == supplied_head
     assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_real_git_topology_rejects_merge_dag_tamper_restore(tmp_path: Path) -> None:
+    topology = _create_real_git_topology(tmp_path, "merge_tamper_restore")
+    path = str(topology["handoff"])
+    commit_range = f"{topology['base']}..{topology['head']}"
+    simplified = _git(
+        topology["repo"],
+        "log",
+        "--format=%H",
+        commit_range,
+        "--",
+        path,
+    ).stdout.splitlines()
+    full_history = _git(
+        topology["repo"],
+        "log",
+        "--full-history",
+        "--format=%H",
+        commit_range,
+        "--",
+        path,
+    ).stdout.splitlines()
+    assert len(simplified) == 1, simplified
+    assert len(full_history) >= 3, full_history
+
+    result = _run_real_git_cli(topology, topology["base"])
+    assert result.returncode != 0
+    assert "handoff record" in result.stderr.lower()
 
 
 # ── Negative: missing handoff file ──────────────────────────────────────
@@ -646,6 +692,7 @@ def test_handoff_ambiguous_introduction_fails() -> None:
     # Two commits = ambiguous (e.g., deletion + reintroduction)
     rel_handoff = "ai/handoffs/TASK-056-REPAIR-v1.yaml"
     kwargs["log_map"] = {f"{SHA_B}..HEAD::{rel_handoff}": f"{SHA_G}\n{SHA_F}"}
+    kwargs["parent_map"][SHA_F] = [SHA_G]
     errors = _run_validator_func(handoff, task_fm, **kwargs)
     assert any("ambiguous" in e.lower() for e in errors)
 
