@@ -16,7 +16,7 @@ Checks (all fail-closed):
 Usage:
     python scripts/validate_ai_handoff.py \\
         --task tasks/active/TASK-056-codex-cline-collaboration.md \\
-        --handoff ai/handoffs/TASK-056-REPAIR-v1.yaml \\
+        --handoff ai/handoffs/TASK-056-REPAIR-v2.yaml \\
         --base-ref origin/main --head HEAD
 """
 
@@ -33,6 +33,11 @@ from typing import Any
 import yaml
 
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+PLAN_VERSION_RE = re.compile(
+    r"^\s*-\s*Plan version:\s*`?([A-Za-z0-9][A-Za-z0-9._-]*)`?\s*$",
+    re.MULTILINE,
+)
+SUPPORTED_SCHEMA_VERSIONS = frozenset({1})
 
 REQUIRED_FIELDS = (
     "schema_version",
@@ -170,6 +175,21 @@ def git_commits_touching_paths(
     return [line for line in output.splitlines() if line]
 
 
+def git_descendant_commits_in_head_ancestry(
+    introduction: str,
+    head: str,
+    cwd: Path,
+) -> list[str]:
+    """Return every post-introduction commit on an ancestry path to exact head."""
+    output = git(
+        "rev-list",
+        "--ancestry-path",
+        f"{introduction}..{head}",
+        cwd=cwd,
+    )
+    return [line for line in output.splitlines() if line]
+
+
 def git_diff_name_only(base: str, head: str, cwd: Path) -> list[str]:
     """Get changed file names (no rename detection)."""
     output = git("diff", "--name-only", "--no-renames", f"{base}...{head}", cwd=cwd)
@@ -210,12 +230,29 @@ def extract_task_front_matter(path: Path) -> dict[str, Any]:
     return yaml.safe_load(match.group(1)) or {}
 
 
+def extract_task_plan_version(path: Path) -> str:
+    """Extract the unique frozen Plan version from an active task."""
+    versions = PLAN_VERSION_RE.findall(path.read_text(encoding="utf-8"))
+    if len(versions) != 1:
+        raise ValueError(
+            f"expected exactly one '- Plan version:' entry in {path}; found {len(versions)}"
+        )
+    return str(versions[0])
+
+
 def validate_schema(handoff: dict[str, Any]) -> list[str]:
     """Validate required fields, SHA format, and structural invariants."""
     errors: list[str] = []
     for field in REQUIRED_FIELDS:
         if field not in handoff:
             errors.append(f"missing required field: {field}")
+    if "schema_version" in handoff:
+        schema_version = handoff["schema_version"]
+        if type(schema_version) is not int or schema_version not in SUPPORTED_SCHEMA_VERSIONS:
+            errors.append(
+                f"schema_version {schema_version!r} is unsupported; "
+                f"supported versions are {sorted(SUPPORTED_SCHEMA_VERSIONS)}"
+            )
     for field in SHA_FIELDS:
         if field in handoff:
             val = str(handoff[field])
@@ -256,6 +293,37 @@ def validate_schema(handoff: dict[str, Any]) -> list[str]:
                     "repair_context.superseded_head_sha is not a valid "
                     f"40-char lowercase hex SHA: {superseded!r}"
                 )
+    return errors
+
+
+def validate_identity(
+    handoff: dict[str, Any],
+    task_fm: dict[str, Any],
+    handoff_path: Path,
+    task_plan_version: str,
+) -> list[str]:
+    """Bind the Handoff identity to its active task, filename, and frozen Plan."""
+    errors: list[str] = []
+    expected_task_id = task_fm.get("id")
+    if not isinstance(expected_task_id, str) or not expected_task_id:
+        errors.append("active task front matter must contain a non-empty string id")
+    elif handoff.get("task_id") != expected_task_id:
+        errors.append(
+            f"task_id {handoff.get('task_id')!r} does not match active task id {expected_task_id!r}"
+        )
+
+    expected_packet_version = handoff_path.stem
+    if handoff.get("packet_version") != expected_packet_version:
+        errors.append(
+            f"packet_version {handoff.get('packet_version')!r} does not match "
+            f"Handoff filename identity {expected_packet_version!r}"
+        )
+
+    if handoff.get("plan_version") != task_plan_version:
+        errors.append(
+            f"plan_version {handoff.get('plan_version')!r} does not match "
+            f"active task Plan version {task_plan_version!r}"
+        )
     return errors
 
 
@@ -416,6 +484,26 @@ def validate_handoff_freeze_topology(
     except subprocess.CalledProcessError:
         return [f"handoff record {rel_handoff} not readable at introduction commit {intro_commit}"]
 
+    # Prove continuous immutability at every descendant commit state that is
+    # also an ancestor of the supplied exact Head. This catches merge results
+    # that select an external parent's absent/original state and would be
+    # invisible to authored-change filtering.
+    try:
+        descendants = git_descendant_commits_in_head_ancestry(intro_commit, head, cwd)
+    except subprocess.CalledProcessError as exc:
+        return [
+            f"cannot enumerate Handoff descendant states from {intro_commit} "
+            f"to supplied head {head}: {exc}"
+        ]
+    for commit in descendants:
+        blob_at_commit = git_optional_blob_at(commit, rel_handoff, cwd)
+        if blob_at_commit != blob_at_intro:
+            observed = "absent" if blob_at_commit is None else blob_at_commit
+            return [
+                f"handoff record {rel_handoff} is not continuously frozen at "
+                f"descendant commit {commit}: observed {observed}, expected {blob_at_intro}"
+            ]
+
     # Blob at supplied head
     try:
         blob_at_head = git_blob_at(head, rel_handoff, cwd)
@@ -514,6 +602,21 @@ def run_validation(
                 f"codex_only_paths does not contain the handoff record itself: "
                 f"{rel_handoff!r} not in {codex_only}"
             ]
+
+        if not task_path.exists():
+            return [f"task file not found: {task_path}"]
+        try:
+            task_plan_version = extract_task_plan_version(task_path)
+        except (OSError, ValueError) as exc:
+            return [f"cannot bind Handoff identity to active task Plan: {exc}"]
+        identity_errors = validate_identity(
+            handoff,
+            task_fm,
+            handoff_path,
+            task_plan_version,
+        )
+        if identity_errors:
+            return identity_errors
 
     # 2. Base validation
     errors.extend(validate_base(base_ref, head, handoff, cwd))

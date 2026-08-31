@@ -342,6 +342,7 @@ PERSISTENT_COLLABORATION_FILES = (
     ".clinerules/10-codex-handoff.md",
     "ai/adapters/cline.md",
     "ai/workflows/team-collaboration.md",
+    "tasks/AGENTS.md",
     "tasks/templates/task-template.md",
 )
 

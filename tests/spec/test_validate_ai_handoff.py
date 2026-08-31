@@ -13,6 +13,8 @@ These tests prove the validator fails-closed on:
 - Handoff Record not introduced in range
 - Handoff Record ambiguous introduction (multiple commits)
 - Handoff Record modified after introduction
+- Handoff Record deleted/restored only by merge results
+- unsupported or mismatched schema/task/packet/plan identity
 - missing/malformed codex_only_paths
 - path allowed by Handoff but outside task allowed_paths
 - forbidden path hits
@@ -34,7 +36,7 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
 VALIDATOR = ROOT / "scripts" / "validate_ai_handoff.py"
-HANDOFF = ROOT / "ai" / "handoffs" / "TASK-056-REPAIR-v1.yaml"
+HANDOFF = ROOT / "ai" / "handoffs" / "TASK-056-REPAIR-v2.yaml"
 TASK = ROOT / "tasks" / "active" / "TASK-056-codex-cline-collaboration.md"
 
 SHA_A = "a" * 40
@@ -140,17 +142,17 @@ def _handoff_data(base: str, task_blob: str, superseded: str) -> dict[str, Any]:
     return {
         "schema_version": 1,
         "task_id": "TASK-056",
-        "packet_version": "TASK-056-REPAIR-v1",
-        "plan_version": "TASK-056-PLAN-v3",
+        "packet_version": "TASK-056-REPAIR-v2",
+        "plan_version": "TASK-056-PLAN-v4",
         "planning_base_sha": base,
         "expected_base_sha": base,
         "expected_pr_base_sha": base,
         "task_blob_sha": task_blob,
         "allowed_paths": [
             "repair.txt",
-            "ai/handoffs/TASK-056-REPAIR-v1.yaml",
+            "ai/handoffs/TASK-056-REPAIR-v2.yaml",
         ],
-        "codex_only_paths": ["ai/handoffs/TASK-056-REPAIR-v1.yaml"],
+        "codex_only_paths": ["ai/handoffs/TASK-056-REPAIR-v2.yaml"],
         "repair_context": {"superseded_head_sha": superseded},
     }
 
@@ -163,7 +165,7 @@ def _create_real_git_topology(tmp_path: Path, scenario: str = "valid") -> dict[s
     _git(repo, "config", "user.name", "Topology Test")
     _git(repo, "config", "user.email", "topology@example.invalid")
     task_rel = "tasks/active/TASK-056-codex-cline-collaboration.md"
-    handoff_rel = "ai/handoffs/TASK-056-REPAIR-v1.yaml"
+    handoff_rel = "ai/handoffs/TASK-056-REPAIR-v2.yaml"
     _write(
         repo,
         task_rel,
@@ -172,11 +174,16 @@ id: TASK-056
 status: active
 allowed_paths:
   - repair.txt
-  - ai/handoffs/TASK-056-REPAIR-v1.yaml
+  - ai/handoffs/TASK-056-REPAIR-v2.yaml
 forbidden_paths:
   - forbidden/**
 ---
-\n# Constructed task\n""",
+\n# Constructed task
+
+## Codex Implementation Plan
+
+- Plan version: `TASK-056-PLAN-v4`
+""",
     )
     _write(repo, "baseline.txt", "base\n")
     base = _commit_all(repo, "base")
@@ -208,6 +215,15 @@ forbidden_paths:
 
     _git(repo, "checkout", "-b", "handoff", base)
     record = _handoff_data(base, task_blob, superseded)
+    identity_overrides: dict[str, Any] = {
+        "identity_schema": ("schema_version", 999),
+        "identity_task": ("task_id", "TASK-999"),
+        "identity_packet": ("packet_version", "UNRELATED-PACKET"),
+        "identity_plan": ("plan_version", "UNRELATED-PLAN"),
+    }
+    if scenario in identity_overrides:
+        field, value = identity_overrides[scenario]
+        record[field] = value
     _write(repo, handoff_rel, yaml.safe_dump(record, sort_keys=False))
     intro = _commit_all(repo, "Codex add-only handoff")
 
@@ -251,6 +267,25 @@ forbidden_paths:
             "-m",
             "merge restored handoff side branch",
         )
+    elif scenario == "merge_delete_restore":
+        original = (repo / handoff_rel).read_text(encoding="utf-8")
+        current = _git(repo, "rev-parse", "HEAD").stdout.strip()
+
+        _git(repo, "checkout", "-b", "record-present-side", current)
+        _git(repo, "commit", "--allow-empty", "-m", "record-present side")
+
+        _git(repo, "checkout", "-b", "record-absent-side", superseded)
+        _git(repo, "commit", "--allow-empty", "-m", "record-absent side")
+
+        _git(repo, "checkout", "superseded")
+        _git(repo, "merge", "--no-ff", "--no-commit", "record-absent-side")
+        _git(repo, "rm", handoff_rel)
+        _git(repo, "commit", "-m", "merge deletion of handoff")
+
+        _git(repo, "merge", "--no-ff", "--no-commit", "record-present-side")
+        _write(repo, handoff_rel, original)
+        _git(repo, "add", handoff_rel)
+        _git(repo, "commit", "-m", "merge restoration of handoff")
 
     return {
         "repo": repo,
@@ -376,6 +411,45 @@ def test_real_git_topology_rejects_merge_dag_tamper_restore(tmp_path: Path) -> N
     assert "handoff record" in result.stderr.lower()
 
 
+def test_real_git_topology_rejects_merge_only_delete_restore(tmp_path: Path) -> None:
+    topology = _create_real_git_topology(tmp_path, "merge_delete_restore")
+    intro_blob = _git(
+        topology["repo"],
+        "rev-parse",
+        f"{topology['intro']}:{topology['handoff']}",
+    ).stdout.strip()
+    head_blob = _git(
+        topology["repo"],
+        "rev-parse",
+        f"{topology['head']}:{topology['handoff']}",
+    ).stdout.strip()
+    assert head_blob == intro_blob
+
+    result = _run_real_git_cli(topology, topology["base"])
+    assert result.returncode != 0
+    assert "handoff record" in result.stderr.lower()
+
+
+@pytest.mark.parametrize(
+    ("scenario", "expected_fragment"),
+    [
+        ("identity_schema", "schema_version"),
+        ("identity_task", "task_id"),
+        ("identity_packet", "packet_version"),
+        ("identity_plan", "plan_version"),
+    ],
+)
+def test_real_git_topology_rejects_identity_mismatch(
+    tmp_path: Path,
+    scenario: str,
+    expected_fragment: str,
+) -> None:
+    topology = _create_real_git_topology(tmp_path, scenario)
+    result = _run_real_git_cli(topology, topology["base"])
+    assert result.returncode != 0
+    assert expected_fragment in result.stderr
+
+
 # ── Negative: missing handoff file ──────────────────────────────────────
 
 
@@ -487,6 +561,13 @@ def _mock_git_responses(
                 return _result(0, " ".join([commit, *parent_map[commit]]) + "\n", "")
             return _result(128, "", f"unknown commit {commit}")
 
+        # git rev-list --ancestry-path <introduction>..<head>
+        if args[0] == "rev-list" and "--ancestry-path" in args:
+            range_arg = next((arg for arg in args if ".." in arg), "")
+            if range_arg in repair_log_map:
+                return _result(0, repair_log_map[range_arg] + "\n", "")
+            return _result(0, "", "")
+
         # git rev-list --full-history <base>..<head> -- <paths...>
         if args[0] == "rev-list" and "--full-history" in args:
             range_arg = next((arg for arg in args if ".." in arg), "")
@@ -522,14 +603,14 @@ def _make_valid_handoff() -> dict[str, Any]:
     return {
         "schema_version": 1,
         "task_id": "TASK-056",
-        "packet_version": "TASK-056-REPAIR-v1",
-        "plan_version": "TASK-056-PLAN-v3",
+        "packet_version": "TASK-056-REPAIR-v2",
+        "plan_version": "TASK-056-PLAN-v4",
         "planning_base_sha": SHA_A,
         "expected_base_sha": SHA_B,
         "expected_pr_base_sha": SHA_B,
         "task_blob_sha": SHA_C,
-        "allowed_paths": ["file1.md", "file2.py", "ai/handoffs/TASK-056-REPAIR-v1.yaml"],
-        "codex_only_paths": ["ai/handoffs/TASK-056-REPAIR-v1.yaml"],
+        "allowed_paths": ["file1.md", "file2.py", "ai/handoffs/TASK-056-REPAIR-v2.yaml"],
+        "codex_only_paths": ["ai/handoffs/TASK-056-REPAIR-v2.yaml"],
         "repair_context": {"superseded_head_sha": SHA_E},
     }
 
@@ -537,7 +618,8 @@ def _make_valid_handoff() -> dict[str, Any]:
 def _make_valid_task_fm() -> dict[str, Any]:
     """Return a valid task front-matter dict for testing."""
     return {
-        "allowed_paths": ["file1.md", "file2.py", "ai/handoffs/TASK-056-REPAIR-v1.yaml"],
+        "id": "TASK-056",
+        "allowed_paths": ["file1.md", "file2.py", "ai/handoffs/TASK-056-REPAIR-v2.yaml"],
         "forbidden_paths": [],
     }
 
@@ -577,7 +659,7 @@ def _run_validator_func(
 def _default_git_kwargs(head: str = "HEAD") -> dict[str, Any]:
     """Default git mock responses for a valid state."""
     rel_task = "tasks/active/TASK-056-codex-cline-collaboration.md"
-    rel_handoff = "ai/handoffs/TASK-056-REPAIR-v1.yaml"
+    rel_handoff = "ai/handoffs/TASK-056-REPAIR-v2.yaml"
     base = SHA_B
     return {
         "rev_parse_map": {"origin/main": SHA_B, "HEAD": SHA_D},
@@ -597,7 +679,10 @@ def _default_git_kwargs(head: str = "HEAD") -> dict[str, Any]:
         "log_map": {f"{base}..{head}::{rel_handoff}": SHA_G},
         "parent_map": {SHA_G: [SHA_B]},
         "path_status_map": {(SHA_G, rel_handoff): f"A\t{rel_handoff}"},
-        "repair_log_map": {f"{SHA_E}..{head}": SHA_G},
+        "repair_log_map": {
+            f"{SHA_E}..{head}": SHA_G,
+            f"{SHA_G}..{head}": "",
+        },
         "diff_name_only": "file1.md\nfile2.py",
         "diff_name_status": "A\tfile1.md\tfile1.md\nA\tfile2.py\tfile2.py",
     }
@@ -622,6 +707,22 @@ def test_schema_invalid_sha_format_fails() -> None:
     task_fm = _make_valid_task_fm()
     errors = _run_validator_func(handoff, task_fm, **_default_git_kwargs())
     assert any("sha" in e.lower() for e in errors)
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("schema_version", 999),
+        ("task_id", "TASK-999"),
+        ("packet_version", "UNRELATED-PACKET"),
+        ("plan_version", "UNRELATED-PLAN"),
+    ],
+)
+def test_handoff_identity_fields_are_semantically_bound(field: str, value: Any) -> None:
+    handoff = _make_valid_handoff()
+    handoff[field] = value
+    errors = _run_validator_func(handoff, _make_valid_task_fm(), **_default_git_kwargs())
+    assert any(field in error for error in errors), errors
 
 
 @pytest.mark.parametrize(
@@ -690,7 +791,7 @@ def test_handoff_ambiguous_introduction_fails() -> None:
     task_fm = _make_valid_task_fm()
     kwargs = _default_git_kwargs()
     # Two commits = ambiguous (e.g., deletion + reintroduction)
-    rel_handoff = "ai/handoffs/TASK-056-REPAIR-v1.yaml"
+    rel_handoff = "ai/handoffs/TASK-056-REPAIR-v2.yaml"
     kwargs["log_map"] = {f"{SHA_B}..HEAD::{rel_handoff}": f"{SHA_G}\n{SHA_F}"}
     kwargs["parent_map"][SHA_F] = [SHA_G]
     errors = _run_validator_func(handoff, task_fm, **kwargs)
@@ -703,7 +804,7 @@ def test_handoff_introduced_then_modified_fails() -> None:
     task_fm = _make_valid_task_fm()
     kwargs = _default_git_kwargs()
     # Blob at introduction = SHA_D, blob at head = SHA_E (modified)
-    rel_handoff = "ai/handoffs/TASK-056-REPAIR-v1.yaml"
+    rel_handoff = "ai/handoffs/TASK-056-REPAIR-v2.yaml"
     kwargs["blob_map"][f"HEAD:{rel_handoff}"] = SHA_E
     errors = _run_validator_func(handoff, task_fm, **kwargs)
     lowered = [e.lower() for e in errors]
@@ -726,7 +827,7 @@ def test_handoff_introduction_must_have_exactly_one_parent() -> None:
 
 def test_handoff_introduction_must_be_add_only() -> None:
     kwargs = _default_git_kwargs()
-    rel_handoff = "ai/handoffs/TASK-056-REPAIR-v1.yaml"
+    rel_handoff = "ai/handoffs/TASK-056-REPAIR-v2.yaml"
     kwargs["path_status_map"] = {(SHA_G, rel_handoff): f"M\t{rel_handoff}"}
     errors = _run_validator_func(_make_valid_handoff(), _make_valid_task_fm(), **kwargs)
     assert any("add-only" in error for error in errors)
@@ -762,7 +863,7 @@ def test_handoff_deleted_at_head_fails() -> None:
     task_fm = _make_valid_task_fm()
     kwargs = _default_git_kwargs()
     # Remove blob at HEAD for handoff file (simulates deletion)
-    rel_handoff = "ai/handoffs/TASK-056-REPAIR-v1.yaml"
+    rel_handoff = "ai/handoffs/TASK-056-REPAIR-v2.yaml"
     if f"HEAD:{rel_handoff}" in kwargs["blob_map"]:
         del kwargs["blob_map"][f"HEAD:{rel_handoff}"]
     errors = _run_validator_func(handoff, task_fm, **kwargs)
@@ -793,7 +894,7 @@ def test_supplied_head_differs_from_ambient_head_record_blob() -> None:
     task_fm = _make_valid_task_fm()
     # Use SHA_F as head; blob at SHA_F for handoff differs from introduction
     kwargs = _default_git_kwargs(head=SHA_F)
-    rel_handoff = "ai/handoffs/TASK-056-REPAIR-v1.yaml"
+    rel_handoff = "ai/handoffs/TASK-056-REPAIR-v2.yaml"
     kwargs["log_map"] = {f"{SHA_B}..{SHA_F}::{rel_handoff}": SHA_G}
     kwargs["blob_map"][f"{SHA_F}:{rel_handoff}"] = SHA_E  # different from SHA_D
     kwargs["merge_base_map"] = {(SHA_B, SHA_F): SHA_B}
@@ -888,7 +989,7 @@ def test_path_outside_handoff_allowed_fails() -> None:
 def test_path_allowed_by_handoff_but_outside_task_fails() -> None:
     """Validator must fail when path is in Handoff allowed but not task allowed."""
     handoff = _make_valid_handoff()
-    handoff["allowed_paths"] = ["file1.md", "file2.py", "ai/handoffs/TASK-056-REPAIR-v1.yaml"]
+    handoff["allowed_paths"] = ["file1.md", "file2.py", "ai/handoffs/TASK-056-REPAIR-v2.yaml"]
     task_fm = _make_valid_task_fm()
     task_fm["allowed_paths"] = ["file1.md"]  # file2.py NOT in task allowed
     kwargs = _default_git_kwargs()
@@ -916,7 +1017,7 @@ def test_rename_outside_allowed_fails() -> None:
     """Validator must fail when a rename target is not in allowed_paths."""
     handoff = _make_valid_handoff()
     task_fm = _make_valid_task_fm()
-    task_fm["allowed_paths"] = ["file1.md", "file2.py", "ai/handoffs/TASK-056-REPAIR-v1.yaml"]
+    task_fm["allowed_paths"] = ["file1.md", "file2.py", "ai/handoffs/TASK-056-REPAIR-v2.yaml"]
     kwargs = _default_git_kwargs()
     kwargs["diff_name_only"] = "file1.md"
     kwargs["diff_name_status"] = "R100\tfile1.md\trenamed_outside.md"
