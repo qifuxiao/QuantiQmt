@@ -43,4 +43,4 @@ tasks:
   - {id: TASK-053, path: backlog/TASK-053-dependency-sequencing-governance.md, status: blocked, depends_on: [TASK-031, TASK-043, TASK-049, TASK-050]}
   - {id: TASK-054, path: completed/TASK-054-miniqmt-m1-delivery-governance.md, status: completed, depends_on: []}
   - {id: TASK-055, path: completed/TASK-055-miniqmt-readonly-environment-probe.md, status: completed, depends_on: [TASK-054]}
-  - {id: TASK-056, path: active/TASK-056-codex-cline-collaboration.md, status: active, depends_on: [TASK-054, TASK-055]}
+  - {id: TASK-056, path: completed/TASK-056-codex-cline-collaboration.md, status: completed, depends_on: [TASK-054, TASK-055]}

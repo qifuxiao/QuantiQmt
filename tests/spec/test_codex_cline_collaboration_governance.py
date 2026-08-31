@@ -87,9 +87,9 @@ def test_template_distinguishes_planning_and_implementation_base() -> None:
 
 
 def test_task_defines_ancestor_relationship() -> None:
-    """The active task must document that Planning Base is an ancestor of
+    """The task must document that Planning Base is an ancestor of
     Implementation Base."""
-    task = _text("tasks/active/TASK-056-codex-cline-collaboration.md")
+    task = _text("tasks/completed/TASK-056-codex-cline-collaboration.md")
     assert "ancestor" in task.lower() or "祖先" in task
 
 
