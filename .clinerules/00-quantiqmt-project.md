@@ -1,17 +1,18 @@
 # QuantiQmt Cline Entry
 
-Before any work:
+## Authority discovery
 
-1. Read `/AGENTS.md` completely.
-2. Read `/spec/README.md` and `/spec/manifest.yaml`.
-3. Read `/tasks/active/README.md` and the single `/tasks/active/TASK-*.md`.
-4. Read every specification named by the task `spec_refs` and any closer `AGENTS.md`.
-5. Check dependencies, git status, `allowed_paths`, `forbidden_paths`, acceptance criteria and
-   `verification.commands`.
+1. Read the root `AGENTS.md` and every closer `AGENTS.md` for a target path.
+2. Read `spec/README.md`, `spec/manifest.yaml`, the single task in
+   `tasks/active/`, and all of its `spec_refs`.
+3. Treat those repository sources as authoritative; this tool entry does not
+   restate their contracts.
 
-Do not implement when there is no active task. Do not activate, widen, complete or waive a task.
-Do not copy business contracts into this file; `spec/` and `AGENTS.md` are the sole authority
-for trading invariants, architecture, and safety constraints.
+## Scope and handoff gate
 
-Use `/ai/workflows/implement-task.md` for implementation evidence and `/ai/workflows/review-task.md`
-for independent Review. Run every task `verification.commands` command before handoff.
+- Execute exactly one active task and obey its dependencies, `allowed_paths`,
+  `forbidden_paths`, acceptance criteria, and `verification.commands`.
+- Read `.clinerules/10-codex-handoff.md` and the Codex-authored Handoff Record
+  before changing files.
+- Stop with `PLAN_BLOCKED` when authority, identity, scope, cleanliness, or
+  required evidence cannot be verified.

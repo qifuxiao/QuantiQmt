@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -166,37 +167,119 @@ def test_workflow_requires_path_audit() -> None:
     assert "path audit" in wf.lower() or "路径审计" in wf
 
 
-# ── .clinerules must not copy business contracts ────────────────────────
+# ── .clinerules are fail-closed reviewed golden text ────────────────────
 
 
-def test_clinerules_reference_not_copy_business_contracts() -> None:
-    """No .clinerules file may embed specific business event, command,
-    DTO, error-code, or state-machine names. Each file must reference
-    the authority chain (AGENTS or spec)."""
-    for path in sorted((ROOT / ".clinerules").glob("*.md")):
-        content = path.read_text(encoding="utf-8")
-        assert "broker.order_reported" not in content
-        assert "order_status_changed" not in content
-        assert "state_changed" not in content
-        assert "order_registered" not in content
-        assert "order_evaluated" not in content
-        assert "AGENTS" in content or "spec" in content
+CLINERULES_GOLDEN = {
+    "00-quantiqmt-project.md": """# QuantiQmt Cline Entry
+
+## Authority discovery
+
+1. Read the root `AGENTS.md` and every closer `AGENTS.md` for a target path.
+2. Read `spec/README.md`, `spec/manifest.yaml`, the single task in
+   `tasks/active/`, and all of its `spec_refs`.
+3. Treat those repository sources as authoritative; this tool entry does not
+   restate their contracts.
+
+## Scope and handoff gate
+
+- Execute exactly one active task and obey its dependencies, `allowed_paths`,
+  `forbidden_paths`, acceptance criteria, and `verification.commands`.
+- Read `.clinerules/10-codex-handoff.md` and the Codex-authored Handoff Record
+  before changing files.
+- Stop with `PLAN_BLOCKED` when authority, identity, scope, cleanliness, or
+  required evidence cannot be verified.
+""",
+    "10-codex-handoff.md": """# Codex Handoff for Cline
+
+## Authority and frozen identity
+
+- Use the root and path-local `AGENTS.md`, `spec/README.md`, `spec/manifest.yaml`,
+  the single active task, and all task `spec_refs` for authority discovery.
+- Read the task's Codex Plan for the Plan version and Planning Base.
+- Read the Codex-authored Handoff Record for the sole frozen
+  Implementation/Repair Base, expected PR Base, task blob, stage paths, and
+  Codex-only paths.
+- A moving ref may only be checked against a frozen SHA; it must not supply,
+  derive, or rewrite that SHA.
+
+## Pre-implementation gates
+
+- Fetch, use the named existing branch, and require a clean worktree.
+- Verify the Handoff topology and blobs against the supplied exact Head before any repair change.
+- Verify Planning Base ancestry, exact Base/PR Base/merge-base identity, task
+  blob identity, dependencies, and the complete Base...Head path set.
+- Bind validation commands to the supplied exact Head, never an ambient moving
+  `HEAD` substituted for it.
+
+## Git and path constraints
+
+- Modify only paths allowed by both the Handoff Record and active task; reject
+  every task-forbidden path and both sides of a rename.
+- Never modify a Codex-only path.
+- Do not rebase, force-push, push directly to `main`, create a replacement PR,
+  or change task/spec scope.
+
+## PLAN_BLOCKED
+
+- Stop and report `PLAN_BLOCKED` with the failing command, exit code, and
+  evidence when any authority, identity, topology, cleanliness, dependency,
+  scope, design, verification, or permission gate fails.
+- Do not improvise a bypass or weaken a fail-closed check.
+
+## Implementation Report
+
+- Report Plan and Packet versions; Planning Base; Handoff commit/blob; expected
+  Base; GitHub PR Base/Head; branch and PR URL.
+- Report changed files, the complete expected-Base...Head path audit,
+  per-acceptance evidence, every command and exit code,
+  first-failure/final-pass evidence, passed/failed/skipped counts, unverified
+  scope, risks, and spec deviations.
+
+## PR mechanics and lifecycle authority
+
+- Commit and push normally to the existing implementation branch, then wait
+  for all GitHub checks and report their links and final states.
+- Do not self-approve, merge, close out, or change task lifecycle state.
+- Independent Review supplies evidence and a verdict only. Authorization is
+  human-only: only a human may authorize activation, merge, closeout, or
+  active-to-completed transition.
+- Automation may mechanically execute a separately recorded and verifiable
+  human authorization; automation is never an alternative authorizer.
+""",
+}
 
 
-# ── Repair v1: .clinerules must be reference-only (no business terms) ──
+def _clinerule_golden_errors(name: str, content: str) -> list[str]:
+    expected = CLINERULES_GOLDEN.get(name)
+    if expected is None:
+        return [f"unreviewed .clinerules file: {name}"]
+    if content != expected:
+        return [f"{name} differs from its reviewed reference-only golden text"]
+    return []
 
 
-BUSINESS_TERMS = ("xtquant", "OrderIntent", "Kill Switch", "OMS", "UNKNOWN")
+def test_clinerules_match_reviewed_reference_only_golden_text() -> None:
+    """Every rule is classified explicitly; unknown files or prose fail closed."""
+    paths = sorted((ROOT / ".clinerules").glob("*.md"))
+    assert {path.name for path in paths} == set(CLINERULES_GOLDEN)
+    for path in paths:
+        assert _clinerule_golden_errors(path.name, path.read_text(encoding="utf-8")) == []
 
 
-def test_clinerules_no_business_terms() -> None:
-    """.clinerules/*.md must not contain trading/business architecture terms."""
-    for path in sorted((ROOT / ".clinerules").glob("*.md")):
-        content = path.read_text(encoding="utf-8")
-        for term in BUSINESS_TERMS:
-            assert term not in content, (
-                f"{path.name} contains business term {term!r}; refer to AGENTS.md / spec/ instead"
-            )
+def test_clinerules_unknown_business_vocabulary_fails_closed() -> None:
+    """Unknown business prose must fail without adding terms to a blacklist."""
+    name = "00-quantiqmt-project.md"
+    constructed = (
+        CLINERULES_GOLDEN[name]
+        + "\nRisk stale or timeout must fail-closed before broker dispatch; "
+        "final prices must not use float.\n"
+    )
+    assert _clinerule_golden_errors(name, constructed)
+
+
+def test_clinerules_unknown_file_fails_closed() -> None:
+    assert _clinerule_golden_errors("99-unclassified.md", "# Unclassified\n")
 
 
 # ── Repair v1: Review must use three-dot diff ─────────────────────────
@@ -251,6 +334,47 @@ def test_human_only_authorization_explicit() -> None:
     assert "不能授权 closeout" in wf or "cannot authorize closeout" in wf.lower(), (
         "must state Reviewer cannot authorize closeout"
     )
+
+
+PERSISTENT_COLLABORATION_FILES = (
+    "AGENTS.md",
+    ".clinerules/00-quantiqmt-project.md",
+    ".clinerules/10-codex-handoff.md",
+    "ai/adapters/cline.md",
+    "ai/workflows/team-collaboration.md",
+    "tasks/templates/task-template.md",
+)
+
+ALTERNATIVE_AUTHORIZER_PATTERNS = (
+    re.compile(
+        r"human\s+or\s+(?:an?\s+)?(?:independent\s+)?"
+        r"(?:reviewer|review agent|authorized workflow|automation)",
+        re.IGNORECASE,
+    ),
+    re.compile(r"人类或(?:独立\s*)?(?:Reviewer|Review Agent|授权流程|自动化)", re.IGNORECASE),
+)
+
+
+def _alternative_authorizer_errors(text: str) -> list[str]:
+    return [pattern.pattern for pattern in ALTERNATIVE_AUTHORIZER_PATTERNS if pattern.search(text)]
+
+
+def test_all_persistent_collaboration_files_reject_alternative_authorizers() -> None:
+    """Positive human-only prose cannot mask a contradictory authorization sentence."""
+    for relative_path in PERSISTENT_COLLABORATION_FILES:
+        assert _alternative_authorizer_errors(_text(relative_path)) == [], relative_path
+
+
+def test_contradictory_lifecycle_sentences_fail_even_with_positive_text() -> None:
+    positive = "Only a human may authorize activation, merge, closeout, and state transition."
+    contradictions = (
+        "A human or independent Review Agent may authorize closeout.",
+        "A human or authorized workflow may move the task to completed.",
+        "由人类或独立 Review Agent 授权状态迁移。",
+        "由人类或授权流程创建 Closeout PR。",
+    )
+    for contradiction in contradictions:
+        assert _alternative_authorizer_errors(f"{positive}\n{contradiction}"), contradiction
 
 
 # ── Repair v1: AGENTS.md must also state three verdicts ───────────────

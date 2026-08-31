@@ -1,4 +1,4 @@
-"""Executable tests for the AI Handoff validator (TASK-056 Plan v3 Repair + ADDENDUM-1).
+"""Executable tests for the AI Handoff validator (TASK-056 Repair Addendum 2).
 
 These tests prove the validator fails-closed on:
 - missing/malformed Handoff Record
@@ -28,6 +28,9 @@ import sys
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
+
+import pytest
+import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
 VALIDATOR = ROOT / "scripts" / "validate_ai_handoff.py"
@@ -70,22 +73,14 @@ def test_mypy_passes() -> None:
         text=True,
         cwd=ROOT,
     )
-    # The 2 pre-existing ctypes errors in readonly_probe.py are known;
-    # we only require zero NEW errors in our validator
-    if result.returncode != 0:
-        # Allow only pre-existing ctypes errors in readonly_probe.py
-        lines = [ln for ln in result.stdout.splitlines() if "error:" in ln]
-        new_errors = [
-            ln for ln in lines if "validate_ai_handoff" not in ln and "readonly_probe" not in ln
-        ]
-        assert not new_errors, f"new mypy errors: {new_errors}"
+    assert result.returncode == 0, result.stdout + result.stderr
 
 
 # ── Integration: real frozen handoff ─────────────────────────────────────
 
 
-def test_validator_passes_on_frozen_handoff() -> None:
-    """Validator must pass on the real frozen Handoff Record in this repo."""
+def test_optional_checkout_smoke_validator_passes_on_frozen_handoff() -> None:
+    """Optionally smoke-test the real checkout when its remote history is available."""
     # Skip if origin/main is not available (shallow CI checkout)
     probe = subprocess.run(
         ["git", "rev-parse", "origin/main"],
@@ -94,8 +89,6 @@ def test_validator_passes_on_frozen_handoff() -> None:
         cwd=ROOT,
     )
     if probe.returncode != 0:
-        import pytest
-
         pytest.skip("origin/main not available (shallow clone)")
     result = subprocess.run(
         [
@@ -115,6 +108,226 @@ def test_validator_passes_on_frozen_handoff() -> None:
         cwd=ROOT,
     )
     assert result.returncode == 0, f"stdout={result.stdout}\nstderr={result.stderr}"
+
+
+# ── Non-skipping real-Git topology acceptance tests ────────────────────
+
+
+def _git(repo: Path, *args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
+    """Run Git in a constructed repository."""
+    return subprocess.run(
+        ["git", *args],
+        cwd=repo,
+        capture_output=True,
+        text=True,
+        check=check,
+    )
+
+
+def _commit_all(repo: Path, message: str) -> str:
+    _git(repo, "add", "--all")
+    _git(repo, "commit", "-m", message)
+    return _git(repo, "rev-parse", "HEAD").stdout.strip()
+
+
+def _write(repo: Path, relative: str, content: str) -> None:
+    path = repo / relative
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content, encoding="utf-8")
+
+
+def _handoff_data(base: str, task_blob: str, superseded: str) -> dict[str, Any]:
+    return {
+        "schema_version": 1,
+        "task_id": "TASK-056",
+        "packet_version": "TASK-056-REPAIR-v1",
+        "plan_version": "TASK-056-PLAN-v3",
+        "planning_base_sha": base,
+        "expected_base_sha": base,
+        "expected_pr_base_sha": base,
+        "task_blob_sha": task_blob,
+        "allowed_paths": [
+            "repair.txt",
+            "ai/handoffs/TASK-056-REPAIR-v1.yaml",
+        ],
+        "codex_only_paths": ["ai/handoffs/TASK-056-REPAIR-v1.yaml"],
+        "repair_context": {"superseded_head_sha": superseded},
+    }
+
+
+def _create_real_git_topology(tmp_path: Path, scenario: str = "valid") -> dict[str, Any]:
+    """Create real Base/Handoff/superseded/sync/repair history for CLI tests."""
+    repo = tmp_path / scenario
+    repo.mkdir()
+    _git(repo, "init")
+    _git(repo, "config", "user.name", "Topology Test")
+    _git(repo, "config", "user.email", "topology@example.invalid")
+    task_rel = "tasks/active/TASK-056-codex-cline-collaboration.md"
+    handoff_rel = "ai/handoffs/TASK-056-REPAIR-v1.yaml"
+    _write(
+        repo,
+        task_rel,
+        """---
+id: TASK-056
+status: active
+allowed_paths:
+  - repair.txt
+  - ai/handoffs/TASK-056-REPAIR-v1.yaml
+forbidden_paths:
+  - forbidden/**
+---
+\n# Constructed task\n""",
+    )
+    _write(repo, "baseline.txt", "base\n")
+    base = _commit_all(repo, "base")
+    _git(repo, "branch", "frozen-base", base)
+    task_blob = _git(repo, "rev-parse", f"{base}:{task_rel}").stdout.strip()
+
+    _git(repo, "checkout", "-b", "superseded", base)
+    _write(repo, "repair.txt", "superseded implementation\n")
+    superseded = _commit_all(repo, "superseded implementation")
+
+    if scenario in {"late_introduction", "wrong_parent"}:
+        if scenario == "late_introduction":
+            _write(repo, "repair.txt", "late repair before handoff\n")
+            _commit_all(repo, "repair before handoff")
+        else:
+            _git(repo, "commit", "--allow-empty", "-m", "non-repair parent")
+        record = _handoff_data(base, task_blob, superseded)
+        _write(repo, handoff_rel, yaml.safe_dump(record, sort_keys=False))
+        intro = _commit_all(repo, "late handoff")
+        return {
+            "repo": repo,
+            "base": base,
+            "superseded": superseded,
+            "intro": intro,
+            "head": intro,
+            "task": task_rel,
+            "handoff": handoff_rel,
+        }
+
+    _git(repo, "checkout", "-b", "handoff", base)
+    record = _handoff_data(base, task_blob, superseded)
+    _write(repo, handoff_rel, yaml.safe_dump(record, sort_keys=False))
+    intro = _commit_all(repo, "Codex add-only handoff")
+
+    _git(repo, "checkout", "superseded")
+    if scenario == "pre_handoff_repair":
+        _write(repo, "repair.txt", "repair created before handoff incorporation\n")
+        _commit_all(repo, "pre-handoff repair")
+    _git(repo, "merge", "--no-ff", "handoff", "-m", "synchronize handoff")
+
+    if scenario != "pre_handoff_repair":
+        _write(repo, "repair.txt", "post-handoff repair\n")
+        _commit_all(repo, "post-handoff repair")
+
+    if scenario == "record_modified":
+        with (repo / handoff_rel).open("a", encoding="utf-8") as stream:
+            stream.write("tampered: true\n")
+        _commit_all(repo, "modify handoff")
+    elif scenario == "record_reintroduced":
+        original = (repo / handoff_rel).read_text(encoding="utf-8")
+        (repo / handoff_rel).unlink()
+        _commit_all(repo, "delete handoff")
+        _write(repo, handoff_rel, original)
+        _commit_all(repo, "reintroduce handoff")
+    elif scenario == "path_violation":
+        _write(repo, "forbidden/rogue.txt", "out of scope\n")
+        _commit_all(repo, "forbidden path")
+
+    return {
+        "repo": repo,
+        "base": base,
+        "superseded": superseded,
+        "intro": intro,
+        "head": _git(repo, "rev-parse", "HEAD").stdout.strip(),
+        "task": task_rel,
+        "handoff": handoff_rel,
+    }
+
+
+def _run_real_git_cli(
+    topology: dict[str, Any], pr_base: str | None = None
+) -> subprocess.CompletedProcess[str]:
+    args = [
+        sys.executable,
+        str(VALIDATOR),
+        "--task",
+        str(topology["task"]),
+        "--handoff",
+        str(topology["handoff"]),
+        "--base-ref",
+        "frozen-base",
+        "--head",
+        str(topology["head"]),
+    ]
+    if pr_base is not None:
+        args.extend(["--pr-base", pr_base])
+    return subprocess.run(
+        args,
+        cwd=topology["repo"],
+        capture_output=True,
+        text=True,
+    )
+
+
+def test_real_git_topology_success(tmp_path: Path) -> None:
+    topology = _create_real_git_topology(tmp_path)
+    result = _run_real_git_cli(topology, topology["base"])
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_real_git_topology_rejects_late_introduction(tmp_path: Path) -> None:
+    topology = _create_real_git_topology(tmp_path, "late_introduction")
+    result = _run_real_git_cli(topology, topology["base"])
+    assert result.returncode != 0
+    assert "parent" in result.stderr.lower() or "before" in result.stderr.lower()
+
+
+def test_real_git_topology_rejects_wrong_parent(tmp_path: Path) -> None:
+    topology = _create_real_git_topology(tmp_path, "wrong_parent")
+    result = _run_real_git_cli(topology, topology["base"])
+    assert result.returncode != 0
+    assert "parent" in result.stderr.lower()
+
+
+def test_real_git_topology_rejects_pre_handoff_repair(tmp_path: Path) -> None:
+    topology = _create_real_git_topology(tmp_path, "pre_handoff_repair")
+    result = _run_real_git_cli(topology, topology["base"])
+    assert result.returncode != 0
+    assert "repair" in result.stderr.lower() and "descendant" in result.stderr.lower()
+
+
+@pytest.mark.parametrize("scenario", ["record_modified", "record_reintroduced"])
+def test_real_git_topology_rejects_record_touch(tmp_path: Path, scenario: str) -> None:
+    topology = _create_real_git_topology(tmp_path, scenario)
+    result = _run_real_git_cli(topology, topology["base"])
+    assert result.returncode != 0
+    assert "handoff record" in result.stderr.lower()
+
+
+def test_real_git_topology_rejects_wrong_pr_base(tmp_path: Path) -> None:
+    topology = _create_real_git_topology(tmp_path)
+    result = _run_real_git_cli(topology, topology["intro"])
+    assert result.returncode != 0
+    assert "pr base" in result.stderr.lower()
+
+
+def test_real_git_topology_rejects_path_violation(tmp_path: Path) -> None:
+    topology = _create_real_git_topology(tmp_path, "path_violation")
+    result = _run_real_git_cli(topology, topology["base"])
+    assert result.returncode != 0
+    assert "forbidden" in result.stderr.lower() or "allowed_paths" in result.stderr
+
+
+def test_real_git_topology_binds_all_queries_to_supplied_head(tmp_path: Path) -> None:
+    topology = _create_real_git_topology(tmp_path)
+    supplied_head = topology["head"]
+    _write(topology["repo"], "forbidden/ambient-only.txt", "must be ignored\n")
+    _commit_all(topology["repo"], "ambient head moves after supplied head")
+    result = _run_real_git_cli(topology, topology["base"])
+    assert topology["head"] == supplied_head
+    assert result.returncode == 0, result.stdout + result.stderr
 
 
 # ── Negative: missing handoff file ──────────────────────────────────────
@@ -153,6 +366,9 @@ def _mock_git_responses(
     is_ancestor_map: dict[tuple[str, str], bool] | None = None,
     blob_map: dict[str, str] | None = None,
     log_map: dict[str, str] | None = None,
+    parent_map: dict[str, list[str]] | None = None,
+    path_status_map: dict[tuple[str, str], str] | None = None,
+    repair_log_map: dict[str, str] | None = None,
     diff_name_only: str = "",
     diff_name_status: str = "",
 ) -> Any:
@@ -162,6 +378,9 @@ def _mock_git_responses(
     is_ancestor_map = is_ancestor_map or {}
     blob_map = blob_map or {}
     log_map = log_map or {}
+    parent_map = parent_map or {}
+    path_status_map = path_status_map or {}
+    repair_log_map = repair_log_map or {}
 
     def fake_run(cmd: list[str], **kwargs: Any) -> subprocess.CompletedProcess:
         if cmd[0] != "git":
@@ -215,6 +434,30 @@ def _mock_git_responses(
                 return _result(0, log_map[key] + "\n", "")
             return _result(0, "", "")
 
+        # git rev-list --parents -n 1 <commit>
+        if args[0] == "rev-list" and "--parents" in args:
+            commit = args[-1]
+            if commit in parent_map:
+                return _result(0, " ".join([commit, *parent_map[commit]]) + "\n", "")
+            return _result(128, "", f"unknown commit {commit}")
+
+        # git rev-list --full-history <base>..<head> -- <paths...>
+        if args[0] == "rev-list" and "--full-history" in args:
+            range_arg = next((arg for arg in args if ".." in arg), "")
+            if range_arg in repair_log_map:
+                return _result(0, repair_log_map[range_arg] + "\n", "")
+            return _result(0, "", "")
+
+        # git diff-tree ... <commit> -- <path>
+        if args[0] == "diff-tree":
+            separator = args.index("--")
+            commit = args[separator - 1]
+            path_arg = args[separator + 1]
+            key = (commit, path_arg)
+            if key in path_status_map:
+                return _result(0, path_status_map[key] + "\n", "")
+            return _result(0, "", "")
+
         # git diff --name-only --no-renames base...head
         if args[0] == "diff" and "--name-only" in args:
             return _result(0, diff_name_only + "\n", "")
@@ -241,6 +484,7 @@ def _make_valid_handoff() -> dict[str, Any]:
         "task_blob_sha": SHA_C,
         "allowed_paths": ["file1.md", "file2.py", "ai/handoffs/TASK-056-REPAIR-v1.yaml"],
         "codex_only_paths": ["ai/handoffs/TASK-056-REPAIR-v1.yaml"],
+        "repair_context": {"superseded_head_sha": SHA_E},
     }
 
 
@@ -266,6 +510,7 @@ def _run_validator_func(
     handoff: dict[str, Any],
     task_fm: dict[str, Any],
     head: str = "HEAD",
+    pr_base: str | None = None,
     **git_kwargs: Any,
 ) -> list[str]:
     """Run the validator's core logic with mocked git."""
@@ -276,7 +521,7 @@ def _run_validator_func(
             handoff=handoff,
             base_ref="origin/main",
             head=head,
-            pr_base=None,
+            pr_base=pr_base,
             cwd=ROOT,
             task_fm=task_fm,
             handoff_path=HANDOFF,
@@ -291,7 +536,12 @@ def _default_git_kwargs(head: str = "HEAD") -> dict[str, Any]:
     return {
         "rev_parse_map": {"origin/main": SHA_B, "HEAD": SHA_D},
         "merge_base_map": {(SHA_B, head): SHA_B},
-        "is_ancestor_map": {(SHA_A, SHA_B): True},
+        "is_ancestor_map": {
+            (SHA_A, SHA_B): True,
+            (SHA_G, head): True,
+            (SHA_E, head): True,
+            (SHA_G, SHA_G): True,
+        },
         "blob_map": {
             f"{base}:{rel_task}": SHA_C,
             f"{head}:{rel_task}": SHA_C,
@@ -299,6 +549,9 @@ def _default_git_kwargs(head: str = "HEAD") -> dict[str, Any]:
             f"{head}:{rel_handoff}": SHA_D,
         },
         "log_map": {f"{base}..{head}::{rel_handoff}": SHA_G},
+        "parent_map": {SHA_G: [SHA_B]},
+        "path_status_map": {(SHA_G, rel_handoff): f"A\t{rel_handoff}"},
+        "repair_log_map": {f"{SHA_E}..{head}": SHA_G},
         "diff_name_only": "file1.md\nfile2.py",
         "diff_name_status": "A\tfile1.md\tfile1.md\nA\tfile2.py\tfile2.py",
     }
@@ -325,6 +578,27 @@ def test_schema_invalid_sha_format_fails() -> None:
     assert any("sha" in e.lower() for e in errors)
 
 
+@pytest.mark.parametrize(
+    ("repair_context", "expected_fragment"),
+    [
+        (None, "repair_context"),
+        ({}, "superseded_head_sha"),
+        ({"superseded_head_sha": "not-a-sha"}, "superseded_head_sha"),
+    ],
+)
+def test_repair_context_structure_fails_closed(
+    repair_context: Any,
+    expected_fragment: str,
+) -> None:
+    handoff = _make_valid_handoff()
+    if repair_context is None:
+        del handoff["repair_context"]
+    else:
+        handoff["repair_context"] = repair_context
+    errors = _run_validator_func(handoff, _make_valid_task_fm(), **_default_git_kwargs())
+    assert any(expected_fragment in error for error in errors)
+
+
 # ── Negative: base / PR base identity ──────────────────────────────────
 
 
@@ -335,6 +609,19 @@ def test_divergent_base_and_pr_base_fails() -> None:
     task_fm = _make_valid_task_fm()
     errors = _run_validator_func(handoff, task_fm, **_default_git_kwargs())
     assert any("expected_base_sha" in e and "expected_pr_base_sha" in e for e in errors)
+
+
+def test_supplied_pr_base_different_from_both_frozen_bases_fails() -> None:
+    """Core validation must reject an external PR Base distinct from frozen Base."""
+    handoff = _make_valid_handoff()
+    task_fm = _make_valid_task_fm()
+    errors = _run_validator_func(
+        handoff,
+        task_fm,
+        pr_base=SHA_F,
+        **_default_git_kwargs(),
+    )
+    assert any("PR base" in error and SHA_F in error for error in errors)
 
 
 # ── Negative tests: handoff immutability ───────────────────────────────
@@ -374,6 +661,52 @@ def test_handoff_introduced_then_modified_fails() -> None:
     errors = _run_validator_func(handoff, task_fm, **kwargs)
     lowered = [e.lower() for e in errors]
     assert any("handoff" in e and "modified" in e for e in lowered)
+
+
+def test_handoff_introduction_parent_must_equal_expected_base() -> None:
+    kwargs = _default_git_kwargs()
+    kwargs["parent_map"] = {SHA_G: [SHA_F]}
+    errors = _run_validator_func(_make_valid_handoff(), _make_valid_task_fm(), **kwargs)
+    assert any("parent" in error.lower() and "expected_base_sha" in error for error in errors)
+
+
+def test_handoff_introduction_must_have_exactly_one_parent() -> None:
+    kwargs = _default_git_kwargs()
+    kwargs["parent_map"] = {SHA_G: [SHA_B, SHA_F]}
+    errors = _run_validator_func(_make_valid_handoff(), _make_valid_task_fm(), **kwargs)
+    assert any("exactly one parent" in error for error in errors)
+
+
+def test_handoff_introduction_must_be_add_only() -> None:
+    kwargs = _default_git_kwargs()
+    rel_handoff = "ai/handoffs/TASK-056-REPAIR-v1.yaml"
+    kwargs["path_status_map"] = {(SHA_G, rel_handoff): f"M\t{rel_handoff}"}
+    errors = _run_validator_func(_make_valid_handoff(), _make_valid_task_fm(), **kwargs)
+    assert any("add-only" in error for error in errors)
+
+
+def test_superseded_head_must_be_ancestor_of_supplied_head() -> None:
+    kwargs = _default_git_kwargs()
+    kwargs["is_ancestor_map"] = {
+        (SHA_A, SHA_B): True,
+        (SHA_G, "HEAD"): True,
+        (SHA_E, "HEAD"): False,
+    }
+    errors = _run_validator_func(_make_valid_handoff(), _make_valid_task_fm(), **kwargs)
+    assert any("superseded_head_sha" in error and "supplied head" in error for error in errors)
+
+
+def test_pre_handoff_repair_stage_commit_fails() -> None:
+    kwargs = _default_git_kwargs()
+    kwargs["repair_log_map"] = {f"{SHA_E}..HEAD": SHA_F}
+    kwargs["is_ancestor_map"] = {
+        (SHA_A, SHA_B): True,
+        (SHA_G, "HEAD"): True,
+        (SHA_E, "HEAD"): True,
+        (SHA_G, SHA_F): False,
+    }
+    errors = _run_validator_func(_make_valid_handoff(), _make_valid_task_fm(), **kwargs)
+    assert any("repair-stage" in error and "descendants" in error for error in errors)
 
 
 def test_handoff_deleted_at_head_fails() -> None:

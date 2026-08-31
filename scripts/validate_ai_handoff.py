@@ -8,7 +8,7 @@ Checks (all fail-closed):
   3. PR base: --pr-base (if given) equals expected_pr_base_sha == expected_base_sha.
   4. Planning ancestry: planning_base_sha is ancestor of expected_base_sha.
   5. Task blob: frozen at expected_base_sha AND unchanged at supplied head.
-  6. Handoff immutability: Record introduced exactly once in base..head, blob unchanged at head.
+  6. Handoff freeze topology: unique add-only introduction directly on Base, before repair.
   7. Path audit: all changed paths within Handoff allowed_paths AND task allowed_paths,
      none in forbidden_paths.
   8. Rename detection: both sides of renames must be in both allowed sets.
@@ -45,6 +45,7 @@ REQUIRED_FIELDS = (
     "task_blob_sha",
     "allowed_paths",
     "codex_only_paths",
+    "repair_context",
 )
 
 SHA_FIELDS = ("planning_base_sha", "expected_base_sha", "expected_pr_base_sha", "task_blob_sha")
@@ -91,6 +92,48 @@ def git_is_ancestor(ancestor: str, descendant: str, cwd: Path) -> bool:
 def git_log_commits_touching(base: str, head: str, path: str, cwd: Path) -> list[str]:
     """Get all commit SHAs in base..head that touched the given path."""
     output = git("log", "--format=%H", f"{base}..{head}", "--", path, cwd=cwd)
+    return [line for line in output.splitlines() if line]
+
+
+def git_commit_parents(commit: str, cwd: Path) -> list[str]:
+    """Return the parents of an exact commit."""
+    output = git("rev-list", "--parents", "-n", "1", commit, cwd=cwd)
+    parts = output.split()
+    if not parts or parts[0] != commit:
+        raise subprocess.CalledProcessError(128, ["git", "rev-list", commit])
+    return parts[1:]
+
+
+def git_path_status(commit: str, path: str, cwd: Path) -> list[str]:
+    """Return name-status lines for a path in an exact commit."""
+    output = git(
+        "diff-tree",
+        "--no-commit-id",
+        "--name-status",
+        "-r",
+        commit,
+        "--",
+        path,
+        cwd=cwd,
+    )
+    return [line for line in output.splitlines() if line]
+
+
+def git_commits_touching_paths(
+    base: str,
+    head: str,
+    paths: list[str],
+    cwd: Path,
+) -> list[str]:
+    """Return exact commits in base..head that touch any supplied path."""
+    output = git(
+        "rev-list",
+        "--full-history",
+        f"{base}..{head}",
+        "--",
+        *paths,
+        cwd=cwd,
+    )
     return [line for line in output.splitlines() if line]
 
 
@@ -149,6 +192,8 @@ def validate_schema(handoff: dict[str, Any]) -> list[str]:
         ap = handoff["allowed_paths"]
         if not isinstance(ap, list) or not ap:
             errors.append("allowed_paths must be a non-empty list")
+        elif not all(isinstance(path, str) and path for path in ap):
+            errors.append("allowed_paths must contain only non-empty strings")
     if "codex_only_paths" in handoff:
         cop = handoff["codex_only_paths"]
         if not isinstance(cop, list) or not cop:
@@ -165,6 +210,19 @@ def validate_schema(handoff: dict[str, Any]) -> list[str]:
             f"expected_base_sha {handoff['expected_base_sha']} != "
             f"expected_pr_base_sha {handoff['expected_pr_base_sha']}"
         )
+    if "repair_context" in handoff:
+        repair_context = handoff["repair_context"]
+        if not isinstance(repair_context, dict):
+            errors.append("repair_context must be a mapping")
+        else:
+            superseded = repair_context.get("superseded_head_sha")
+            if superseded is None:
+                errors.append("repair_context missing required field: superseded_head_sha")
+            elif not isinstance(superseded, str) or not SHA_RE.match(superseded):
+                errors.append(
+                    "repair_context.superseded_head_sha is not a valid "
+                    f"40-char lowercase hex SHA: {superseded!r}"
+                )
     return errors
 
 
@@ -244,13 +302,14 @@ def validate_task_blob(
     return errors
 
 
-def validate_handoff_immutable(
+def validate_handoff_freeze_topology(
     handoff_path: Path,
     base: str,
     head: str,
+    handoff: dict[str, Any],
     cwd: Path,
 ) -> list[str]:
-    """Check Handoff Record was introduced exactly once in base..head and unchanged at head."""
+    """Prove the supplied Head descends from an immutable pre-repair Handoff."""
     rel_handoff = handoff_path.relative_to(cwd).as_posix()
 
     # Discover all commits in base..head that touched the handoff file
@@ -272,6 +331,51 @@ def validate_handoff_immutable(
         ]
 
     intro_commit = commits[0]
+
+    try:
+        parents = git_commit_parents(intro_commit, cwd)
+    except subprocess.CalledProcessError as exc:
+        return [f"cannot read parents for handoff introduction {intro_commit}: {exc}"]
+    if len(parents) != 1:
+        return [
+            f"handoff introduction {intro_commit} must have exactly one parent; "
+            f"found {len(parents)}"
+        ]
+    if parents[0] != base:
+        return [f"handoff introduction parent {parents[0]} does not equal expected_base_sha {base}"]
+
+    try:
+        path_status = git_path_status(intro_commit, rel_handoff, cwd)
+    except subprocess.CalledProcessError as exc:
+        return [f"cannot inspect handoff introduction diff {intro_commit}: {exc}"]
+    if path_status != [f"A\t{rel_handoff}"]:
+        return [
+            f"handoff introduction {intro_commit} must add-only {rel_handoff}; "
+            f"found {path_status!r}"
+        ]
+
+    if not git_is_ancestor(intro_commit, head, cwd):
+        return [f"handoff introduction {intro_commit} is not an ancestor of supplied head {head}"]
+
+    repair_context = handoff["repair_context"]
+    assert isinstance(repair_context, dict)
+    superseded = str(repair_context["superseded_head_sha"])
+    if not git_is_ancestor(superseded, head, cwd):
+        return [f"superseded_head_sha {superseded} is not an ancestor of supplied head {head}"]
+
+    repair_paths = [str(path) for path in handoff["allowed_paths"]]
+    try:
+        repair_commits = git_commits_touching_paths(superseded, head, repair_paths, cwd)
+    except subprocess.CalledProcessError as exc:
+        return [f"cannot audit repair-stage commit ordering for supplied head {head}: {exc}"]
+    premature = [
+        commit for commit in repair_commits if not git_is_ancestor(intro_commit, commit, cwd)
+    ]
+    if premature:
+        return [
+            "repair-stage path commit(s) are not descendants of the Handoff introduction "
+            f"{intro_commit}: {premature}"
+        ]
 
     # Blob at introduction commit
     try:
@@ -395,10 +499,10 @@ def run_validation(
         base = str(handoff["expected_base_sha"])
         errors.extend(validate_task_blob(handoff, task_path, base, head, cwd))
 
-    # 6. Handoff immutability (introduced once, unchanged at supplied head)
+    # 6. Handoff freeze topology and immutability, all bound to supplied head
     if handoff_path is not None:
         base = str(handoff["expected_base_sha"])
-        errors.extend(validate_handoff_immutable(handoff_path, base, head, cwd))
+        errors.extend(validate_handoff_freeze_topology(handoff_path, base, head, handoff, cwd))
 
     # 7. Path audit (Handoff allowed_paths AND task allowed_paths AND forbidden)
     base = str(handoff["expected_base_sha"])
@@ -416,7 +520,11 @@ def main() -> int:
     parser.add_argument("--pr-base", default=None, help="GitHub PR base SHA (optional)")
     args = parser.parse_args()
 
-    cwd = Path(__file__).resolve().parents[1]
+    try:
+        cwd = Path(git("rev-parse", "--show-toplevel", cwd=Path.cwd())).resolve()
+    except subprocess.CalledProcessError as exc:
+        print(f"FAIL: current directory is not a readable Git repository: {exc}", file=sys.stderr)
+        return 1
     task_path = Path(args.task)
     handoff_path = Path(args.handoff)
     if not task_path.is_absolute():

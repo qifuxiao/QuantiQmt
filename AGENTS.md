@@ -95,7 +95,8 @@
 1. 执行 task 中所有 `verification.commands`。
 2. 检查每条 acceptance criterion，并记录证据。
 3. 报告修改文件、测试结果、未解决风险和规范偏差。
-4. 不得自行把任务从 active 移到 completed；由人类或独立 Review Agent 验收后移动。
+4. 不得自行把任务从 active 移到 completed；独立 Review 只提供完成证据，只有人类可以
+   授权 active → completed 状态迁移。自动化只能机械执行已经单独记录且可核验的人类授权。
 
 测试无法执行时不得声称完成，必须说明阻塞原因和未验证范围。
 

@@ -33,11 +33,13 @@
 → 对方 Review 会话只读审查（APPROVE / REQUEST_CHANGES / BLOCKED）
 → REQUEST_CHANGES 则开发会话修复后重新 Review
 → APPROVE 后人类合并 PR
-→ 人类授权 closeout：协调会话检查 main、创建/执行 completion PR
+→ 人类单独记录并授权 closeout：协调会话仅机械检查 main、创建/执行 completion PR
 → 再选择下一任务
 ```
 
-实现 PR 合并不等于任务完成。任务只有在独立 Review 通过，并由人类或授权流程把 task 从 `tasks/active/` 移入 `tasks/completed/` 后，才算 completed。
+实现 PR 合并不等于任务完成。独立 Review 只提供完成证据；只有人类可以授权 task 从
+`tasks/active/` 移入 `tasks/completed/`。自动化只能机械执行已经单独记录且可核验的人类授权，
+不能作为替代授权者。
 
 ## 交接物与 PR 生命周期
 
@@ -56,9 +58,10 @@
 1. **Implementation PR**：Cline 推送实现变更。独立 Codex Review 会话只读审查
    **精确 Head SHA**，结论仅限 `APPROVE`、`REQUEST_CHANGES` 或 `BLOCKED`。
    Head SHA 改变后旧 Review 自动失效（invalidated），必须重新 Review。
-2. **Closeout PR**：在 Implementation PR 合并后，由人类或授权流程创建，
+2. **Closeout PR**：在 Implementation PR 合并后且人类授权已经单独记录并可核验时创建，
    核验独立 Review 结论、CI 结果、merge commit 和人类授权，将 task 从
-   `tasks/active/` 移入 `tasks/completed/` 并更新 `tasks/index.yaml`。
+   `tasks/active/` 移入 `tasks/completed/` 并更新 `tasks/index.yaml`。自动化只能机械执行该
+   人类授权，不能自行授权创建 Closeout PR 或状态迁移。
 
 ### Path audit
 

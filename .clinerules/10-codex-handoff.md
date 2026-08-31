@@ -1,87 +1,56 @@
-# Cline Codex Handoff Protocol
+# Codex Handoff for Cline
 
-This file defines the cross-server handoff constraints between Codex (planning / review)
-and Cline (implementation). It references `AGENTS.md` and `spec/` but does **not** copy
-business contract content.
+## Authority and frozen identity
 
-## Authority chain
+- Use the root and path-local `AGENTS.md`, `spec/README.md`, `spec/manifest.yaml`,
+  the single active task, and all task `spec_refs` for authority discovery.
+- Read the task's Codex Plan for the Plan version and Planning Base.
+- Read the Codex-authored Handoff Record for the sole frozen
+  Implementation/Repair Base, expected PR Base, task blob, stage paths, and
+  Codex-only paths.
+- A moving ref may only be checked against a frozen SHA; it must not supply,
+  derive, or rewrite that SHA.
 
-Read in order before any modification:
+## Pre-implementation gates
 
-1. `AGENTS.md`
-2. `spec/manifest.yaml`
-3. the single active task in `tasks/active/`
-4. all task `spec_refs`
-5. this file (`.clinerules/10-codex-handoff.md`)
+- Fetch, use the named existing branch, and require a clean worktree.
+- Verify the Handoff topology and blobs against the supplied exact Head before any repair change.
+- Verify Planning Base ancestry, exact Base/PR Base/merge-base identity, task
+  blob identity, dependencies, and the complete Base...Head path set.
+- Bind validation commands to the supplied exact Head, never an ambient moving
+  `HEAD` substituted for it.
 
-## Pre-flight (before any modification)
+## Git and path constraints
 
-1. Run `git fetch origin --prune`.
-2. Confirm the worktree is **clean** (`git status --porcelain` must be empty).
-   A **dirty** worktree is a `PLAN_BLOCKED` condition.
-3. Read the **Codex-authored Handoff Record** (the YAML file referenced by the
-   repair context). The `expected_base_sha` in the Handoff Record is the sole
-   authoritative Implementation/Repair Base SHA. Cline may verify that a ref
-   (e.g. `origin/main`) **resolves to** that frozen SHA, but Cline must not
-   derive, infer, or write the value from `origin/main` or the task file.
-4. Confirm the **Planning Base SHA** (from the task Plan section) is an ancestor
-   of the Implementation Base (`git merge-base --is-ancestor <Planning Base> <Implementation Base>` exit 0).
-5. Confirm the branch was created from the exact Implementation Base.
-6. If any check fails, return **PLAN_BLOCKED** with the failing command, exit code,
-   and evidence. Do not proceed, improvise, or modify task / spec to work around the
-   block.
+- Modify only paths allowed by both the Handoff Record and active task; reject
+  every task-forbidden path and both sides of a rename.
+- Never modify a Codex-only path.
+- Do not rebase, force-push, push directly to `main`, create a replacement PR,
+  or change task/spec scope.
 
-## PLAN_BLOCKED conditions
+## PLAN_BLOCKED
 
-Return `PLAN_BLOCKED` (stop and report; do **not** improvise) when any of the
-following is true:
+- Stop and report `PLAN_BLOCKED` with the failing command, exit code, and
+  evidence when any authority, identity, topology, cleanliness, dependency,
+  scope, design, verification, or permission gate fails.
+- Do not improvise a bypass or weaken a fail-closed check.
 
-- The worktree is **dirty** (untracked, modified, or staged files outside the
-  current task scope).
-- The Implementation Base SHA does not match the recorded value, or the Planning
-  Base is not an ancestor of the Implementation Base.
-- The active task count is not exactly one, or dependency status is unexpected.
-- A **design gap** is detected that would require modifying `spec/`, the task,
-  or adding a new business contract.
-- A required path is not in `allowed_paths`, or a forbidden path would be touched.
-- Verification commands cannot be executed or pass.
-- GitHub permissions are insufficient to push or create a PR.
+## Implementation Report
 
-`PLAN_BLOCKED` must include: the failing command, exit code, and evidence.
-Cline must not substitute its own plan or modify task / spec to work around the
-block.
+- Report Plan and Packet versions; Planning Base; Handoff commit/blob; expected
+  Base; GitHub PR Base/Head; branch and PR URL.
+- Report changed files, the complete expected-Base...Head path audit,
+  per-acceptance evidence, every command and exit code,
+  first-failure/final-pass evidence, passed/failed/skipped counts, unverified
+  scope, risks, and spec deviations.
 
-## Implementation Report (required after implementation)
+## PR mechanics and lifecycle authority
 
-After implementing and verifying, Cline must produce an **Implementation Report**
-containing all of the following:
-
-- Task ID
-- Packet version / Plan version
-- Planning Base SHA
-- Implementation Base SHA
-- Head SHA (`git rev-parse HEAD` at the time of the report)
-- Branch name
-- PR URL
-- Changed files (full list)
-- Per-acceptance-criterion evidence
-- Every verification command with its **exit code**
-- First-failing test evidence (test-first proof)
-- Final test results
-- **Allowed / forbidden-path audit** result (full diff path membership)
-- **Unverified** scope
-- **Risk**s
-- Spec **deviation**s
-- Explicit statement: not merged, not self-approved, not closed out
-
-## Prohibitions
-
-- **No direct push to main.** All changes go through a branch and a PR.
-- **No force-push.**
-- **No self-approve.** Cline cannot approve its own PR.
-- **No merge.** Only a human may merge.
-- **No closeout.** Moving a task to `completed` is a **human-only** decision.
-  A Review Agent records a verdict but cannot authorize closeout or task state
-  transition.
-- **No modification of task, spec, or activation status.**
-- **No modification of `.github/` or branch protection.**
+- Commit and push normally to the existing implementation branch, then wait
+  for all GitHub checks and report their links and final states.
+- Do not self-approve, merge, close out, or change task lifecycle state.
+- Independent Review supplies evidence and a verdict only. Authorization is
+  human-only: only a human may authorize activation, merge, closeout, or
+  active-to-completed transition.
+- Automation may mechanically execute a separately recorded and verifiable
+  human authorization; automation is never an alternative authorizer.
