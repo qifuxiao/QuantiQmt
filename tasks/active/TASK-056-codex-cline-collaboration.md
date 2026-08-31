@@ -10,8 +10,10 @@ allowed_paths:
   - .clinerules/10-codex-handoff.md
   - ai/adapters/cline.md
   - ai/handoffs/TASK-056-REPAIR-v1.yaml
+  - ai/handoffs/TASK-056-REPAIR-v2.yaml
   - ai/workflows/team-collaboration.md
   - scripts/validate_ai_handoff.py
+  - tasks/AGENTS.md
   - tasks/templates/task-template.md
   - tasks/active/TASK-056-codex-cline-collaboration.md
   - tasks/backlog/TASK-056-codex-cline-collaboration.md
@@ -43,7 +45,7 @@ verification:
     - poetry run ruff check scripts/validate_ai_handoff.py tests/spec/test_miniqmt_m1_delivery_governance.py tests/spec/test_codex_cline_collaboration_governance.py tests/spec/test_validate_ai_handoff.py
     - poetry run ruff format --check scripts/validate_ai_handoff.py tests/spec/test_miniqmt_m1_delivery_governance.py tests/spec/test_codex_cline_collaboration_governance.py tests/spec/test_validate_ai_handoff.py
     - poetry run python -c "from scripts.validate_specs import extract_front_matter, task_files; active=sorted(str(extract_front_matter(path).get('id')) for path in task_files() if extract_front_matter(path).get('status') == 'active'); assert active == ['TASK-056'], active"
-    - poetry run python scripts/validate_ai_handoff.py --task tasks/active/TASK-056-codex-cline-collaboration.md --handoff ai/handoffs/TASK-056-REPAIR-v1.yaml --base-ref origin/main --head HEAD
+    - poetry run python scripts/validate_ai_handoff.py --task tasks/active/TASK-056-codex-cline-collaboration.md --handoff ai/handoffs/TASK-056-REPAIR-v2.yaml --base-ref origin/main --head HEAD
     - git diff --check origin/main...HEAD
 delivery:
   schema_version: 1
@@ -77,11 +79,21 @@ Base 的 Codex Implementation Plan。
   `scripts/validate_ai_handoff.py`、`tests/spec/test_validate_ai_handoff.py` 四个授权路径。
 - Plan Amendment 合并前，PR #95 必须保持 open 且不得 merge；Amendment 合并后由 Codex
   基于新的 main 精确 SHA 创建 GitHub 版本化 Repair Handoff Record，再由 Cline 修复。
+- 2026-08-31 独立 Codex Review 对 PR #95 的精确 Head
+  `bc6d762b1d770d962593c7d88e945852d50b9481` 输出 `REQUEST_CHANGES`：发现 merge-only
+  删除/重引入可绕过 Record 不可变校验、Handoff 身份字段未绑定 active task/Packet/Plan，
+  以及 `tasks/AGENTS.md` 仍错误授权 Reviewer 写入 completed。
+- 2026-08-31 人类明确批准创建 `TASK-056-PLAN-v4` Repair Amendment；在 Plan v3 范围之上
+  仅新增 `tasks/AGENTS.md` 与新的 Codex-only
+  `ai/handoffs/TASK-056-REPAIR-v2.yaml`，并继续使用既有 TASK-056 validator/governance
+  测试路径关闭上述三个 findings。该 Amendment 必须先独立合并到 main；其后 Codex 才可
+  基于新的精确 Base 创建 v2 Handoff。授权不覆盖旧 Handoff 修改、业务代码、`spec/`、CI、
+  依赖、merge、closeout 或任务完成状态迁移。
 
 ## Codex Implementation Plan
 
-- Plan version: `TASK-056-PLAN-v3`
-- Planning base SHA: `0d9f8e879b2029c23ba955364080667d2efa50ed`
+- Plan version: `TASK-056-PLAN-v4`
+- Planning base SHA: `d0700f2ed67f2e53f55445c87444346c23bb6318`
 - Observable outcome: Cline 从 GitHub 上的唯一 active task 获取 Codex Plan，基于其精确
   Implementation Base SHA 实现并提交 PR；新的 Codex Review 会话只读审查精确 Head；
   人类完成 merge 和 closeout 授权。
@@ -93,26 +105,38 @@ Base 的 Codex Implementation Plan。
 - `Implementation Base SHA` 或后续 `Repair Base SHA` 不由 Cline 推断、选择或写回 task。
   Codex 必须在任何实现/修复修改前创建独立 commit，引入版本化、GitHub 可读取的 Handoff
   Record；Cline 只能从该 commit 开始工作且不得修改 Record。
-- `ai/handoffs/TASK-056-REPAIR-v1.yaml` 必须至少冻结 `schema_version`、`task_id`、
+- `ai/handoffs/TASK-056-REPAIR-v2.yaml` 必须至少冻结 `schema_version`、`task_id`、
   `packet_version`、`plan_version`、`planning_base_sha`、`expected_base_sha`、
   `expected_pr_base_sha`、`task_blob_sha`、阶段性 `allowed_paths` 和 `codex_only_paths`。
+- Handoff identity 必须语义绑定当前验证对象：`schema_version` 必须是 validator 明确支持的
+  版本 `1`，`task_id` 必须等于 active task front matter 的 `TASK-056`，`packet_version` 必须
+  等于 Handoff 文件身份 `TASK-056-REPAIR-v2`，`plan_version` 必须等于本 task 中冻结的
+  `TASK-056-PLAN-v4`；仅检查字段存在或 SHA 格式不得通过。
 - `expected_base_sha` 必须是 Plan Amendment 合并后的精确 main SHA；
   `expected_pr_base_sha` 必须与它相等。两者未知时不得创建占位 Record 或开始修复。
+- v2 Handoff introduction commit 必须恰有一个 parent，且该 parent 必须等于 Amendment
+  合并后的精确 main SHA（即 v2 Record 的 `expected_base_sha`）；该 commit 对 v2 Handoff
+  路径为 add-only，且不得包含任何其他路径。
 - `task_blob_sha` 必须等于
   `git rev-parse <expected_base_sha>:tasks/active/TASK-056-codex-cline-collaboration.md`；Record
   必须把自身列入 `codex_only_paths`。validator 必须确认 Record 当前 blob 与首次引入它的
   Codex Handoff commit 完全一致，且 task 当前 blob 与 expected Base 中冻结值一致。
-- Repair Handoff 的阶段性 `allowed_paths` 只能包含 `AGENTS.md`、两份 `.clinerules/*.md`、
-  `ai/adapters/cline.md`、本 Handoff Record、`ai/workflows/team-collaboration.md`、validator、
-  task template 和两份 TASK-056/validator 测试；不得包含 task lifecycle、spec、业务或 CI。
+- Repair Handoff 的阶段性 `allowed_paths` 保留 Plan v3 已冻结的十个完整 PR 审计路径，并且
+  只新增 `tasks/AGENTS.md` 与 `ai/handoffs/TASK-056-REPAIR-v2.yaml`。v1/v2 两份 Handoff
+  都必须列入 `codex_only_paths` 且不得修改；不得新增 task lifecycle、spec、业务或 CI 路径。
 - `scripts/validate_ai_handoff.py` 必须 fail-closed 地断言 Handoff expected Base、
   `git merge-base <base-ref> <head>` 和 Review 输入的 GitHub PR Base SHA 三者相等，Planning
   Base 是其祖先，task blob/Record 未漂移，且 exact Base...Head diff 全部通过路径授权。
+- 对 v2 Handoff introduction 的后代锥与 supplied exact Head 祖先集合的交集，validator 必须
+  使用不简化 merge 历史的真实 DAG 遍历，要求每个提交结果中的 v2 Record 都存在且 blob
+  等于 introduction 的冻结 blob。外部同步 parent 可不含 v2 Record，但任何 introduction
+  后的 descendant merge 结果均不得删除、修改或重新引入 Record；所有查询必须绑定 supplied
+  `--head`，不得使用环境中的移动 `HEAD`。
 - PR 创建前可省略 `--pr-base`，但独立 Review 必须从 GitHub 读取精确 PR Base 后使用
   `--pr-base <SHA>` 重跑；缺失、PR 非 OPEN、Base/Head 不相等或 Review 结束 Head 改变均
   只能 `BLOCKED`，不得降级为当前 merge-base 自动可信。
 - Cline 必须在 Implementation Report 中分别报告 Planning Base、Handoff expected Base、
-  GitHub PR Base 和 Head；Plan v3 Amendment 之前的 Base/Head 证据不得复用于修复后 Review。
+  GitHub PR Base 和 Head；Plan v4 Amendment 之前的 Base/Head 证据不得复用于修复后 Review。
 
 ### Authority and role decisions
 
@@ -134,18 +158,21 @@ Base 的 Codex Implementation Plan。
   evidence、Handoff Record 不可变约束、禁止直接 push main/self-approve/merge/closeout，
   并明确 Reviewer verdict 与人类 closeout 授权的边界。
 - `ai/adapters/cline.md`: 要求 Cline 读取 task 内 Codex Plan，并输出标准 Implementation Report。
-- `ai/handoffs/TASK-056-REPAIR-v1.yaml`: 由 Codex 在 Amendment 合并后、Cline 修复前以
+- `ai/handoffs/TASK-056-REPAIR-v1.yaml`: 保留历史冻结证据，任何 Agent 均不得修改。
+- `ai/handoffs/TASK-056-REPAIR-v2.yaml`: 由 Codex 在 Amendment 合并后、实现修复前以
   独立 commit 创建，冻结精确 Repair Base、PR Base、task blob、Packet/Plan 和阶段性路径。
 - `ai/workflows/team-collaboration.md`: 定义 Implementation Packet、Implementation Report、
   Repair Packet、精确 Base...Head Review、三种 verdict、Review 前后 Head 核验，以及
   Implementation/Closeout 两个 PR 生命周期和人类专属 closeout 授权。
-- `scripts/validate_ai_handoff.py`: 提供可复用 CLI 和纯函数，校验 Handoff schema/Base、
-  task blob、Record 不漂移、祖先关系及 allowed/forbidden path membership。
+- `scripts/validate_ai_handoff.py`: 在既有校验上增加 Handoff identity 语义绑定，并验证 v2
+  introduction 后、supplied Head 可达的每个 descendant 提交结果始终保有冻结 Record blob。
+- `tasks/AGENTS.md`: 删除 Reviewer 可写 completed 的冲突授权；独立 Review 仅提供证据，只有
+  人类可授权 active → completed，自动化只能机械执行单独记录且可核验的人类授权。
 - `tasks/templates/task-template.md`: 增加非规范性的版本化 Codex Implementation Plan 模板。
-- `tests/spec/test_codex_cline_collaboration_governance.py`: 按章节和明确规范句式锁定治理要求，
-  拒绝旧双点 Review、两 verdict、Reviewer closeout 和允许式 self-approve 等冲突文本。
-- `tests/spec/test_validate_ai_handoff.py`: 对构造输入覆盖 Base/PR Base 不等、Record/task
-  漂移、missing SHA、rename、越权和 forbidden path 等正反用例。
+- `tests/spec/test_codex_cline_collaboration_governance.py`: 将 `tasks/AGENTS.md` 纳入全部持久
+  协作文件扫描并拒绝 Reviewer/automation 作为 completed 状态迁移授权者的矛盾句。
+- `tests/spec/test_validate_ai_handoff.py`: 增加真实 merge-only 删除/重引入 DAG 回归，以及
+  `schema_version`、`task_id`、`packet_version`、`plan_version` 错误的函数级和 CLI 反例。
 - `tests/spec/test_miniqmt_m1_delivery_governance.py`: 只同步 TASK-056 active 占用断言，保留
   TASK-054/055、MiniQMT 和 TASK-053 全部安全断言。
 
@@ -158,6 +185,10 @@ Base 的 Codex Implementation Plan。
   而默认通过。
 - Handoff expected Base、merge-base、PR Base、Planning ancestor、task blob、Record immutable →
   `test_validate_ai_handoff.py` 的纯函数正反用例和 CLI 集成测试。
+- Handoff identity → 由 active task ID、task 中 Plan version、Handoff 文件/Packet identity 和
+  validator 支持版本共同校验；任一字段仅存在但语义不等时，函数与 CLI 都必须失败。
+- merge-only 删除/重引入 → 临时真实 Git DAG 覆盖同步 merge、删除 Record 的 merge、恢复
+  原始 blob 的 merge；即使最终 Head blob 等于 introduction，validator 仍必须拒绝。
 - 三类交接物、两 PR 生命周期、精确 Base...Head、PR OPEN、Review 前后 Head、三 verdict、
   人类专属 closeout → team workflow 章节测试，并显式拒绝旧
   `origin/main..origin/<branch>`、仅两 verdict 及 Reviewer 可授权 closeout 的文本。
@@ -174,7 +205,8 @@ Base 的 Codex Implementation Plan。
   Planning Base 不是 expected Base 祖先、Record 被 Cline 修改、工作区有非预期修改、active
   task 数量不为一、task/spec 冲突、allowed paths 不足或设计缺口时，Cline 必须停止并返回
   `PLAN_BLOCKED` 及证据。
-- Cline 不得用 force-push、直接 push main、降低测试或自行修改 task/spec 解决阻塞。
+- v2 Handoff 合入 PR #95 及其后续修复全过程禁止 rebase 和 force-push；Implementation
+  Agent 也不得直接 push main、降低测试或自行修改 task/spec 解决阻塞。
 - Codex Review 必须先验证 PR OPEN、精确 Base/Head 和三点 diff，并在结束时重新读取 Head；
   Head 改变后旧 verdict 失效并从头 Review。
 - Implementation PR 合并不等于 task completed；必须另建 Closeout PR 核验 Review、CI、
@@ -182,15 +214,19 @@ Base 的 Codex Implementation Plan。
 
 ### Implementation order
 
-1. 先独立 Review 并由人类合并本 Plan v3 Amendment；不得把授权扩展与 Cline 修复放在
+1. 先独立 Review 并由人类合并本 Plan v4 Amendment；不得把授权扩展与实现修复放在
    同一未合并 commit 中自我生效。
 2. Amendment 合并后，Codex 读取新 main 精确 SHA，创建只含
-   `ai/handoffs/TASK-056-REPAIR-v1.yaml` 的独立 Handoff commit；该 Record 的 expected Base 和
-   expected PR Base 均为新 main SHA，并记录 task blob SHA。
-3. Cline fetch Handoff commit，将精确新 main/Handoff 合入 PR #95 分支且不得 force-push；
-   在任何 repair 修改前运行 validator，Base/Record 不一致则 `PLAN_BLOCKED`。
-4. Cline 先新增/加强失败的治理与 validator 正反测试，再最小修改 `.clinerules/00`、
-   `.clinerules/10`、AGENTS、adapter、workflow 和 template，关闭全部 Review findings。
+   `ai/handoffs/TASK-056-REPAIR-v2.yaml` 的独立 Handoff commit；该 Record 的 expected Base 和
+   expected PR Base 均为新 main SHA，并记录 task blob SHA、`TASK-056-PLAN-v4` 与
+   `TASK-056-REPAIR-v2` identity。该 commit 必须恰有一个 parent 且等于该精确 Base，对 v2
+   路径必须是 add-only，并且不得包含其他路径；旧 v1 Record 必须保持 byte-for-byte 不变。
+3. 经人类授权的 Implementation Agent fetch Handoff commit，将精确新 main/Handoff 合入
+   PR #95 分支；合入与后续修复全过程禁止 rebase 和 force-push。在任何 repair 修改前运行
+   validator，Base/Record 不一致则 `PLAN_BLOCKED`。
+4. 经人类授权的 Implementation Agent 先新增失败的治理与 validator 正反测试，再只修改
+   `tasks/AGENTS.md` 与 `scripts/validate_ai_handoff.py` 完成最小修复；不得借机修改其他已
+   授权但与本轮三个 findings 无关的治理文件。
 5. PR 创建后从 GitHub 读取精确 PR Base/Head，使用 validator 的 `--pr-base` 再审计；更新
    Implementation Report 和 Repair evidence 后正常 push，不合并、不 self-approve、不 closeout。
 6. 新 Codex Review 会话对新的精确 Base...Head 从头 Review；旧 Head
@@ -218,7 +254,7 @@ Base 的 Codex Implementation Plan。
 - 项目级 Codex/Cline 职责和 GitHub 事实交接规则。
 - Cline 固定 handoff 约束和标准 Implementation Report。
 - 三类交接物、两 PR 生命周期及 Repair 循环的工具中立工作流。
-- Codex-authored、GitHub 版本化且 Cline 不可修改的 Handoff Record。
+- Codex-authored、GitHub 版本化且 Implementation Agent 不可修改的 Handoff Record。
 - 可对构造输入执行的 Base/PR Base/task blob/Record/path fail-closed validator。
 - 可复用的 task-level Codex Implementation Plan 模板。
 - 覆盖角色隔离、精确 SHA、冲突/否定语义、validator 正反例和队列投影的机器治理测试。
@@ -229,8 +265,12 @@ Base 的 Codex Implementation Plan。
 - [ ] Cline 必须读取 Codex Plan，并在无 active、Base 不匹配、dirty 或设计缺口时 fail-closed。
 - [ ] 全部 `.clinerules/` 只引用 AGENTS/task/spec，不复制模拟账户、交易开关、Broker/API、
   订单链、UNKNOWN/reconciliation、Event、DTO、状态机、错误码或其他业务契约正文。
-- [ ] Codex-authored Handoff Record 在修复前冻结 expected Base/PR Base/task blob/Plan/Packet/
-  阶段路径，Cline 修改或缺失 Record 时 fail-closed。
+- [ ] Codex-authored v2 Handoff Record 在修复前冻结 expected Base/PR Base/task blob/Plan/Packet/
+  阶段路径，Implementation Agent 修改或缺失 Record 时 fail-closed。
+- [ ] Validator 将 `schema_version`、`task_id`、`packet_version`、`plan_version` 分别绑定到
+  支持版本、active task、v2 Packet 和 Plan v4；任一语义不匹配均 fail-closed。
+- [ ] v2 introduction 后、supplied Head 可达的每个 descendant 提交结果都保有同一冻结
+  Record blob；merge-only 删除、恢复原 blob 或重新引入均被真实 Git 拓扑测试拒绝。
 - [ ] 机器 validator 对构造输入证明 expected Base、merge-base、PR Base 三者必须相等，
   并覆盖 missing/mismatch、Record/task 漂移、rename、outside allowed 和 forbidden 反例。
 - [ ] Cline Report 包含 Base/Head SHA、branch/PR、changed files、逐项 acceptance、命令退出码、
@@ -240,10 +280,12 @@ Base 的 Codex Implementation Plan。
 - [ ] Implementation PR 与 Closeout PR 分离；Cline 不得 self-approve/merge/closeout。
 - [ ] Reviewer 只记录 verdict，只有人类可授权 closeout/状态迁移，所有规则无“人类或
   Reviewer 均可授权”的歧义。
+- [ ] `tasks/AGENTS.md` 不再授权 Reviewer 写入 completed，并被全部持久协作文件否定扫描覆盖。
 - [ ] Task template 明确区分 Planning Base 与 Codex-authored Handoff Record 中的 expected
   Base，并包含设计、文件计划、测试映射、失败设计和 PLAN_BLOCKED 条件。
-- [ ] 没有修改 spec、业务代码、migration、依赖、CI、交易权限或其他任务 scope；TASK-056
-  仅包含 2026-08-30 人类明确批准的四个新增路径和 Plan v3 Repair 范围。
+- [ ] 没有修改 spec、业务代码、migration、依赖、CI、交易权限或其他任务 scope；相对
+  Plan v3 仅新增 `tasks/AGENTS.md` 和 v2 Handoff 路径，finding 实现只修改 v2 Handoff、
+  validator、`tasks/AGENTS.md` 与两份既有 TASK-056 validator/governance 测试。
 - [ ] changed-path membership audit 和所有 verification commands 通过，独立 Review
   后才可进入 closeout。
 
