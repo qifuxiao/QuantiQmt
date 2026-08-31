@@ -114,6 +114,9 @@ Base 的 Codex Implementation Plan。
   `TASK-056-PLAN-v4`；仅检查字段存在或 SHA 格式不得通过。
 - `expected_base_sha` 必须是 Plan Amendment 合并后的精确 main SHA；
   `expected_pr_base_sha` 必须与它相等。两者未知时不得创建占位 Record 或开始修复。
+- v2 Handoff introduction commit 必须恰有一个 parent，且该 parent 必须等于 Amendment
+  合并后的精确 main SHA（即 v2 Record 的 `expected_base_sha`）；该 commit 对 v2 Handoff
+  路径为 add-only，且不得包含任何其他路径。
 - `task_blob_sha` 必须等于
   `git rev-parse <expected_base_sha>:tasks/active/TASK-056-codex-cline-collaboration.md`；Record
   必须把自身列入 `codex_only_paths`。validator 必须确认 Record 当前 blob 与首次引入它的
@@ -202,7 +205,8 @@ Base 的 Codex Implementation Plan。
   Planning Base 不是 expected Base 祖先、Record 被 Cline 修改、工作区有非预期修改、active
   task 数量不为一、task/spec 冲突、allowed paths 不足或设计缺口时，Cline 必须停止并返回
   `PLAN_BLOCKED` 及证据。
-- Cline 不得用 force-push、直接 push main、降低测试或自行修改 task/spec 解决阻塞。
+- v2 Handoff 合入 PR #95 及其后续修复全过程禁止 rebase 和 force-push；Implementation
+  Agent 也不得直接 push main、降低测试或自行修改 task/spec 解决阻塞。
 - Codex Review 必须先验证 PR OPEN、精确 Base/Head 和三点 diff，并在结束时重新读取 Head；
   Head 改变后旧 verdict 失效并从头 Review。
 - Implementation PR 合并不等于 task completed；必须另建 Closeout PR 核验 Review、CI、
@@ -215,10 +219,11 @@ Base 的 Codex Implementation Plan。
 2. Amendment 合并后，Codex 读取新 main 精确 SHA，创建只含
    `ai/handoffs/TASK-056-REPAIR-v2.yaml` 的独立 Handoff commit；该 Record 的 expected Base 和
    expected PR Base 均为新 main SHA，并记录 task blob SHA、`TASK-056-PLAN-v4` 与
-   `TASK-056-REPAIR-v2` identity。旧 v1 Record 必须保持 byte-for-byte 不变。
+   `TASK-056-REPAIR-v2` identity。该 commit 必须恰有一个 parent 且等于该精确 Base，对 v2
+   路径必须是 add-only，并且不得包含其他路径；旧 v1 Record 必须保持 byte-for-byte 不变。
 3. 经人类授权的 Implementation Agent fetch Handoff commit，将精确新 main/Handoff 合入
-   PR #95 分支且不得 force-push；在任何 repair 修改前运行 validator，Base/Record 不一致
-   则 `PLAN_BLOCKED`。
+   PR #95 分支；合入与后续修复全过程禁止 rebase 和 force-push。在任何 repair 修改前运行
+   validator，Base/Record 不一致则 `PLAN_BLOCKED`。
 4. 经人类授权的 Implementation Agent 先新增失败的治理与 validator 正反测试，再只修改
    `tasks/AGENTS.md` 与 `scripts/validate_ai_handoff.py` 完成最小修复；不得借机修改其他已
    授权但与本轮三个 findings 无关的治理文件。
