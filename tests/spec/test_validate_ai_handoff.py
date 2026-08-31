@@ -38,6 +38,7 @@ ROOT = Path(__file__).resolve().parents[2]
 VALIDATOR = ROOT / "scripts" / "validate_ai_handoff.py"
 HANDOFF = ROOT / "ai" / "handoffs" / "TASK-056-REPAIR-v2.yaml"
 TASK = ROOT / "tasks" / "completed" / "TASK-056-codex-cline-collaboration.md"
+FROZEN_ACTIVE_TASK = ROOT / "tasks" / "active" / "TASK-056-codex-cline-collaboration.md"
 
 SHA_A = "a" * 40
 SHA_B = "b" * 40
@@ -81,6 +82,54 @@ def test_mypy_passes() -> None:
 # ── Integration: real frozen handoff ─────────────────────────────────────
 
 
+def _checkout_smoke_skip_reason(
+    origin_main: str,
+    expected_base: str,
+    frozen_task_exists: bool,
+) -> str | None:
+    if origin_main != expected_base:
+        return "origin/main no longer matches the frozen Handoff base"
+    if not frozen_task_exists:
+        return "the frozen active-task path has been closed out"
+    return None
+
+
+@pytest.mark.parametrize(
+    ("origin_main", "expected_base", "frozen_task_exists", "expected_reason"),
+    [
+        (
+            SHA_A,
+            SHA_B,
+            True,
+            "origin/main no longer matches the frozen Handoff base",
+        ),
+        (
+            SHA_A,
+            SHA_A,
+            False,
+            "the frozen active-task path has been closed out",
+        ),
+        (SHA_A, SHA_A, True, None),
+    ],
+)
+def test_optional_checkout_smoke_has_only_two_skip_reasons(
+    origin_main: str,
+    expected_base: str,
+    frozen_task_exists: bool,
+    expected_reason: str | None,
+) -> None:
+    assert (
+        _checkout_smoke_skip_reason(origin_main, expected_base, frozen_task_exists)
+        == expected_reason
+    )
+
+
+def test_optional_checkout_smoke_distinguishes_frozen_and_completed_task_paths() -> None:
+    assert FROZEN_ACTIVE_TASK != TASK
+    assert FROZEN_ACTIVE_TASK.parent.name == "active"
+    assert TASK.parent.name == "completed"
+
+
 def test_optional_checkout_smoke_validator_passes_on_frozen_handoff() -> None:
     """Optionally smoke-test the real checkout when its remote history is available."""
     # This smoke test is meaningful only while the moving remote still names the
@@ -93,20 +142,24 @@ def test_optional_checkout_smoke_validator_passes_on_frozen_handoff() -> None:
         text=True,
         cwd=ROOT,
     )
-    if probe.returncode != 0:
-        pytest.skip("origin/main not available (shallow clone)")
+    assert probe.returncode == 0, f"origin/main is not readable: {probe.stderr}"
     handoff = yaml.safe_load(HANDOFF.read_text(encoding="utf-8"))
     assert isinstance(handoff, dict)
-    if probe.stdout.strip() != handoff["expected_base_sha"]:
-        pytest.skip("origin/main no longer matches the frozen Handoff base")
-    if not TASK.exists():
-        pytest.skip("the frozen active-task path has been closed out")
+    expected_base = handoff["expected_base_sha"]
+    assert isinstance(expected_base, str)
+    skip_reason = _checkout_smoke_skip_reason(
+        probe.stdout.strip(),
+        expected_base,
+        FROZEN_ACTIVE_TASK.exists(),
+    )
+    if skip_reason is not None:
+        pytest.skip(skip_reason)
     result = subprocess.run(
         [
             sys.executable,
             str(VALIDATOR),
             "--task",
-            str(TASK),
+            str(FROZEN_ACTIVE_TASK),
             "--handoff",
             str(HANDOFF),
             "--base-ref",

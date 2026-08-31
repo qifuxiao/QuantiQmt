@@ -348,8 +348,9 @@ Base 的 Codex Implementation Plan。
   `TASK-056` active assertion 和精确 implementation diff check 均 exit 0。主分支合并前移后，
   可选 checkout smoke 如预期不再适用；核心真实 Git topology 测试仍为 `15 passed, 0 skipped`。
 - 生命周期投影完成后，`scripts/validate_specs.py`、mypy 和空 active task assertion 均 exit 0；
-  四文件治理测试为 `130 passed, 0 failed, 1 skipped`，唯一 skip 是已单独报告的可选 checkout
-  smoke，因为移动的 `origin/main` 已不再等于冻结 Repair Base。
+  修复 Closeout Review finding 后四文件治理测试为 `134 passed, 0 failed, 1 skipped`；新增四项
+  回归测试锁定 completed/frozen-active 路径分离和仅允许的两种 skip 原因。唯一实际 skip 是
+  已单独报告的可选 checkout smoke，因为移动的 `origin/main` 已不再等于冻结 Repair Base。
 - Closeout 仅移动并更新 TASK-056、active/index 投影和三个直接引用其生命周期路径的治理测试；
   未修改 `spec/`、`src/`、`.github/`、migration、依赖、Handoff Record、业务代码或其他任务。
   规范偏差为 none。
