@@ -9,9 +9,13 @@ allowed_paths:
   - ai/adapters/codex.md
   - ai/adapters/cline.md
   - ai/handoffs/TASK-057-IMPLEMENTATION-v1.yaml
+  - ai/handoffs/TASK-057-REPAIR-v2.yaml
   - ai/prompts/miniqmt-m1-task.md
+  - ai/schemas/agent-assignment.schema.yaml
+  - ai/schemas/agent-environment-evidence.schema.yaml
   - ai/workflows/poetry-verification.md
   - ai/workflows/team-collaboration.md
+  - scripts/validate_agent_environment.py
   - scripts/validate_specs.py
   - tasks/templates/task-template.md
   - tasks/completed/TASK-022-observability-control-contracts.md
@@ -23,6 +27,7 @@ allowed_paths:
   - tasks/index.yaml
   - tests/spec/test_miniqmt_m1_delivery_governance.py
   - tests/spec/test_agent_execution_environment_governance.py
+  - tests/spec/test_validate_agent_environment.py
 forbidden_paths:
   - spec/**
   - src/**
@@ -49,12 +54,13 @@ verification:
     - poetry run python -c "import sys; print(sys.executable); print(sys.version)"
     - poetry run python -c "import yaml, jsonschema, pytest; print('deps-ok')"
     - poetry run python scripts/validate_specs.py
-    - poetry run pytest tests/spec/test_validate_specs.py tests/spec/test_miniqmt_m1_delivery_governance.py tests/spec/test_codex_cline_collaboration_governance.py tests/spec/test_validate_ai_handoff.py tests/spec/test_agent_execution_environment_governance.py
+    - poetry run pytest tests/spec/test_validate_specs.py tests/spec/test_miniqmt_m1_delivery_governance.py tests/spec/test_codex_cline_collaboration_governance.py tests/spec/test_validate_ai_handoff.py tests/spec/test_agent_execution_environment_governance.py tests/spec/test_validate_agent_environment.py
     - poetry run mypy src scripts
-    - poetry run ruff check scripts/validate_specs.py tests/spec/test_agent_execution_environment_governance.py
-    - poetry run ruff format --check scripts/validate_specs.py tests/spec/test_agent_execution_environment_governance.py
+    - poetry run ruff check scripts/validate_specs.py scripts/validate_agent_environment.py tests/spec/test_agent_execution_environment_governance.py tests/spec/test_validate_agent_environment.py
+    - poetry run ruff format --check scripts/validate_specs.py scripts/validate_agent_environment.py tests/spec/test_agent_execution_environment_governance.py tests/spec/test_validate_agent_environment.py
     - poetry run python -c "from scripts.validate_specs import extract_front_matter, task_files; active=sorted(str(extract_front_matter(path).get('id')) for path in task_files() if extract_front_matter(path).get('status') == 'active'); assert active == ['TASK-057'], active"
-    - poetry run python scripts/validate_ai_handoff.py --task tasks/active/TASK-057-tool-neutral-agents-windows-verification-poetry.md --handoff ai/handoffs/TASK-057-IMPLEMENTATION-v1.yaml --base-ref origin/main --head HEAD
+    - poetry run python scripts/validate_agent_environment.py --help
+    - poetry run python scripts/validate_ai_handoff.py --task tasks/active/TASK-057-tool-neutral-agents-windows-verification-poetry.md --handoff ai/handoffs/TASK-057-REPAIR-v2.yaml --base-ref origin/main --head HEAD
     - poetry run pytest tests/spec
     - poetry run pytest tests/contract
     - poetry run ruff check .
@@ -64,9 +70,9 @@ verification:
 delivery:
   schema_version: 1
   contract_status: not_applicable
-  implementation_status: not_started
-  acceptance_status: not_run
-  review_status: pending
+  implementation_status: in_progress
+  acceptance_status: partial
+  review_status: changes_requested
   release_status: prohibited
 ---
 
@@ -90,18 +96,50 @@ Windows 验收、环境访问失败冒充 Poetry 损坏，以及代码 Head 与�
 - 本授权不允许修改 `spec/`、业务代码、migration、依赖、CI、`.clinerules/`、真实资金权限，
   也不允许连接 Mini QMT、查询账号或发送任何委托。环境和模拟委托规则仅作为后续 task
   的授权门槛，不是本任务的交易授权。
+- 2026-09-01 人类在 PR #100 第四轮独立 Review 未通过后批准停止局部 Addendum 循环，
+  采用本 `TASK-057-PLAN-v2` 架构重置。新增授权路径仅为两个治理 schema、正式环境证据
+  validator、其测试和新的 Codex-only Repair Handoff；上述禁止范围不变。
+- PR #100 的 `d2633e79254fe06cc0667dc3659d1946de774982` 是 Plan v1 的待修复 Head，
+  不是 Plan v2 的可信 Implementation Base，也不得继续接受基于 v1 的局部补丁。
 
 ## Codex Implementation Plan
 
-- Plan version: `TASK-057-PLAN-v1`
-- Planning Base SHA: `7d77d87afacae327bc29ba6e2ecfc6b3d72318d1`
-- Implementation Base SHA: 只由 Activation 合并后 Codex-authored
-  `ai/handoffs/TASK-057-IMPLEMENTATION-v1.yaml` 的 `expected_base_sha` 提供；任何 Agent
-  不得从移动的 `origin/main` 或 task 自行推断。
+- Plan version: `TASK-057-PLAN-v2`
+- Planning Base SHA: `ec2b95b165619af671a919a9950d40adfa9bbbaf`
+- Superseded Plan: `TASK-057-PLAN-v1` 及其 Implementation/Repair 增量保留为审计历史，
+  但不得再作为后续实现决策的权威来源。
+- Implementation Base SHA: 只由本 Amendment 合并后 Codex-authored
+  `ai/handoffs/TASK-057-REPAIR-v2.yaml` 的 `expected_base_sha` 提供；任何 Agent不得从
+  移动的 `origin/main`、PR #100 或 task自行推断。
 - Observable outcome: 一个新 task 能明确选择 Cline/Linux 或 Codex/Windows 作为
   Implementation Agent，将 portable、Windows 和 Windows/Mini QMT 验证分配给有能力的
   Agent；所有证据绑定同一精确 Head。Codex 在沙箱访问用户 Poetry 环境受限时请求最小
-  沙箱外权限并执行原始 `poetry` 命令，不再误判 SymbolicLink 或创建替代环境。
+  沙箱外权限并执行 task冻结的原始 `poetry` 命令，不再误判 SymbolicLink 或创建替代环境。
+
+### Plan v2 architecture reset
+
+- 环境证据不再由治理测试文件中的私有 helper 解释。`scripts/validate_agent_environment.py`
+  是唯一正式 machine gate，两个 `ai/schemas/*.schema.yaml` 是其版本化输入契约；测试只验证
+  公开 schema/validator 行为，不得再实现第二套伪 validator。
+- validator 必须自行读取精确 Head 的唯一 active task和冻结的 Repair v2 Handoff，从可信
+  对象取得 task id、Base、PR Base、allowed paths和 `verification.commands`。CLI 参数或
+  evidence record不得提供、覆盖或缩减 expected command set。
+- `verification.commands` 在本任务中作为由 active task + Codex Handoff冻结的 opaque exact
+  strings。validator验证逐项精确覆盖和结果，不尝试用 POSIX parser证明任意 PowerShell
+  命令安全，也不接受 evidence自报的等价命令。命令是否可执行及宿主权限仍由 task审查、
+  Agent adapter、最小 sandbox授权和 Independent Review共同控制。
+- required lane必须 fail-closed：空 evidence collection、空 expected command set、重复或
+  混入其他 task/Base/Head/PR/branch的 record、缺命令、非零 exit、非允许 skip、能力或授权
+  不足，任一情况都不能满足 lane。
+- assignment使用按序事件而非可选快照字段推断。正式事件只有 `ASSIGN`、`STOP`、`SWITCH`；
+  sequence严格递增，任何时刻最多一个 writer。切换必须由 Human GitHub evidence授权，
+  前任 `STOP` Head、新任 `SWITCH` starting Head和当时 PR Head三者精确相等。
+- `xtquant` 版本是 provenance，不是猜测的 semver。证据记录脱敏后的 opaque value、可信
+  source（例如 package metadata或vendor API）和采集结果；source/value未知或可能包含路径、
+  账号、secret时保持 unverified/BLOCKED。禁止用宽松版本正则把任意文本当版本，也禁止因
+  版本格式非 semver而误拒合法 vendor release。
+- Mini QMT环境 capability与外部副作用 authorization必须分开验证。本任务只能定义证据门禁，
+  始终禁止连接、账号查询或委托；后续模拟委托仍需独立 active task和可核验人类授权。
 
 ### Authority and role design
 
@@ -122,8 +160,9 @@ Windows 验收、环境访问失败冒充 Poetry 损坏，以及代码 Head 与�
 - `windows_miniqmt`: Windows、已安装 Mini QMT、task-approved `xtquant`、`userdata_mini`、
   唯一 session 和精确模拟账号 allowlist。默认只读；任何模拟委托必须由独立 active task
   和人类再次明确授权。真实资金始终禁止。
-- 每个 lane 记录 task、Base、Head、执行角色/tool、OS、Python/Poetry/xtquant版本、命令、
-  exit code、passed/failed/skipped、时间、脱敏证据、未验证范围和 evidence URL。
+- 每个 lane 依据正式 schema记录 task、Base、Head、PR/branch、执行角色/tool、OS、Python/
+  Poetry/xtquant provenance、命令、exit code、passed/failed/skipped、RFC3339时区时间、
+  脱敏状态、未验证范围和 evidence URL。
 - Head 改变后该 Head 的所有环境证据和 Review verdict 自动失效。缺少 task-required lane
   时只能 `BLOCKED`，不得以 Broker Simulator、Linux mock 或文字说明替代。
 
@@ -157,15 +196,24 @@ Windows 验收、环境访问失败冒充 Poetry 损坏，以及代码 Head 与�
   build/contract复验、产物保护及标准证据报告的工具流程。
 - `ai/prompts/miniqmt-m1-task.md`: 将 portable实现与 Windows/Mini QMT验证分开，明确缺少
   Windows证据时不得声称 M1验收。
+- `ai/schemas/agent-assignment.schema.yaml`: 冻结有序 assignment事件、Human evidence、
+  单 writer和精确 stop/switch Head所需字段与枚举。
+- `ai/schemas/agent-environment-evidence.schema.yaml`: 冻结 evidence envelope、环境能力、
+  版本 provenance、命令结果、counts、时间、脱敏和未验证范围字段。
+- `scripts/validate_agent_environment.py`: 实现正式 fail-closed gate；只从 task/Handoff读取
+  可信 identity和expected commands，验证 schema、assignment状态机、lane能力/授权、
+  exact Head/PR/branch身份、完整命令覆盖和结果一致性。
 - `tasks/templates/task-template.md`: 增加 implementation assignment、verification lanes、
   environment evidence和精确 Head失效模板，去除固定 Cline角色。
 - `scripts/validate_specs.py`: 仅在 Planning Base可复现时移除导致严格 mypy失败的多余
   `type: ignore`；不得改变规范解析/校验行为。
 - `tasks/completed/TASK-022-observability-control-contracts.md`: 追加 2026-09-01 勘误，保留
   原始观察并把根因重分类为 Codex sandbox访问边界，不重写历史命令结果。
-- `tests/spec/test_agent_execution_environment_governance.py`: 用正反例锁定工具中立角色、
-  单写者切换、lane能力、Head失效、human-only副作用、Poetry原命令、sandbox/worktree/
-  SymbolicLink和历史勘误；禁止仅用有限关键词黑名单制造假阳性。
+- `tests/spec/test_agent_execution_environment_governance.py`: 缩减为共享文档/template一致性和
+  正式 validator的高层集成测试；删除其中承担产品逻辑的私有 parser/pseudo-validator。
+- `tests/spec/test_validate_agent_environment.py`: 直接测试正式 schema/validator的正反例、
+  Git身份加载、空集合/空expected set、混入record、完整命令覆盖、assignment事件状态机、
+  capability/authorization和version provenance。
 - `tests/spec/test_miniqmt_m1_delivery_governance.py`: Activation PR 仅把旧的“无 active task”
   投影更新为“TASK-057 是唯一 active”，并锁定 index；不改变 M1 产品与交易安全断言。
 
@@ -173,14 +221,22 @@ Windows 验收、环境访问失败冒充 Poetry 损坏，以及代码 Head 与�
 
 - 工具中立角色与无固定 Cline → 扫描共享规则/template，要求 Implementation Agent字段，
   同时允许 adapter保留工具专属入口。
-- 单写者和中途切换 → 构造缺人类 evidence、缺 starting Head、并发写入的失败样例。
+- 正式契约 → schema Draft校验、validator CLI/import smoke和文档只引用该正式 gate；测试文件
+  不得定义同名或等价的主验证逻辑。
+- 可信输入 → evidence伪造expected commands、空task命令集、task/Handoff漂移、错误Base/PR/
+  branch/Head和混入record均失败。
+- 单写者和中途切换 → 有序 `ASSIGN/STOP/SWITCH` 正例，以及乱序、缺人类 evidence、缺
+  starting Head、双writer、stop/switch/PR Head不一致的失败样例。
 - portable/windows/windows_miniqmt → capability matrix正反例；Linux声称 Windows/Mini QMT
   PASS 必须失败，Linux portable全部跳过也必须失败。
 - Head绑定 → 环境 evidence Head与PR Head不同、推送后复用旧证据必须失败。
 - Mini QMT副作用 → 无独立 active task或无可核验人类授权的模拟委托证据必须失败；任何
   real-money授权文本必须失败。
-- Poetry → 强制原始命令和最小 escalation前缀；重装/删环境/bundled Python/直接 pytest
-  替代/修改依赖配置等反例必须失败。
+- Poetry → 对 task冻结的 exact command set执行完整覆盖；安全参数如 `-q` 只有在task中冻结
+  才能通过，子shell或其他文本也只有作为被审查的task原始命令才可执行，evidence不得改写。
+  最小 escalation、重装/删环境/bundled Python/直接替代/修改依赖配置由共享治理测试锁定。
+- 版本 provenance → 可信source的opaque vendor version通过；未知source、空value及敏感信息
+  泄漏失败，不对 `xtquant` 值臆造semver语法。
 - worktree/build → 空环境自动安装、lock不兼容继续执行、删除既有dist等反例必须失败。
 - TASK-022 → 必须存在追加勘误并明确新根因，不得删除原始历史证据。
 
@@ -194,25 +250,38 @@ Windows 验收、环境访问失败冒充 Poetry 损坏，以及代码 Head 与�
   改依赖。worktree环境不兼容则停止并报告 lock/pyproject差异。
 - Mini QMT客户端、session、账号类型或allowlist任一不确定时fail-closed；本治理任务本身
   禁止连接客户端或产生任何Broker副作用。
+- schema版本未知、task/Handoff无法从Git精确读取、required lane为空、record身份混杂、
+  assignment事件不可还原或正式 validator与文档冲突时，停止并返回 `PLAN_BLOCKED`。
 
 ### Implementation order
 
-1. 独立 Review并由人类合并 Activation PR。
-2. Codex读取新的精确main，创建只含 `ai/handoffs/TASK-057-IMPLEMENTATION-v1.yaml` 的
-   Codex-only commit；expected Base/PR Base均为该main，`superseded_head_sha`同样冻结为该
-   Base，表示尚无实现提交。
-3. 人类通过GitHub evidence分配一个独立 Windows Codex作为本任务 Implementation Agent；
-   Coordinator与后续 Reviewer不得承担该实现。
-4. Implementation Agent先写失败治理测试，再最小修改共享规则/adapters/workflow/template，
-   追加TASK-022勘误，并在仍可复现时修复 `validate_specs.py` mypy问题。
-5. 原样运行全部 verification commands；构建前保护既有dist，记录所有exit/skip和环境证据。
-6. 正常push Implementation PR，不self-approve/merge/closeout；新 Codex Review精确 Head。
-7. 人类合并后另建纯治理 Closeout PR。
+1. 独立 Review本 Plan v2 Amendment PR；由人类合并后停止使用 Plan v1继续修补 PR #100。
+2. Coordinator读取 amended main，创建 add-only `ai/handoffs/TASK-057-REPAIR-v2.yaml`：
+   expected Base/PR Base均为 amended main，冻结 Plan v2 task blob、完整allowed paths，并在
+   `repair_context.superseded_head_sha`记录 `d2633e79254fe06cc0667dc3659d1946de774982`。
+3. 人类通过GitHub evidence分配一个 Implementation Agent，并明确授权把 Repair v2 Handoff
+   lineage以普通、可审计的同步merge引入 PR #100；禁止rebase、force-push或并发writer。
+4. Implementation Agent先提交正式 schema/validator失败测试，再实现最小 gate；随后调整
+   共享workflow/template并删除旧治理测试中的私有pseudo-validator职责。
+5. 最终PR Head必须同时包含 amended task、不可变Handoff v1/v2和授权实现；以amended main为
+   PR Base，merge-base精确一致，`d2633e...` 为祖先，Repair v2 Handoff/task blob保持冻结。
+6. 原样运行全部verification commands和Repair v2 path/Handoff audit；构建前保护既有dist，
+   记录每条exit/skip、环境证据和CI。
+7. 全新 Independent Review审查精确Head；只有人类可GitHub Approval/merge。合并后另建纯
+   治理Closeout PR。
+
+本 Amendment PR 自身只修改 active task，不会提前创建上述新文件；因此本 PR 的验证范围是
+`validate_specs.py`、active/index一致性、现有治理投影、Ruff/format和精确changed-path audit。
+只有 Amendment 合并并冻结 Repair v2 Handoff后，才执行本 task front matter列出的完整命令。
 
 ### PLAN_BLOCKED conditions
 
 - 需要修改 forbidden path、`spec/`、业务代码、依赖、CI或真实资金权限。
-- 现有 Handoff validator无法在不修改其代码的情况下验证 TASK-057初始Handoff拓扑。
+- 现有 Handoff validator无法验证 amended-main → add-only Repair v2 Handoff → PR #100同步merge
+  拓扑，或需要修改禁止路径 `scripts/validate_ai_handoff.py`。
+- 无法从active task和Repair v2 Handoff取得唯一可信expected command set，或实现要求接受
+  caller/evidence提供的预期命令。
+- 需要构建通用PowerShell/POSIX shell安全解析器、执行未冻结命令或新增依赖。
 - 无法获得独立 Windows Implementation Agent或后续独立 Reviewer。
 - Poetry项目环境与当前 `pyproject.toml`/`poetry.lock` 不兼容，或必须安装/升级依赖才能验证。
 - 不能保护用户既有 `dist/`，或验证要求删除/覆盖不可归因于本轮的产物。
@@ -225,6 +294,10 @@ Windows 验收、环境访问失败冒充 Poetry 损坏，以及代码 Head 与�
 - 不修改 `.clinerules/`；Cline专属规则仍引用共享权威，不被复制成第二份业务规范。
 - 不重装 Poetry、不创建第二套环境、不升级依赖、不提交wheel或其他构建产物。
 - 不把当前机器的用户目录绝对路径硬编码为所有开发者的项目契约。
+- 不构建通用shell parser、不证明任意PowerShell/POSIX文本安全、不把有限关键词黑名单当
+  安全边界；本任务采用冻结task exact command set和宿主最小权限边界。
+- 不在本任务把全仓task命令迁移为structured argv。若以后需要argv-native执行格式，应以
+  独立治理task、兼容迁移和schema版本升级完成。
 
 ## Deliverables
 
@@ -234,12 +307,14 @@ Windows 验收、环境访问失败冒充 Poetry 损坏，以及代码 Head 与�
 - Cline/Linux与Codex/Windows能力边界adapter。
 - 支持环境lane的task和Mini QMT Prompt模板。
 - TASK-022追加式环境根因勘误。
-- 可执行的治理正反测试和全仓Poetry验证证据。
+- 两个版本化治理schema、一个正式环境证据validator及其独立正反测试。
+- 可执行的治理正反测试和全仓Poetry验证证据；旧测试文件不再承担隐藏validator职责。
 
 ## Acceptance criteria
 
 - [ ] 共享规则使用 Implementation Agent而非把实现角色绑定到Cline；adapter仍可保留工具名。
 - [ ] Agent分配/切换记录tool、OS、starting Head、人类evidence和单写者停止点。
+- [ ] Assignment采用有序事件模型；乱序、双writer或stop/switch/PR Head不一致时fail-closed。
 - [ ] portable、windows、windows_miniqmt lane职责、能力和required/pending/BLOCKED语义明确。
 - [ ] Linux Cline执行全部可移植验证，但不能执行或声称Windows/Mini QMT验收。
 - [ ] Windows环境证据绑定精确Head；Head变化使旧证据和Review失效。
@@ -249,13 +324,22 @@ Windows 验收、环境访问失败冒充 Poetry 损坏，以及代码 Head 与�
 - [ ] build/contract流程保护既有dist，只清理本轮可归因产物，最终contract为0 skipped。
 - [ ] TASK-022保留历史并追加可审计勘误，当前结论明确为sandbox访问边界。
 - [ ] task template、Mini QMT Prompt、协作workflow和Implementation Report字段一致。
+- [ ] 正式schema和`validate_agent_environment.py`是唯一machine gate；测试不复制主逻辑。
+- [ ] validator只从精确task/Handoff读取identity和expected commands，拒绝caller/evidence覆盖。
+- [ ] required lane在空records、空expected commands、混入identity、缺命令或结果不一致时失败。
+- [ ] command evidence精确覆盖冻结task命令；不依赖POSIX parser解释PowerShell，也不过拟合
+  当前pytest/mypy参数。
+- [ ] `xtquant`使用可信source + opaque value provenance；未知或敏感值失败，不猜测semver。
 - [ ] 全部治理正反测试、task verification、mypy、Ruff、pre-commit和path audit通过。
 - [ ] 未修改spec、业务代码、migration、依赖、CI、`.clinerules`或其他任务范围。
 
 ## Required evidence
 
-- Handoff/assignment：Plan、Planning Base、Handoff commit、expected Base、tool/OS、Starting
-  Head、人类assignment URL、GitHub PR Base/Head和完整path audit。
+- Handoff/assignment：Plan v2、Planning Base、Repair v2 Handoff commit/blob、expected Base、
+  superseded Head、按序assignment events、tool/OS、Starting/STOP/SWITCH Head、人类assignment
+  URL、GitHub PR Base/Head和完整path audit。
+- Validator：两个schema的版本/路径、validator CLI和导入结果、可信task/Handoff解析、空集合、
+  identity混入、命令覆盖、assignment状态机及version provenance正反测试。
 - Poetry：Poetry/Python版本、环境路径/Valid、依赖导入、每条原始命令和exit code；明确区分
   sandbox失败与沙箱外真实结果。
 - Tests：pytest passed/failed/skipped、非skip治理反例、mypy、Ruff、pre-commit和contract
@@ -271,4 +355,6 @@ Windows 验收、环境访问失败冒充 Poetry 损坏，以及代码 Head 与�
   Mini QMT。
 - 环境证据可能泄漏账号/路径；只记录版本、路径叶节点和脱敏状态，禁止凭据/完整账号入Git。
 - 仓库规则不能自动授予Codex宿主权限；缺人类批准时保持BLOCKED，不绕过sandbox。
+- Plan v1的反复局部修复已经证明私有helper边界不稳定；Plan v2通过缩小可信输入和建立正式
+  gate控制风险。若正式schema仍不完整，应返回PLAN_BLOCKED并修订Plan，不继续追加黑名单。
 - 回滚只恢复本任务治理文件和追加勘误；不删除历史证据、不修改业务状态或外部环境。
