@@ -1,8 +1,11 @@
 # Active Tasks
 
-当前没有 active task。
+当前唯一 active task：
 
-TASK-056 已经独立 Review、人类 Approval、合并并按单独记录的人类授权移入 completed。
-它没有授权交易业务实现、`spec/` 变更、部署、release 或下游任务激活。
+- TASK-057 — tool-neutral implementation agents、Windows/Mini QMT verification lanes 和
+  Codex Poetry environment governance。
 
-TASK-053 继续原样暂停在 backlog/blocked；后续任务必须由人类另行选择和激活。
+TASK-057 只授权协作/环境治理、模板、adapter、Poetry验证流程、治理测试和追加式历史勘误；
+不授权交易业务实现、`spec/`、依赖、CI、Mini QMT连接、模拟委托、部署或release。
+
+TASK-053 继续原样暂停在 backlog/blocked；其他任务不得并行激活。
