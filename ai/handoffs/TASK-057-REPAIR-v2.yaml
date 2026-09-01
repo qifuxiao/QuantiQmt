@@ -1,0 +1,92 @@
+schema_version: 1
+task_id: TASK-057
+packet_version: TASK-057-REPAIR-v2
+plan_version: TASK-057-PLAN-v2
+planning_base_sha: ec2b95b165619af671a919a9950d40adfa9bbbaf
+expected_base_sha: 7d60e2393412ae5e43c908e10208fa40b20007ef
+expected_pr_base_sha: 7d60e2393412ae5e43c908e10208fa40b20007ef
+task_blob_sha: a41bd84b84409f65d3d1a3b7f3298946daa6b5af
+
+allowed_paths:
+  - AGENTS.md
+  - ai/adapters/cline.md
+  - ai/adapters/codex.md
+  - ai/handoffs/TASK-057-IMPLEMENTATION-v1.yaml
+  - ai/handoffs/TASK-057-REPAIR-v2.yaml
+  - ai/prompts/miniqmt-m1-task.md
+  - ai/schemas/agent-assignment.schema.yaml
+  - ai/schemas/agent-environment-evidence.schema.yaml
+  - ai/workflows/poetry-verification.md
+  - ai/workflows/team-collaboration.md
+  - scripts/validate_agent_environment.py
+  - scripts/validate_specs.py
+  - tasks/completed/TASK-022-observability-control-contracts.md
+  - tasks/templates/task-template.md
+  - tests/spec/test_agent_execution_environment_governance.py
+  - tests/spec/test_validate_agent_environment.py
+
+codex_only_paths:
+  - ai/handoffs/TASK-057-IMPLEMENTATION-v1.yaml
+  - ai/handoffs/TASK-057-REPAIR-v2.yaml
+
+required_lanes:
+  - lane: portable
+    capability: portable
+    minimum_records: 1
+    commands:
+      - poetry run python scripts/validate_specs.py
+      - poetry run pytest tests/spec/test_validate_specs.py tests/spec/test_miniqmt_m1_delivery_governance.py tests/spec/test_codex_cline_collaboration_governance.py tests/spec/test_validate_ai_handoff.py tests/spec/test_agent_execution_environment_governance.py tests/spec/test_validate_agent_environment.py
+      - poetry run mypy src scripts
+      - poetry run ruff check scripts/validate_specs.py scripts/validate_agent_environment.py tests/spec/test_agent_execution_environment_governance.py tests/spec/test_validate_agent_environment.py
+      - poetry run ruff format --check scripts/validate_specs.py scripts/validate_agent_environment.py tests/spec/test_agent_execution_environment_governance.py tests/spec/test_validate_agent_environment.py
+      - poetry run python -c "from scripts.validate_specs import extract_front_matter, task_files; active=sorted(str(extract_front_matter(path).get('id')) for path in task_files() if extract_front_matter(path).get('status') == 'active'); assert active == ['TASK-057'], active"
+      - poetry run python scripts/validate_agent_environment.py --help
+      - poetry run python scripts/validate_ai_handoff.py --task tasks/active/TASK-057-tool-neutral-agents-windows-verification-poetry.md --handoff ai/handoffs/TASK-057-REPAIR-v2.yaml --base-ref origin/main --head HEAD
+      - poetry run pytest tests/spec
+      - poetry run pytest tests/contract
+      - poetry run ruff check .
+      - poetry run ruff format --check .
+      - poetry run pre-commit run --all-files
+      - git diff --check origin/main...HEAD
+  - lane: windows
+    capability: windows
+    minimum_records: 1
+    commands:
+      - poetry --version
+      - poetry env info
+      - poetry run python -c "import sys; print(sys.executable); print(sys.version)"
+      - poetry run python -c "import yaml, jsonschema, pytest; print('deps-ok')"
+
+prohibited_lanes:
+  - windows_miniqmt
+
+repair_context:
+  superseded_head_sha: d2633e79254fe06cc0667dc3659d1946de774982
+  stage: plan_v2_architecture_reset
+  note: >-
+    PR #100 Plan v1 implementation remains auditable but must receive no further
+    Plan v1 patches. Repair v2 must synchronize this add-only Handoff lineage
+    into PR #100 without rebase or force-push before any new implementation.
+
+required_outcome:
+  - Replace the test-private pseudo-validator with two versioned governance schemas and one formal environment-evidence validator.
+  - Load task, Base, Head, required lanes, prohibited lanes, and exact expected commands only from the frozen active task and this Handoff.
+  - Reject empty or mixed evidence, identity drift, caller or evidence overrides, incomplete or duplicate command coverage, and unsatisfied capabilities or authorization.
+  - Model assignment as ordered ASSIGN, STOP, and SWITCH events with one writer and exact stop, switch, and PR Head identity.
+  - Record xtquant as trusted-source provenance with an opaque sanitized value rather than guessed semantic-version syntax.
+  - Preserve tool-neutral implementation, Windows and Poetry verification governance while prohibiting Mini QMT access and every trading side effect in TASK-057.
+
+execution_constraints:
+  implementation_pr_must_remain_open: true
+  direct_push_to_main: forbidden
+  rebase: forbidden
+  force_push: forbidden
+  self_approve: forbidden
+  merge: forbidden
+  closeout: forbidden
+  modify_handoff_records: forbidden
+  modify_task_or_spec: forbidden
+  modify_business_code_dependencies_or_ci: forbidden
+  miniqmt_connection_account_access_or_order: forbidden
+  expected_commands_from_caller_or_evidence: forbidden
+  universal_shell_parser: forbidden
