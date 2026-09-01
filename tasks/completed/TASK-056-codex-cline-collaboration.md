@@ -1,7 +1,7 @@
 ---
 id: TASK-056
 title: Establish Codex-Cline GitHub collaboration protocol
-status: active
+status: completed
 depends_on: [TASK-054, TASK-055]
 spec_refs: []
 allowed_paths:
@@ -50,10 +50,28 @@ verification:
 delivery:
   schema_version: 1
   contract_status: not_applicable
-  implementation_status: not_started
-  acceptance_status: not_run
-  review_status: pending
+  implementation_status: merged
+  acceptance_status: passed
+  review_status: approved
   release_status: prohibited
+  completion_evidence:
+    mode: governance_closeout_after_independent_review
+    change_pr: https://github.com/qifuxiao/QuantiQmt/pull/95
+    reviewed_head_sha: 70f0a731e72c26391f996326f5dc2009d8f0e580
+    review_verdict: APPROVE
+    reviewer: qfxyyy
+    evidence_url: https://github.com/qifuxiao/QuantiQmt/pull/95#pullrequestreview-5068093171
+    merge_commit_sha: 0064bf238beffbbe053e927f1851b7dbc1e1016d
+    review_submitted_at: '2026-08-31T15:15:46Z'
+    merge_completed_at: '2026-08-31T15:16:42Z'
+    ci_evidence: >-
+      4/4 GitHub checks succeeded on the reviewed Head: two quality and two
+      persistence-postgresql jobs from workflow runs 33402234453 and 33402227203.
+    human_authorization_evidence: >-
+      2026-08-31 user explicitly authorized an independent TASK-056 Closeout PR
+      based on merge commit 0064bf238beffbbe053e927f1851b7dbc1e1016d, limited
+      to the active-to-completed lifecycle projection and excluding spec,
+      business code, CI, dependencies, self-approval, and merge.
 ---
 
 # Objective
@@ -261,32 +279,32 @@ Base 的 Codex Implementation Plan。
 
 ## Acceptance criteria
 
-- [ ] 持久规则明确 Codex 决策、Cline 产能、Codex 独立验收、人类最终授权的角色边界。
-- [ ] Cline 必须读取 Codex Plan，并在无 active、Base 不匹配、dirty 或设计缺口时 fail-closed。
-- [ ] 全部 `.clinerules/` 只引用 AGENTS/task/spec，不复制模拟账户、交易开关、Broker/API、
+- [x] 持久规则明确 Codex 决策、Cline 产能、Codex 独立验收、人类最终授权的角色边界。
+- [x] Cline 必须读取 Codex Plan，并在无 active、Base 不匹配、dirty 或设计缺口时 fail-closed。
+- [x] 全部 `.clinerules/` 只引用 AGENTS/task/spec，不复制模拟账户、交易开关、Broker/API、
   订单链、UNKNOWN/reconciliation、Event、DTO、状态机、错误码或其他业务契约正文。
-- [ ] Codex-authored v2 Handoff Record 在修复前冻结 expected Base/PR Base/task blob/Plan/Packet/
+- [x] Codex-authored v2 Handoff Record 在修复前冻结 expected Base/PR Base/task blob/Plan/Packet/
   阶段路径，Implementation Agent 修改或缺失 Record 时 fail-closed。
-- [ ] Validator 将 `schema_version`、`task_id`、`packet_version`、`plan_version` 分别绑定到
+- [x] Validator 将 `schema_version`、`task_id`、`packet_version`、`plan_version` 分别绑定到
   支持版本、active task、v2 Packet 和 Plan v4；任一语义不匹配均 fail-closed。
-- [ ] v2 introduction 后、supplied Head 可达的每个 descendant 提交结果都保有同一冻结
+- [x] v2 introduction 后、supplied Head 可达的每个 descendant 提交结果都保有同一冻结
   Record blob；merge-only 删除、恢复原 blob 或重新引入均被真实 Git 拓扑测试拒绝。
-- [ ] 机器 validator 对构造输入证明 expected Base、merge-base、PR Base 三者必须相等，
+- [x] 机器 validator 对构造输入证明 expected Base、merge-base、PR Base 三者必须相等，
   并覆盖 missing/mismatch、Record/task 漂移、rename、outside allowed 和 forbidden 反例。
-- [ ] Cline Report 包含 Base/Head SHA、branch/PR、changed files、逐项 acceptance、命令退出码、
+- [x] Cline Report 包含 Base/Head SHA、branch/PR、changed files、逐项 acceptance、命令退出码、
   未验证范围、风险、spec deviations 和 allowed-path diff 结论。
-- [ ] 所有 Review 入口要求 PR OPEN、精确 Base/Head、祖先检查、精确 `Base...Head` diff、
+- [x] 所有 Review 入口要求 PR OPEN、精确 Base/Head、祖先检查、精确 `Base...Head` diff、
   结束 Head 再核验和三种 verdict；禁止移动 ref 双点范围及仅两 verdict 模板。
-- [ ] Implementation PR 与 Closeout PR 分离；Cline 不得 self-approve/merge/closeout。
-- [ ] Reviewer 只记录 verdict，只有人类可授权 closeout/状态迁移，所有规则无“人类或
+- [x] Implementation PR 与 Closeout PR 分离；Cline 不得 self-approve/merge/closeout。
+- [x] Reviewer 只记录 verdict，只有人类可授权 closeout/状态迁移，所有规则无“人类或
   Reviewer 均可授权”的歧义。
-- [ ] `tasks/AGENTS.md` 不再授权 Reviewer 写入 completed，并被全部持久协作文件否定扫描覆盖。
-- [ ] Task template 明确区分 Planning Base 与 Codex-authored Handoff Record 中的 expected
+- [x] `tasks/AGENTS.md` 不再授权 Reviewer 写入 completed，并被全部持久协作文件否定扫描覆盖。
+- [x] Task template 明确区分 Planning Base 与 Codex-authored Handoff Record 中的 expected
   Base，并包含设计、文件计划、测试映射、失败设计和 PLAN_BLOCKED 条件。
-- [ ] 没有修改 spec、业务代码、migration、依赖、CI、交易权限或其他任务 scope；相对
+- [x] 没有修改 spec、业务代码、migration、依赖、CI、交易权限或其他任务 scope；相对
   Plan v3 仅新增 `tasks/AGENTS.md` 和 v2 Handoff 路径，finding 实现只修改 v2 Handoff、
   validator、`tasks/AGENTS.md` 与两份既有 TASK-056 validator/governance 测试。
-- [ ] changed-path membership audit 和所有 verification commands 通过，独立 Review
+- [x] changed-path membership audit 和所有 verification commands 通过，独立 Review
   后才可进入 closeout。
 
 ## Required evidence
@@ -299,6 +317,44 @@ Base 的 Codex Implementation Plan。
   exit code；Head 改变时旧 Review 失效。
 - Closeout 记录独立 Review、CI、merge commit 和可核验的人类授权；Reviewer verdict 不是
   closeout 授权，未知事实不得猜测。
+
+## Final Review and closeout evidence
+
+- 独立只读 Review 对最终 implementation Head
+  `70f0a731e72c26391f996326f5dc2009d8f0e580` 给出 `APPROVE`；修正两项 Review 指令错误后，
+  未发现 blocking finding，TASK-056 四文件测试为 `131 passed, 0 failed, 0 skipped`，15 项
+  真实 Git topology 测试全部非 skip 通过。
+- 不同作者的 collaborator `qfxyyy` 于 `2026-08-31T15:15:46Z` 对同一精确 Head 提交正式
+  GitHub `APPROVED` Review：
+  https://github.com/qifuxiao/QuantiQmt/pull/95#pullrequestreview-5068093171
+- 该 Head 的 4/4 GitHub checks 全部成功：
+  [quality pull_request](https://github.com/qifuxiao/QuantiQmt/actions/runs/33402234453/job/99521096256)、
+  [quality push](https://github.com/qifuxiao/QuantiQmt/actions/runs/33402227203/job/99521074950)、
+  [persistence pull_request](https://github.com/qifuxiao/QuantiQmt/actions/runs/33402234453/job/99521096464) 和
+  [persistence push](https://github.com/qifuxiao/QuantiQmt/actions/runs/33402227203/job/99521074764)。
+- PR #95 于 `2026-08-31T15:16:42Z` 由 `qfxyyy` 合并到 `main`，merge commit 为
+  `0064bf238beffbbe053e927f1851b7dbc1e1016d`；该 commit 的第二 parent 精确等于 reviewed Head。
+- 2026-08-31 人类随后单独明确授权基于上述 merge commit 创建 TASK-056 Closeout PR，并仅
+  机械执行 active → completed 生命周期投影；授权明确排除 `spec/`、业务代码、CI、依赖、
+  self-approval 和 Closeout PR merge。
+- Closeout 不授权 release、下游任务激活、部署或任何交易能力；`release_status` 继续为
+  `prohibited`，TASK-053 继续保持 backlog/blocked。
+
+## Closeout verification
+
+- Closeout 分支基于 `origin/main@0064bf238beffbbe053e927f1851b7dbc1e1016d` 创建，未重写
+  implementation 历史，也未修改 v1/v2 Handoff Record。
+- 生命周期变更前，冻结 Base/Head/PR Base validator、spec validator、Ruff、mypy、唯一
+  `TASK-056` active assertion 和精确 implementation diff check 均 exit 0。主分支合并前移后，
+  可选 checkout smoke 如预期不再适用；核心真实 Git topology 测试仍为 `15 passed, 0 skipped`。
+- 生命周期投影完成后，`scripts/validate_specs.py`、mypy 和空 active task assertion 均 exit 0；
+  修复 Closeout Review finding 后四文件治理测试为 `135 passed, 0 failed, 1 skipped`；新增五项
+  回归测试锁定 completed/frozen-active 路径分离、仅允许的两种 skip 原因，以及浅 checkout
+  在 active 路径已迁移时仍只能命中该迁移原因。唯一实际 skip 是已单独报告的可选 checkout
+  smoke，因为 frozen active-task 路径已经迁移到 completed。
+- Closeout 仅移动并更新 TASK-056、active/index 投影和三个直接引用其生命周期路径的治理测试；
+  未修改 `spec/`、`src/`、`.github/`、migration、依赖、Handoff Record、业务代码或其他任务。
+  规范偏差为 none。
 
 ## Risks and rollback
 

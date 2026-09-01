@@ -37,7 +37,8 @@ import yaml
 ROOT = Path(__file__).resolve().parents[2]
 VALIDATOR = ROOT / "scripts" / "validate_ai_handoff.py"
 HANDOFF = ROOT / "ai" / "handoffs" / "TASK-056-REPAIR-v2.yaml"
-TASK = ROOT / "tasks" / "active" / "TASK-056-codex-cline-collaboration.md"
+TASK = ROOT / "tasks" / "completed" / "TASK-056-codex-cline-collaboration.md"
+FROZEN_ACTIVE_TASK = ROOT / "tasks" / "active" / "TASK-056-codex-cline-collaboration.md"
 
 SHA_A = "a" * 40
 SHA_B = "b" * 40
@@ -81,23 +82,94 @@ def test_mypy_passes() -> None:
 # ── Integration: real frozen handoff ─────────────────────────────────────
 
 
+def _checkout_smoke_skip_reason(
+    origin_main: str,
+    expected_base: str,
+    frozen_task_exists: bool,
+) -> str | None:
+    if not frozen_task_exists:
+        return "the frozen active-task path has been closed out"
+    if origin_main != expected_base:
+        return "origin/main no longer matches the frozen Handoff base"
+    return None
+
+
+@pytest.mark.parametrize(
+    ("origin_main", "expected_base", "frozen_task_exists", "expected_reason"),
+    [
+        (
+            SHA_A,
+            SHA_B,
+            True,
+            "origin/main no longer matches the frozen Handoff base",
+        ),
+        (
+            SHA_A,
+            SHA_A,
+            False,
+            "the frozen active-task path has been closed out",
+        ),
+        (
+            "",
+            SHA_A,
+            False,
+            "the frozen active-task path has been closed out",
+        ),
+        (SHA_A, SHA_A, True, None),
+    ],
+)
+def test_optional_checkout_smoke_has_only_two_skip_reasons(
+    origin_main: str,
+    expected_base: str,
+    frozen_task_exists: bool,
+    expected_reason: str | None,
+) -> None:
+    assert (
+        _checkout_smoke_skip_reason(origin_main, expected_base, frozen_task_exists)
+        == expected_reason
+    )
+
+
+def test_optional_checkout_smoke_distinguishes_frozen_and_completed_task_paths() -> None:
+    assert FROZEN_ACTIVE_TASK != TASK
+    assert FROZEN_ACTIVE_TASK.parent.name == "active"
+    assert TASK.parent.name == "completed"
+
+
 def test_optional_checkout_smoke_validator_passes_on_frozen_handoff() -> None:
     """Optionally smoke-test the real checkout when its remote history is available."""
-    # Skip if origin/main is not available (shallow CI checkout)
+    # This smoke test is meaningful only while the moving remote still names the
+    # frozen implementation Base and the task remains at its implementation path.
+    # The non-skipping real-Git topology tests below remain the CI gate after
+    # implementation merge and task closeout.
+    handoff = yaml.safe_load(HANDOFF.read_text(encoding="utf-8"))
+    assert isinstance(handoff, dict)
+    expected_base = handoff["expected_base_sha"]
+    assert isinstance(expected_base, str)
+    if not FROZEN_ACTIVE_TASK.exists():
+        skip_reason = _checkout_smoke_skip_reason("", expected_base, False)
+        assert skip_reason is not None
+        pytest.skip(skip_reason)
     probe = subprocess.run(
         ["git", "rev-parse", "origin/main"],
         capture_output=True,
         text=True,
         cwd=ROOT,
     )
-    if probe.returncode != 0:
-        pytest.skip("origin/main not available (shallow clone)")
+    assert probe.returncode == 0, f"origin/main is not readable: {probe.stderr}"
+    skip_reason = _checkout_smoke_skip_reason(
+        probe.stdout.strip(),
+        expected_base,
+        True,
+    )
+    if skip_reason is not None:
+        pytest.skip(skip_reason)
     result = subprocess.run(
         [
             sys.executable,
             str(VALIDATOR),
             "--task",
-            str(TASK),
+            str(FROZEN_ACTIVE_TASK),
             "--handoff",
             str(HANDOFF),
             "--base-ref",
@@ -658,7 +730,7 @@ def _run_validator_func(
 
 def _default_git_kwargs(head: str = "HEAD") -> dict[str, Any]:
     """Default git mock responses for a valid state."""
-    rel_task = "tasks/active/TASK-056-codex-cline-collaboration.md"
+    rel_task = "tasks/completed/TASK-056-codex-cline-collaboration.md"
     rel_handoff = "ai/handoffs/TASK-056-REPAIR-v2.yaml"
     base = SHA_B
     return {
@@ -882,7 +954,7 @@ def test_supplied_head_differs_from_ambient_head_task_blob() -> None:
 
     # Now make blob at SHA_D differ from frozen
     kwargs2 = _default_git_kwargs(head=SHA_D)
-    rel_task = "tasks/active/TASK-056-codex-cline-collaboration.md"
+    rel_task = "tasks/completed/TASK-056-codex-cline-collaboration.md"
     kwargs2["blob_map"][f"{SHA_D}:{rel_task}"] = SHA_E
     errors2 = _run_validator_func(handoff, task_fm, head=SHA_D, **kwargs2)
     assert any("drift" in e.lower() for e in errors2)
