@@ -10,6 +10,7 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+RFC3339_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$")
 GITHUB_EVIDENCE_RE = re.compile(
     r"^https://github\.com/[^/]+/[^/]+/(?:pull|issues)/\d+#(?:issuecomment|pullrequestreview)-\d+$"
 )
@@ -154,13 +155,299 @@ def _valid_lane_record(lane: str, os_name: str, head: str) -> dict[str, object]:
     return record
 
 
-def _poetry_command_errors(command: str) -> list[str]:
+def _complete_evidence_record(
+    command: str,
+    *,
+    base: str = "c" * 40,
+    head: str = "d" * 40,
+    role: str = "Implementation Agent",
+) -> dict[str, object]:
+    return {
+        "task": "TASK-057",
+        "base": base,
+        "head": head,
+        "lane": "portable",
+        "requirement": "required",
+        "role": role,
+        "tool": "Codex",
+        "os": "Windows",
+        "python_version": "3.12.10",
+        "poetry_version": "2.4.1",
+        "command": command,
+        "exit_code": 0,
+        "executed": 1,
+        "passed": 1,
+        "failed": 0,
+        "skipped": 0,
+        "timestamp": "2026-09-01T09:00:00Z",
+        "sanitized_evidence": True,
+        "unverified_scope": "",
+        "evidence_url": "https://github.com/example/repo/pull/3#issuecomment-4",
+    }
+
+
+def _environment_evidence_schema_errors(
+    record: Mapping[str, object],
+    *,
+    expected_task: str,
+    expected_base: str,
+    expected_head: str,
+) -> list[str]:
+    required = {
+        "task",
+        "base",
+        "head",
+        "lane",
+        "requirement",
+        "role",
+        "tool",
+        "os",
+        "python_version",
+        "poetry_version",
+        "command",
+        "exit_code",
+        "executed",
+        "passed",
+        "failed",
+        "skipped",
+        "timestamp",
+        "sanitized_evidence",
+        "unverified_scope",
+        "evidence_url",
+    }
+    errors = [f"missing {field}" for field in sorted(required - record.keys())]
+    if record.get("task") != expected_task:
+        errors.append("evidence task does not match expected task")
+    if not SHA_RE.fullmatch(str(record.get("base", ""))):
+        errors.append("Base must be an exact SHA")
+    elif record.get("base") != expected_base:
+        errors.append("evidence Base does not match expected Base")
+    if not SHA_RE.fullmatch(str(record.get("head", ""))):
+        errors.append("Head must be an exact SHA")
+    elif record.get("head") != expected_head:
+        errors.append("evidence Head does not match expected Head")
+    if record.get("lane") not in {"portable", "windows", "windows_miniqmt"}:
+        errors.append("unknown lane")
+    if record.get("requirement") not in {
+        "required",
+        "optional",
+        "not_applicable",
+    }:
+        errors.append("invalid lane requirement")
+    if record.get("role") not in {
+        "Implementation Agent",
+        "Environment Verification Agent",
+    }:
+        errors.append("role may not produce environment evidence")
+    if (
+        record.get("lane") in {"windows", "windows_miniqmt"}
+        and str(record.get("os", "")).lower() != "windows"
+    ):
+        errors.append("Windows evidence requires an actual Windows agent")
+    for field in ("tool", "os", "python_version", "poetry_version", "command"):
+        if not isinstance(record.get(field), str) or not str(record.get(field)).strip():
+            errors.append(f"{field} must be a non-empty string")
+    if record.get("lane") == "windows_miniqmt" and (
+        not isinstance(record.get("xtquant_version"), str)
+        or not str(record.get("xtquant_version")).strip()
+    ):
+        errors.append("xtquant_version is required for Windows/Mini QMT evidence")
+    if type(record.get("exit_code")) is not int:
+        errors.append("exit_code must be an integer")
+    if not RFC3339_RE.fullmatch(str(record.get("timestamp", ""))):
+        errors.append("timestamp must be RFC3339")
+    if record.get("sanitized_evidence") is not True:
+        errors.append("sanitized_evidence must be true")
+    if "unverified_scope" in record and not isinstance(record.get("unverified_scope"), str):
+        errors.append("unverified_scope must be an explicit string")
+    if not GITHUB_EVIDENCE_RE.fullmatch(str(record.get("evidence_url", ""))):
+        errors.append("environment evidence requires a durable GitHub URL")
+    return errors
+
+
+def _required_lane_satisfaction_errors(
+    records: list[Mapping[str, object]],
+    *,
+    expected_task: str,
+    expected_base: str,
+    expected_head: str,
+    lane: str,
+    expected_commands: set[str],
+    skip_allowances: Mapping[str, int],
+) -> list[str]:
+    errors: list[str] = []
+    normalized_expected = {" ".join(command.split()) for command in expected_commands}
+    normalized_allowances = {
+        " ".join(command.split()): allowance for command, allowance in skip_allowances.items()
+    }
+    observed: list[str] = []
+    for index, record in enumerate(records):
+        schema_errors = _environment_evidence_schema_errors(
+            record,
+            expected_task=expected_task,
+            expected_base=expected_base,
+            expected_head=expected_head,
+        )
+        errors.extend(f"record {index}: {error}" for error in schema_errors)
+        if record.get("lane") != lane:
+            errors.append(f"record {index}: lane does not match required lane")
+        if record.get("requirement") != "required":
+            errors.append(f"record {index}: lane record is not required")
+        command = " ".join(str(record.get("command", "")).split())
+        observed.append(command)
+        counts: dict[str, int] = {}
+        for field in ("executed", "passed", "failed", "skipped"):
+            value = record.get(field)
+            if type(value) is not int or value < 0:
+                errors.append(f"record {index}: {field} must be a non-negative integer")
+            else:
+                counts[field] = value
+        if len(counts) == 4:
+            if counts["executed"] <= 0:
+                errors.append(f"record {index}: executed work must be nonzero")
+            if counts["executed"] != (counts["passed"] + counts["failed"] + counts["skipped"]):
+                errors.append(f"record {index}: result counts are inconsistent")
+            if counts["failed"] != 0:
+                errors.append(f"record {index}: failed count must be zero")
+            allowance = normalized_allowances.get(command, 0)
+            if counts["skipped"] > allowance:
+                errors.append(f"record {index}: skipped count exceeds allowance")
+            if counts["skipped"] > 0 and not str(record.get("unverified_scope", "")).strip():
+                errors.append(f"record {index}: skipped scope must be explicit")
+        if record.get("exit_code") != 0:
+            errors.append(f"record {index}: exit code must be zero")
+
+    observed_set = set(observed)
+    missing = normalized_expected - observed_set
+    unexpected = observed_set - normalized_expected
+    if missing:
+        errors.append(f"missing expected commands: {sorted(missing)}")
+    if unexpected:
+        errors.append(f"unexpected commands: {sorted(unexpected)}")
+    if len(observed) != len(observed_set):
+        errors.append("duplicate command evidence is not exact coverage")
+    return errors
+
+
+def _poetry_command_errors(
+    command: str,
+    *,
+    expected_commands: set[str],
+    build_reason: str | None = None,
+) -> list[str]:
     normalized = " ".join(command.strip().split())
-    allowed = normalized.startswith("poetry run ") or normalized == "poetry build"
-    if not allowed:
-        return ["project verification must use an original poetry run/build command"]
-    mutation_tokens = ("poetry install", "pip install", "poetry env remove", "--no-verify")
-    return [token for token in mutation_tokens if token in normalized]
+    normalized_expected = {" ".join(item.strip().split()) for item in expected_commands}
+    errors: list[str] = []
+    if normalized not in normalized_expected:
+        errors.append("command is not in the task-supplied expected command set")
+    lower = normalized.lower()
+    if not lower.startswith("poetry "):
+        errors.append("project verification must use the original Poetry entrypoint")
+    mutation_patterns = (
+        r"(?:^| )(?:python -m )?(?:venv|virtualenv)(?: |$)",
+        r"(?:^| )(?:python -m )?pip (?:install|uninstall)(?: |$)",
+        r"^poetry (?:add|install|update|remove|lock)(?: |$)",
+        r"^poetry run poetry (?:add|install|update|remove|lock)(?: |$)",
+        r"^poetry env (?:use|remove)(?: |$)",
+    )
+    errors.extend(
+        f"mutation command is forbidden: {pattern}"
+        for pattern in mutation_patterns
+        if re.search(pattern, lower)
+    )
+    if "bundled" in lower:
+        errors.append("bundled Python is forbidden")
+    if "--no-verify" in lower:
+        errors.append("--no-verify is forbidden")
+    if normalized == "poetry build" and build_reason not in {
+        "task_required",
+        "missing_wheel_only_skip",
+    }:
+        errors.append("poetry build requires an allowed reason")
+    return errors
+
+
+def _worktree_reuse_errors(decision: Mapping[str, object]) -> list[str]:
+    required_true = (
+        "existing_environment_valid",
+        "dependency_complete",
+        "python_compatible",
+        "pyproject_identity_compatible",
+        "lock_identity_compatible",
+        "original_poetry_entrypoint",
+        "compatibility_verifiable",
+    )
+    required_false = ("create_environment", "install_dependencies")
+    errors = [field for field in required_true if decision.get(field) is not True]
+    errors.extend(field for field in required_false if decision.get(field) is not False)
+    return errors
+
+
+def _dist_transition_errors(
+    before: Mapping[str, Mapping[str, object]],
+    after: Mapping[str, Mapping[str, object]],
+    *,
+    cleanup: set[str],
+    build_reason: str | None,
+) -> list[str]:
+    errors: list[str] = []
+    if build_reason not in {"task_required", "missing_wheel_only_skip"}:
+        errors.append("build reason is not allowed")
+    for inventory_name, inventory in (("before", before), ("after", after)):
+        for path, metadata in inventory.items():
+            if not isinstance(path, str) or not path:
+                errors.append(f"{inventory_name} inventory path must be explicit")
+            for field in ("checksum", "ignored", "ownership"):
+                if field not in metadata:
+                    errors.append(f"{inventory_name} inventory {path} is missing {field}")
+    for path, metadata in before.items():
+        if path not in after:
+            errors.append(f"existing artifact was deleted or moved: {path}")
+        elif after[path].get("checksum") != metadata.get("checksum"):
+            errors.append(f"existing artifact was overwritten: {path}")
+    attributable: set[str] = set()
+    for path in after.keys() - before.keys():
+        metadata = after[path]
+        if (
+            metadata.get("ignored") is True
+            and metadata.get("ownership") == "build"
+            and metadata.get("produced_by_build") is True
+        ):
+            attributable.add(path)
+        else:
+            errors.append(f"new artifact cannot be attributed to this build: {path}")
+    if not cleanup <= attributable:
+        errors.append("cleanup contains existing, user-owned, or unattributable artifacts")
+    return errors
+
+
+def _assignment_collection_errors(
+    records: list[Mapping[str, object]], *, pr: int, branch: str
+) -> list[str]:
+    errors: list[str] = []
+    scoped = [
+        record for record in records if record.get("pr") == pr and record.get("branch") == branch
+    ]
+    active = [record for record in scoped if record.get("active") is True]
+    if len(active) > 1:
+        errors.append("PR and branch have more than one active writer")
+    by_agent = {str(record.get("agent")): record for record in scoped}
+    for index, record in enumerate(scoped):
+        switching = "previous_agent" in record
+        errors.extend(
+            f"record {index}: {error}" for error in _assignment_errors(record, switching=switching)
+        )
+        if record.get("active") not in {True, False}:
+            errors.append(f"record {index}: active must be explicit")
+        if switching:
+            previous = by_agent.get(str(record.get("previous_agent")))
+            if previous is None:
+                errors.append(f"record {index}: previous writer record is missing")
+            elif previous.get("active") is not False:
+                errors.append(f"record {index}: previous writer must be inactive")
+            if record.get("next_agent") != record.get("agent"):
+                errors.append(f"record {index}: next agent identity does not match")
+    return errors
 
 
 def test_shared_governance_uses_tool_neutral_roles() -> None:
@@ -360,7 +647,11 @@ def test_poetry_workflow_requires_original_commands_and_minimum_escalation() -> 
     ),
 )
 def test_poetry_command_allow_structure_is_fail_closed(command: str, valid: bool) -> None:
-    assert (_poetry_command_errors(command) == []) is valid
+    build_reason = "task_required" if command == "poetry build" else None
+    assert (
+        _poetry_command_errors(command, expected_commands={command}, build_reason=build_reason)
+        == []
+    ) is valid
 
 
 def test_worktree_reuse_checks_python_project_and_lock_compatibility() -> None:
@@ -410,6 +701,13 @@ def test_template_prompt_workflow_share_environment_evidence_fields() -> None:
             "environment evidence",
             "exact head",
             "unverified scope",
+            "expected base",
+            "requirement",
+            "timestamp",
+            "sanitized_evidence",
+            "expected command set",
+            "required-lane satisfaction",
+            "pr/branch single-writer",
         ):
             assert token in text, f"{relative_path}: {token}"
 
@@ -426,3 +724,426 @@ def test_codex_and_cline_adapters_report_only_actual_capabilities() -> None:
     assert "Windows" in cline
     assert "Mini QMT" in cline
     assert "不得声称" in cline or "must not claim" in cline.lower()
+
+
+@pytest.mark.parametrize(
+    ("field", "replacement"),
+    (
+        ("base", "a" * 40),
+        ("head", "b" * 40),
+        ("timestamp", None),
+        ("sanitized_evidence", None),
+        ("unverified_scope", None),
+        ("role", "Independent Review Agent"),
+    ),
+)
+def test_environment_evidence_schema_and_identity_fail_closed(
+    field: str, replacement: object
+) -> None:
+    record = _complete_evidence_record("poetry run pytest tests/spec")
+    if replacement is None:
+        del record[field]
+    else:
+        record[field] = replacement
+    assert _environment_evidence_schema_errors(
+        record,
+        expected_task="TASK-057",
+        expected_base="c" * 40,
+        expected_head="d" * 40,
+    )
+
+
+def test_environment_evidence_schema_accepts_complete_current_identity() -> None:
+    record = _complete_evidence_record("poetry run pytest tests/spec")
+    assert (
+        _environment_evidence_schema_errors(
+            record,
+            expected_task="TASK-057",
+            expected_base="c" * 40,
+            expected_head="d" * 40,
+        )
+        == []
+    )
+
+
+def test_windows_miniqmt_evidence_requires_applicable_version() -> None:
+    record = _complete_evidence_record("poetry run pytest tests/integration")
+    record["lane"] = "windows_miniqmt"
+    assert _environment_evidence_schema_errors(
+        record,
+        expected_task="TASK-057",
+        expected_base="c" * 40,
+        expected_head="d" * 40,
+    )
+    record["xtquant_version"] = "sanitized-version"
+    assert (
+        _environment_evidence_schema_errors(
+            record,
+            expected_task="TASK-057",
+            expected_base="c" * 40,
+            expected_head="d" * 40,
+        )
+        == []
+    )
+
+
+def test_required_lane_satisfaction_accepts_exact_successful_command_set() -> None:
+    commands = {
+        "poetry run pytest tests/spec",
+        "poetry run mypy src scripts",
+    }
+    records = [_complete_evidence_record(command) for command in sorted(commands)]
+    assert (
+        _required_lane_satisfaction_errors(
+            records,
+            expected_task="TASK-057",
+            expected_base="c" * 40,
+            expected_head="d" * 40,
+            lane="portable",
+            expected_commands=commands,
+            skip_allowances={},
+        )
+        == []
+    )
+
+
+@pytest.mark.parametrize(
+    ("mutation", "value"),
+    (
+        ("exit_code", 1),
+        ("failed", 1),
+        ("skipped", 1),
+        ("executed", 0),
+        ("passed", -1),
+    ),
+)
+def test_required_lane_satisfaction_rejects_unsuccessful_records(
+    mutation: str, value: object
+) -> None:
+    command = "poetry run pytest tests/spec"
+    record = _complete_evidence_record(command)
+    record[mutation] = value
+    assert _required_lane_satisfaction_errors(
+        [record],
+        expected_task="TASK-057",
+        expected_base="c" * 40,
+        expected_head="d" * 40,
+        lane="portable",
+        expected_commands={command},
+        skip_allowances={},
+    )
+
+
+def test_required_lane_satisfaction_rejects_missing_expected_command() -> None:
+    assert _required_lane_satisfaction_errors(
+        [_complete_evidence_record("poetry run pytest tests/spec")],
+        expected_task="TASK-057",
+        expected_base="c" * 40,
+        expected_head="d" * 40,
+        lane="portable",
+        expected_commands={
+            "poetry run pytest tests/spec",
+            "poetry run mypy src scripts",
+        },
+        skip_allowances={},
+    )
+
+
+def test_required_lane_satisfaction_rejects_unexpected_substitute_command() -> None:
+    assert _required_lane_satisfaction_errors(
+        [_complete_evidence_record("pytest tests/spec")],
+        expected_task="TASK-057",
+        expected_base="c" * 40,
+        expected_head="d" * 40,
+        lane="portable",
+        expected_commands={"poetry run pytest tests/spec"},
+        skip_allowances={},
+    )
+
+
+def test_allowed_skip_requires_explicit_scope() -> None:
+    command = "poetry run pytest tests/contract"
+    record = _complete_evidence_record(command)
+    record["executed"] = 2
+    record["skipped"] = 1
+    assert _required_lane_satisfaction_errors(
+        [record],
+        expected_task="TASK-057",
+        expected_base="c" * 40,
+        expected_head="d" * 40,
+        lane="portable",
+        expected_commands={command},
+        skip_allowances={command: 1},
+    )
+    record["unverified_scope"] = "one missing-wheel-only contract case"
+    assert (
+        _required_lane_satisfaction_errors(
+            [record],
+            expected_task="TASK-057",
+            expected_base="c" * 40,
+            expected_head="d" * 40,
+            lane="portable",
+            expected_commands={command},
+            skip_allowances={command: 1},
+        )
+        == []
+    )
+
+
+@pytest.mark.parametrize(
+    "command",
+    (
+        "poetry run python -m venv .second-env",
+        "poetry run poetry add requests",
+        "poetry run python -m pip install requests",
+        "poetry run python -m pip uninstall requests",
+        "poetry run poetry install",
+        "poetry run poetry update",
+        "poetry run poetry remove requests",
+        "poetry run poetry lock",
+        "pytest tests/spec",
+        "python -m pytest tests/spec",
+        "ruff check .",
+        "mypy src scripts",
+        "bundled/python pytest tests/spec",
+        "poetry run pytest tests/spec --no-verify",
+    ),
+)
+def test_poetry_gate_rejects_mutation_and_substitute_commands(command: str) -> None:
+    expected = {"poetry run pytest tests/spec"}
+    assert _poetry_command_errors(command, expected_commands=expected)
+
+
+def test_poetry_gate_uses_exact_normalized_expected_command_set() -> None:
+    expected = {"poetry run pytest tests/spec"}
+    assert (
+        _poetry_command_errors("  poetry   run pytest   tests/spec  ", expected_commands=expected)
+        == []
+    )
+    assert _poetry_command_errors("poetry run pytest tests/contract", expected_commands=expected)
+
+
+@pytest.mark.parametrize("reason", (None, "unrelated failure", "always build"))
+def test_poetry_build_requires_an_allowed_reason(reason: str | None) -> None:
+    assert _poetry_command_errors(
+        "poetry build", expected_commands={"poetry build"}, build_reason=reason
+    )
+
+
+@pytest.mark.parametrize("reason", ("task_required", "missing_wheel_only_skip"))
+def test_poetry_build_accepts_only_contractual_reasons(reason: str) -> None:
+    assert (
+        _poetry_command_errors(
+            "poetry build", expected_commands={"poetry build"}, build_reason=reason
+        )
+        == []
+    )
+
+
+def test_worktree_reuse_accepts_only_compatible_existing_environment() -> None:
+    decision = {
+        "existing_environment_valid": True,
+        "dependency_complete": True,
+        "python_compatible": True,
+        "pyproject_identity_compatible": True,
+        "lock_identity_compatible": True,
+        "original_poetry_entrypoint": True,
+        "create_environment": False,
+        "install_dependencies": False,
+        "compatibility_verifiable": True,
+    }
+    assert _worktree_reuse_errors(decision) == []
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    (
+        ("existing_environment_valid", False),
+        ("dependency_complete", False),
+        ("python_compatible", False),
+        ("pyproject_identity_compatible", False),
+        ("lock_identity_compatible", False),
+        ("original_poetry_entrypoint", False),
+        ("create_environment", True),
+        ("install_dependencies", True),
+        ("compatibility_verifiable", False),
+    ),
+)
+def test_worktree_reuse_fails_closed(field: str, value: bool) -> None:
+    decision = {
+        "existing_environment_valid": True,
+        "dependency_complete": True,
+        "python_compatible": True,
+        "pyproject_identity_compatible": True,
+        "lock_identity_compatible": True,
+        "original_poetry_entrypoint": True,
+        "create_environment": False,
+        "install_dependencies": False,
+        "compatibility_verifiable": True,
+    }
+    decision[field] = value
+    assert _worktree_reuse_errors(decision)
+
+
+def test_dist_inventory_accepts_only_new_ignored_attributable_cleanup() -> None:
+    before = {
+        "dist/user.whl": {
+            "checksum": "old",
+            "ignored": True,
+            "ownership": "user-owned",
+        }
+    }
+    after = {
+        **before,
+        "dist/new.whl": {
+            "checksum": "new",
+            "ignored": True,
+            "ownership": "build",
+            "produced_by_build": True,
+        },
+    }
+    assert (
+        _dist_transition_errors(
+            before,
+            after,
+            cleanup={"dist/new.whl"},
+            build_reason="missing_wheel_only_skip",
+        )
+        == []
+    )
+
+
+def test_dist_inventory_rejects_incomplete_metadata() -> None:
+    before = {
+        "dist/user.whl": {
+            "checksum": "old",
+            "ignored": True,
+        }
+    }
+    assert _dist_transition_errors(
+        before,
+        before,
+        cleanup=set(),
+        build_reason="task_required",
+    )
+
+
+@pytest.mark.parametrize("case", ("overwrite", "delete", "move", "cleanup_existing"))
+def test_dist_inventory_rejects_destructive_existing_artifact_changes(case: str) -> None:
+    before = {
+        "dist/user.whl": {
+            "checksum": "old",
+            "ignored": True,
+            "ownership": "user-owned",
+        }
+    }
+    after: dict[str, dict[str, object]] = {
+        "dist/user.whl": dict(before["dist/user.whl"]),
+        "dist/new.whl": {
+            "checksum": "new",
+            "ignored": True,
+            "ownership": "build",
+            "produced_by_build": True,
+        },
+    }
+    cleanup = {"dist/new.whl"}
+    if case == "overwrite":
+        after["dist/user.whl"]["checksum"] = "changed"
+    elif case == "delete":
+        del after["dist/user.whl"]
+    elif case == "move":
+        moved = after.pop("dist/user.whl")
+        after["dist/moved-user.whl"] = moved
+    else:
+        cleanup.add("dist/user.whl")
+    assert _dist_transition_errors(
+        before,
+        after,
+        cleanup=cleanup,
+        build_reason="missing_wheel_only_skip",
+    )
+
+
+def _writer_record(
+    agent: str,
+    *,
+    active: bool,
+    starting_head: str,
+    previous_agent: str | None = None,
+    previous_agent_stop_head: str | None = None,
+) -> dict[str, object]:
+    record: dict[str, object] = {
+        "role": "Implementation Agent",
+        "tool": agent.split("/")[0],
+        "os": agent.split("/")[1],
+        "agent": agent,
+        "pr": 100,
+        "branch": "codex/task-057-implementation",
+        "starting_head": starting_head,
+        "human_evidence_url": "https://github.com/example/repo/pull/100#issuecomment-2",
+        "single_writer": True,
+        "active": active,
+    }
+    if previous_agent is not None:
+        record.update(
+            {
+                "previous_agent": previous_agent,
+                "next_agent": agent,
+                "previous_agent_stop_head": previous_agent_stop_head,
+            }
+        )
+    return record
+
+
+def test_assignment_collection_accepts_a_sequential_human_switch() -> None:
+    stop_head = "a" * 40
+    records = [
+        _writer_record("Codex/Windows", active=False, starting_head="9" * 40),
+        _writer_record(
+            "Cline/Linux",
+            active=True,
+            starting_head=stop_head,
+            previous_agent="Codex/Windows",
+            previous_agent_stop_head=stop_head,
+        ),
+    ]
+    assert (
+        _assignment_collection_errors(records, pr=100, branch="codex/task-057-implementation") == []
+    )
+
+
+def test_assignment_collection_rejects_two_active_writers() -> None:
+    records = [
+        _writer_record("Codex/Windows", active=True, starting_head="a" * 40),
+        _writer_record("Cline/Linux", active=True, starting_head="a" * 40),
+    ]
+    assert _assignment_collection_errors(records, pr=100, branch="codex/task-057-implementation")
+
+
+def test_assignment_collection_rejects_switch_while_old_writer_is_active() -> None:
+    stop_head = "a" * 40
+    records = [
+        _writer_record("Codex/Windows", active=True, starting_head="9" * 40),
+        _writer_record(
+            "Cline/Linux",
+            active=True,
+            starting_head=stop_head,
+            previous_agent="Codex/Windows",
+            previous_agent_stop_head=stop_head,
+        ),
+    ]
+    assert _assignment_collection_errors(records, pr=100, branch="codex/task-057-implementation")
+
+
+def test_assignment_collection_rejects_switch_head_mismatch() -> None:
+    records = [
+        _writer_record("Codex/Windows", active=False, starting_head="9" * 40),
+        _writer_record(
+            "Cline/Linux",
+            active=True,
+            starting_head="a" * 40,
+            previous_agent="Codex/Windows",
+            previous_agent_stop_head="b" * 40,
+        ),
+    ]
+    assert _assignment_collection_errors(records, pr=100, branch="codex/task-057-implementation")

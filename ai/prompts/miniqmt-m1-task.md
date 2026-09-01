@@ -16,6 +16,7 @@ Implementation assignment:
 - Exact Starting Head:
 - Human evidence URL:
 - Single-writer stop point:
+- PR/branch single-writer records (PR + branch, agent, active true/false):
 
 Verification lanes:
 - portable: required | optional | not_applicable
@@ -23,10 +24,18 @@ Verification lanes:
 - windows_miniqmt: required | optional | not_applicable
 
 Environment evidence:
-- Exact Base / exact Head:
-- Role / tool / OS / Python / Poetry / xtquant version as applicable:
-- Original commands, exit codes, passed / failed / skipped:
-- Evidence URL / unverified scope:
+- Task / expected Base / exact Head / lane / requirement:
+- Producer role / tool / OS / Python / Poetry / sanitized xtquant version as applicable:
+- Original command / exit code / executed / passed / failed / skipped / RFC3339 timestamp:
+- sanitized_evidence: true / explicit unverified_scope (empty allowed) / durable GitHub evidence URL:
+
+Required-lane satisfaction:
+- Validate every record's schema and task/Base/Head identity.
+- Compare the complete record set with the task's exact expected command set; reject missing,
+  unexpected or substitute commands.
+- Require exit code 0, failed 0, non-negative internally consistent counts and executed greater than 0.
+- Permit skips only within an explicit per-command allowance and record every allowed skip in a
+  non-empty unverified_scope.
 
 Implement only the single active task in tasks/active/ for the Mini QMT M1 delivery.
 
@@ -53,6 +62,10 @@ Verification and handoff:
 - Run every verification.commands entry and report exit codes.
 - Run every supported portable command; Linux evidence cannot satisfy Windows or Windows/Mini QMT lanes.
 - Bind all evidence to the exact Head. A Head change invalidates environment evidence and Review.
+- Treat well-formed evidence and required-lane satisfaction as separate gates. Only an Implementation
+  Agent or Environment Verification Agent may produce environment evidence.
+- Enforce PR/branch single-writer across all records; a Human-authorized switch requires previous/next
+  identity, equal previous stop Head and next Starting Head, and the previous writer inactive.
 - Missing required Windows/Mini QMT capability is BLOCKED, not a reason to downgrade acceptance.
 - Map every acceptance criterion to evidence.
 - Report changed files, environment evidence, unverified scope, risks and spec deviations.

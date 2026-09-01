@@ -34,9 +34,11 @@ One observable outcome.
 - Exact Starting Head: `<40-char SHA>`
 - Human evidence URL: `<durable GitHub comment/review URL>`
 - Single writer: `<true; previous agent / next agent / stop Head when switching>`
+- PR/branch single-writer: `<PR + branch scope; active true/false for every writer record>`
 
 The Environment Verification Agent produces evidence only; the Independent Review Agent reviews the
-exact Head only; Human alone authorizes activation, external side effects, merge and closeout.
+exact Head only; Human alone authorizes activation, external side effects, merge and closeout. A switch
+must prove previous/next agent, previous stop Head == next Starting Head, and previous writer inactive.
 
 ### Verification lanes
 
@@ -48,13 +50,24 @@ exact Head only; Human alone authorizes activation, external side effects, merge
 
 ### Environment evidence
 
-- Task / Planning Base / Implementation Base / exact Head:
-- Role / tool / OS / Python / Poetry / xtquant versions as applicable:
-- Original commands / exit codes / passed / failed / skipped / timestamp:
-- Sanitized evidence URL / unverified scope:
+Single-record schema/identity gate:
 
-Head changes invalidate all environment evidence and Independent Review verdicts. A missing required
-lane is `BLOCKED`; another OS, mock or narrative cannot substitute for it.
+- Task / expected Base / exact Head / lane / requirement (`required`, `optional`, `not_applicable`):
+- Producer role / tool / OS / Python / Poetry / sanitized xtquant versions as applicable:
+- Original command / exit code / executed / passed / failed / skipped / RFC3339 timestamp:
+- `sanitized_evidence: true` / explicit `unverified_scope` (empty allowed) / durable GitHub evidence URL:
+
+Required-lane satisfaction gate over the complete record set:
+
+- Exact expected command set / observed command set / missing or unexpected commands:
+- Every record schema and task/Base/Head identity valid:
+- Every exit code 0, failed 0, counts non-negative and internally consistent, executed greater than 0:
+- Per-command skip allowance / skipped scope recorded in non-empty `unverified_scope`:
+
+Only an Implementation Agent or Environment Verification Agent may produce environment evidence.
+Well-formed evidence alone does not satisfy a required lane. Head changes invalidate all environment
+evidence and Independent Review verdicts. A missing or unsatisfied required lane is `BLOCKED`; another
+OS, mock, substitute command or narrative cannot replace it.
 
 ### Design
 

@@ -28,6 +28,11 @@ role、task ID、tool、OS、允许/禁止路径、是否可以写文件和实�
 stop Head；新 Agent 的 Starting Head 必须等于该 stop Head。旧 Agent 从该点停止写入，缺少
 任一字段或存在并发 writer 时返回 `PLAN_BLOCKED`。
 
+`PR/branch single-writer` 是集合级门槛，不是单条 assignment 写有 `single_writer: true` 就成立。
+按 PR + branch 汇总全部 writer record 后，同时最多一个 `active: true`；Human GitHub evidence
+必须证明 previous/next agent、previous stop Head、next Starting Head 和 previous writer 已
+`active: false`。两条分别格式正确但同时 active 的记录仍必须拒绝。
+
 ## 分工原则
 
 - 一个 Implementation Agent 一次只处理一个 active task。
@@ -142,11 +147,23 @@ Review 结论由 Review Agent 记录，但**不能授权 closeout**。任务激�
 | `windows` | 实际 Windows Agent | Windows-only compatibility/integration；Linux 结果不得标为通过 |
 | `windows_miniqmt` | 实际 Windows、可用 Mini QMT 和 task-approved `xtquant` | 默认只读；缺客户端、session、模拟账号 allowlist 或授权均为 `BLOCKED` |
 
-每份 environment evidence 必须记录 task、Base、exact Head、role、tool、OS、Python/Poetry
-版本（适用时含脱敏 xtquant 版本）、原始 command、exit code、passed/failed/skipped 数量、时间、
-脱敏证据、unverified scope 和 evidence URL。required lane 缺少能力时保持 pending/`BLOCKED`，
-不能用其他 lane、mock 或文字说明替代。Head 改变后，旧 environment evidence 和 Review verdict
-全部失效，必须在新 Head 重跑。
+Environment evidence 有两个互不替代的验证层：
+
+1. **单条 schema/identity gate**：每条 record 必须记录 task、调用方传入的 expected Base、
+   exact Head、lane、`requirement`（`required` / `optional` / `not_applicable`）、producer role、
+   tool、OS、Python/Poetry 及适用的脱敏 xtquant 版本、original command、exit code、
+   executed/passed/failed/skipped、RFC3339 `timestamp`、`sanitized_evidence: true`、显式
+   `unverified_scope`（允许空字符串但不得缺失）和 durable GitHub evidence URL。task/Base/Head
+   必须与调用方 expected values 精确相等，不能只检查 SHA 格式。只有 Implementation Agent
+   和 Environment Verification Agent 可以生产环境证据；Independent Review Agent 不可以。
+2. **required-lane satisfaction gate**：对 required lane 的完整 record set 核对 task 提供的
+   exact expected command set。必须无缺失、无意外或替代命令；每条 schema/identity 均有效、
+   `exit_code == 0`、`failed == 0`、计数为非负整数且内部一致、`executed > 0`。skip 只能在
+   task 对该 command 明确给出 allowance 时出现，且必须写入非空 `unverified_scope`。
+
+单条格式正确不等于 required lane 已满足。required lane 缺少能力或 satisfaction gate 未通过时
+保持 pending/`BLOCKED`，不能用其他 lane、mock 或文字说明替代。Head 改变后，旧 environment
+evidence 和 Review verdict 全部失效，必须以新的 expected Base/exact Head 重跑完整命令集合。
 
 Environment Verification Agent 只报告实际能力和证据，不授权任务、外部副作用或状态迁移。
 `windows_miniqmt` 还必须证明客户端可用、`xtquant` 已被 task 允许、`userdata_mini` 已核验、
