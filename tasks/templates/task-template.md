@@ -36,6 +36,10 @@ One observable outcome.
 - Single writer: `<true; previous agent / next agent / stop Head when switching>`
 - PR/branch single-writer: `<ordered PR + branch records; active true/false and stop_head for every previous writer>`
 
+Tool 使用最长 64 字符、无空白/控制字符的工具中立安全标识符；OS 必须是 Windows、Linux 或
+macOS。相邻 record 的 agent identity 改变即构成 switch，完整 previous/next/stop Head 字段不能
+省略；previous 必须是紧邻的前一 record，同一集合不得重复 agent identity key。
+
 The Environment Verification Agent produces evidence only; the Independent Review Agent reviews the
 exact Head only; Human alone authorizes activation, external side effects, merge and closeout. A switch
 must occur after the previous record and prove previous/next agent, previous record `stop_head` == switch
@@ -59,6 +63,10 @@ Single-record schema/identity gate:
 - `sanitized_evidence: true` / explicit `unverified_scope` (empty allowed) / durable GitHub evidence URL:
 - Explicit `real_money: false` / `simulation_order` boolean:
 
+Applicable xtquant version is a bounded metadata-only token (maximum 64 characters; letters, digits,
+dot, underscore, plus or hyphen). Paths, whitespace/control characters, `userdata_mini`, account or
+secret-like labels, and long digit-only values are invalid and remain unverified/`BLOCKED`.
+
 Required-lane satisfaction gate over the complete record set:
 
 - Exact expected command set / observed command set / missing or unexpected commands:
@@ -74,6 +82,10 @@ OS, mock, substitute command or narrative cannot replace it.
 An evidence record cannot authorize its own simulation order. The satisfaction caller must supply a
 trusted authorization context binding the active task and durable Human GitHub evidence; real money is
 always forbidden.
+
+Poetry command validation uses quote-aware semantic tokens, exact task command membership and a closed
+child-entrypoint grammar. A task must enumerate its supported `python`, `pytest`, `mypy`, `ruff` and
+`pre-commit` forms; unknown, shell, executable-path or arbitrary child entrypoints fail even if expected.
 
 ### Design
 

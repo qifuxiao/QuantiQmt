@@ -17,6 +17,8 @@ Implementation assignment:
 - Human evidence URL:
 - Single-writer stop point:
 - Ordered PR/branch single-writer records (PR + branch, agent, active true/false, previous stop_head):
+- Tool is a bounded safe identifier; OS is Windows, Linux or macOS. An adjacent agent change is always
+  a switch requiring complete previous/next/stop-Head fields and no repeated agent identity key.
 
 Verification lanes:
 - portable: required | optional | not_applicable
@@ -29,6 +31,8 @@ Environment evidence:
 - Original command / exit code / executed / passed / failed / skipped / RFC3339 timestamp:
 - sanitized_evidence: true / explicit unverified_scope (empty allowed) / durable GitHub evidence URL:
 - explicit real_money: false / simulation_order boolean:
+- sanitized xtquant version is a maximum-64-character metadata token only; no path, whitespace/control,
+  userdata/account/secret label or long digit-only value:
 
 Required-lane satisfaction:
 - Validate every record's schema and task/Base/Head identity.
@@ -63,11 +67,15 @@ Verification and handoff:
 - Run every verification.commands entry and report exit codes.
 - Run every supported portable command; Linux evidence cannot satisfy Windows or Windows/Mini QMT lanes.
 - Bind all evidence to the exact Head. A Head change invalidates environment evidence and Review.
+- Validate Poetry commands with quote-aware tokens, exact expected membership and a closed child grammar.
+  Only task-declared forms of python/pytest/mypy/ruff/pre-commit are allowed; shell, executable-path and
+  unknown child entrypoints fail even if mistakenly present in the expected set.
 - Treat well-formed evidence and required-lane satisfaction as separate gates. Only an Implementation
   Agent or Environment Verification Agent may produce environment evidence.
 - Enforce PR/branch single-writer across all records; a Human-authorized switch requires previous/next
   identity, an earlier inactive previous record, and equal previous record stop_head, switch
-  previous_agent_stop_head and next Starting Head.
+  previous_agent_stop_head and next Starting Head. Detect the switch from adjacent agent identities;
+  omission of switch fields, non-adjacent substitution and repeated agent identity keys must fail.
 - Never accept record-only simulation-order authorization; require trusted caller context binding the
   active task and durable Human GitHub evidence. Real-money evidence is always invalid.
 - Missing required Windows/Mini QMT capability is BLOCKED, not a reason to downgrade acceptance.

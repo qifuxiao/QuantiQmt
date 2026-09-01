@@ -24,6 +24,9 @@ role、task ID、tool、OS、允许/禁止路径、是否可以写文件和实�
 - human evidence URL（必须是持久 GitHub comment/review URL，聊天摘要不够）；
 - `single writer: true` 以及 Coordinator/旧 writer 的停止点。
 
+`tool` 必须是最长 64 字符、无空白/控制字符的工具中立安全标识符；`OS` 必须明确为
+Windows、Linux 或 macOS。空值、仅空白、非字符串或不受支持的 OS 均 fail-closed。
+
 中途切换必须由人类另行记录 previous agent、next agent、授权范围和 previous agent 的
 stop Head；新 Agent 的 Starting Head 必须等于该 stop Head。旧 Agent 从该点停止写入，缺少
 任一字段或存在并发 writer 时返回 `PLAN_BLOCKED`。
@@ -34,7 +37,9 @@ stop Head；新 Agent 的 Starting Head 必须等于该 stop Head。旧 Agent �
 已有较低序号的 previous writer record；该 record 必须是 `active: false` 并携带精确 `stop_head`。
 Human GitHub evidence 必须证明 previous/next agent，且 previous record 的 `stop_head`、switch 的
 `previous_agent_stop_head` 和 next `Starting Head` 三者相等。两条分别格式正确但同时 active、记录
-逆序或只由 next record 自报 stop Head 时仍必须拒绝。
+逆序或只由 next record 自报 stop Head 时仍必须拒绝。相邻 record 的 agent identity 一旦改变，
+即自动视为 switch 并强制要求完整 switch 字段；不得通过省略 `previous_agent` 绕过。previous
+必须是紧邻的前一 writer，且同一有序 PR/branch 集合不得重复使用 agent identity key。
 
 ## 分工原则
 
@@ -159,6 +164,9 @@ Environment evidence 有两个互不替代的验证层：
    `unverified_scope`（允许空字符串但不得缺失）和 durable GitHub evidence URL。task/Base/Head
    必须与调用方 expected values 精确相等，不能只检查 SHA 格式。只有 Implementation Agent
    和 Environment Verification Agent 可以生产环境证据；Independent Review Agent 不可以。
+   xtquant 版本必须是最长 64 字符的 metadata-only token，只含字母、数字、点、下划线、加号
+   或连字符；路径、空白、控制字符、`userdata_mini`、账号/secret/credential 标签和长纯数字
+   token 均拒绝。未知或不可解析版本保持 unverified/`BLOCKED`，不得从 runtime path 猜测。
 2. **required-lane satisfaction gate**：对 required lane 的完整 record set 核对 task 提供的
    exact expected command set。必须无缺失、无意外或替代命令；每条 schema/identity 均有效、
    `exit_code == 0`、`failed == 0`、计数为非负整数且内部一致、`executed > 0`。skip 只能在
@@ -181,6 +189,10 @@ trading 始终 forbidden。
 - 需要 PostgreSQL 的 Review 必须设置 `QUANTIQMT_POSTGRES_DSN` 并连接真实 PostgreSQL。
 - Poetry、sandbox、worktree 和 build 验证必须遵循 `ai/workflows/poetry-verification.md`；不得
   用 bundled Python 或直接 pytest/Ruff/mypy 冒充项目规定的原始 `poetry run` 命令。
+- TASK-057 的命令 gate 在 quote-aware tokenization 和 exact expected-set 之外使用封闭 grammar：
+  `poetry run` child 只允许 `python`、`pytest`、`mypy`、`ruff`、`pre-commit` 的规定形式；未知
+  entrypoint、shell trampoline、`.exe`/drive/UNC/含路径 entrypoint 和不支持的 Python form
+  即使误入 expected set 也必须拒绝。
 - 测试无法运行时不得 APPROVE；必须明确未验证范围。
 - GitHub connector 不可用时，可使用本地 Git refs、PR head refs 和用户提供的 commit SHA 做只读复验，但必须说明发布/读取限制。
 

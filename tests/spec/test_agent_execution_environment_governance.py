@@ -16,6 +16,23 @@ RFC3339_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-
 GITHUB_EVIDENCE_RE = re.compile(
     r"^https://github\.com/[^/]+/[^/]+/(?:pull|issues)/\d+#(?:issuecomment|pullrequestreview)-\d+$"
 )
+SAFE_TOOL_IDENTIFIER_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._+-]{0,63}$")
+XTQUANT_VERSION_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._+-]{0,63}$")
+XTQUANT_SENSITIVE_LABEL_RE = re.compile(
+    r"(?:userdata_mini|account|acct|credential|secret|token|password|passwd|pwd|api[-_]?key)",
+    re.IGNORECASE,
+)
+SUPPORTED_ASSIGNMENT_OSES = {"windows", "linux", "macos"}
+SUPPORTED_PYTHON_PROBES = {
+    "import sys; print(sys.executable); print(sys.version)",
+    "import yaml, jsonschema, pytest; print('deps-ok')",
+    (
+        "from scripts.validate_specs import extract_front_matter, task_files; "
+        "active=sorted(str(extract_front_matter(path).get('id')) for path in task_files() "
+        "if extract_front_matter(path).get('status') == 'active'); "
+        "assert active == ['TASK-057'], active"
+    ),
+}
 
 SHARED_GOVERNANCE_FILES = (
     "AGENTS.md",
@@ -50,6 +67,20 @@ def _assignment_errors(record: Mapping[str, object], *, switching: bool = False)
     errors = [f"missing {field}" for field in sorted(required - record.keys())]
     if record.get("role") != "Implementation Agent":
         errors.append("role must be Implementation Agent")
+    tool = record.get("tool")
+    if (
+        not isinstance(tool, str)
+        or tool != tool.strip()
+        or SAFE_TOOL_IDENTIFIER_RE.fullmatch(tool) is None
+    ):
+        errors.append("tool must be a bounded safe identifier")
+    os_name = record.get("os")
+    if (
+        not isinstance(os_name, str)
+        or os_name != os_name.strip()
+        or os_name.lower() not in SUPPORTED_ASSIGNMENT_OSES
+    ):
+        errors.append("os must be one of Windows, Linux, or macOS")
     if not SHA_RE.fullmatch(str(record.get("starting_head", ""))):
         errors.append("starting_head must be an exact SHA")
     if not GITHUB_EVIDENCE_RE.fullmatch(str(record.get("human_evidence_url", ""))):
@@ -58,6 +89,17 @@ def _assignment_errors(record: Mapping[str, object], *, switching: bool = False)
         errors.append("single_writer must be true")
     if switching and record.get("previous_agent_stop_head") != record.get("starting_head"):
         errors.append("previous agent must stop at the new starting Head")
+    return errors
+
+
+def _xtquant_version_errors(value: object) -> list[str]:
+    if not isinstance(value, str) or XTQUANT_VERSION_RE.fullmatch(value) is None:
+        return ["xtquant_version must be a bounded metadata-only version token"]
+    errors: list[str] = []
+    if XTQUANT_SENSITIVE_LABEL_RE.search(value):
+        errors.append("xtquant_version contains a sensitive or account-like label")
+    if value.isdigit() and len(value) >= 6:
+        errors.append("xtquant_version must not be a long account-like digit token")
     return errors
 
 
@@ -103,6 +145,7 @@ def _lane_errors(record: Mapping[str, object], *, pr_head: str) -> list[str]:
     ):
         errors.append("portable lane cannot skip every supported command")
     if lane == "windows_miniqmt":
+        errors.extend(_xtquant_version_errors(record.get("xtquant_version")))
         capabilities = {
             "miniqmt_available",
             "xtquant_task_approved",
@@ -147,6 +190,7 @@ def _valid_lane_record(lane: str, os_name: str, head: str) -> dict[str, object]:
     if lane == "windows_miniqmt":
         record.update(
             {
+                "xtquant_version": "xtquant-1.0.0",
                 "miniqmt_available": True,
                 "xtquant_task_approved": True,
                 "userdata_mini_verified": True,
@@ -253,12 +297,8 @@ def _environment_evidence_schema_errors(
     for field in ("tool", "os", "python_version", "poetry_version", "command"):
         if not isinstance(record.get(field), str) or not str(record.get(field)).strip():
             errors.append(f"{field} must be a non-empty string")
-    if record.get("lane") == "windows_miniqmt" and (
-        not isinstance(record.get("xtquant_version"), str)
-        or not str(record.get("xtquant_version")).strip()
-    ):
-        errors.append("xtquant_version is required for Windows/Mini QMT evidence")
     if record.get("lane") == "windows_miniqmt":
+        errors.extend(_xtquant_version_errors(record.get("xtquant_version")))
         for capability in (
             "miniqmt_available",
             "xtquant_task_approved",
@@ -417,6 +457,64 @@ def _semantic_command_tokens(command: str) -> tuple[tuple[str, ...] | None, list
     return tokens, errors
 
 
+def _closed_poetry_grammar_errors(
+    tokens: tuple[str, ...], *, build_reason: str | None
+) -> list[str]:
+    errors: list[str] = []
+    lower_tokens = tuple(token.lower() for token in tokens)
+    if lower_tokens == ("poetry", "--version"):
+        return errors
+    if lower_tokens == ("poetry", "env", "info"):
+        return errors
+    if lower_tokens == ("poetry", "build"):
+        if build_reason not in {"task_required", "missing_wheel_only_skip"}:
+            errors.append("poetry build requires an allowed reason")
+        return errors
+    if len(lower_tokens) < 3 or lower_tokens[:2] != ("poetry", "run"):
+        return ["command is outside the closed Poetry verification grammar"]
+
+    child = lower_tokens[2]
+    child_args = lower_tokens[3:]
+    original_child_args = tokens[3:]
+    supported_children = {"python", "pytest", "mypy", "ruff", "pre-commit"}
+    if child not in supported_children:
+        return ["poetry run child entrypoint is not supported"]
+
+    if child == "python":
+        if (
+            len(child_args) == 2
+            and child_args[0] == "-c"
+            and original_child_args[1] in SUPPORTED_PYTHON_PROBES
+        ):
+            return errors
+        supported_scripts = {
+            "scripts/validate_specs.py",
+            "scripts/validate_ai_handoff.py",
+        }
+        if child_args and child_args[0] in supported_scripts:
+            return errors
+        errors.append("python invocation is outside the supported probe and validator forms")
+    elif child in {"pytest", "mypy"}:
+        if not child_args or any(argument.startswith("-") for argument in child_args):
+            errors.append(f"{child} requires explicit option-free task-supplied targets")
+    elif child == "ruff":
+        if child_args and child_args[0] == "check":
+            if len(child_args) < 2 or any(argument.startswith("-") for argument in child_args[1:]):
+                errors.append("ruff check requires explicit option-free task-supplied targets")
+        elif child_args and child_args[0] == "format":
+            if (
+                len(child_args) < 3
+                or child_args[1] != "--check"
+                or any(argument.startswith("-") for argument in child_args[2:])
+            ):
+                errors.append("ruff format requires --check and explicit task-supplied targets")
+        else:
+            errors.append("ruff requires the supported check or format form")
+    elif child == "pre-commit" and child_args != ("run", "--all-files"):
+        errors.append("pre-commit requires the exact run --all-files form")
+    return errors
+
+
 def _poetry_command_errors(
     command: str,
     *,
@@ -436,56 +534,9 @@ def _poetry_command_errors(
     if tokens not in expected_tokens:
         errors.append("command is not in the task-supplied expected command set")
     lower_tokens = tuple(token.lower() for token in tokens)
-    if not lower_tokens or lower_tokens[0] != "poetry":
-        errors.append("project verification must use the original Poetry entrypoint")
-    elif len(lower_tokens) < 2 or lower_tokens[1] not in {
-        "--version",
-        "env",
-        "build",
-        "run",
-    }:
-        errors.append("unexpected Poetry command")
-
-    mutation_commands = {"add", "install", "update", "remove", "lock"}
-    if len(lower_tokens) >= 2 and lower_tokens[1] in mutation_commands:
-        errors.append("Poetry dependency mutation is forbidden")
-    if (
-        len(lower_tokens) >= 3
-        and lower_tokens[:2] == ("poetry", "env")
-        and lower_tokens[2] != "info"
-    ):
-        errors.append("Poetry environment mutation is forbidden")
-    run_tokens = lower_tokens[2:] if lower_tokens[:2] == ("poetry", "run") else ()
-    if run_tokens:
-        if run_tokens[0] in {"venv", "virtualenv"}:
-            errors.append("second-environment creation is forbidden")
-        if run_tokens[0] in {"pip", "pip3"} and any(
-            token in {"install", "uninstall"} for token in run_tokens[1:]
-        ):
-            errors.append("pip mutation is forbidden")
-        if run_tokens[0] == "poetry" and any(
-            token in mutation_commands or token == "env" for token in run_tokens[1:]
-        ):
-            errors.append("nested Poetry mutation is forbidden")
-        python_entrypoint = re.search(
-            r"(?:^|[\\/])(?:python(?:3(?:\.\d+)*)?|py)(?:\.exe)?$",
-            run_tokens[0],
-        )
-        if python_entrypoint is not None and "-m" in run_tokens:
-            module_index = run_tokens.index("-m") + 1
-            if module_index >= len(run_tokens):
-                errors.append("python -m requires an explicit module")
-            elif run_tokens[module_index] in {"pip", "venv", "virtualenv", "ensurepip"}:
-                errors.append("Python environment or dependency mutation is forbidden")
-    if any("bundled" in token for token in lower_tokens):
-        errors.append("bundled Python is forbidden")
+    errors.extend(_closed_poetry_grammar_errors(tokens, build_reason=build_reason))
     if "--no-verify" in lower_tokens:
         errors.append("--no-verify is forbidden")
-    if lower_tokens == ("poetry", "build") and build_reason not in {
-        "task_required",
-        "missing_wheel_only_skip",
-    }:
-        errors.append("poetry build requires an allowed reason")
     return errors
 
 
@@ -553,40 +604,48 @@ def _assignment_collection_errors(
     active = [record for record in scoped if record.get("active") is True]
     if len(active) > 1:
         errors.append("PR and branch have more than one active writer")
+    seen_agents: set[str] = set()
+    switch_fields = {"previous_agent", "next_agent", "previous_agent_stop_head"}
     for index, record in enumerate(scoped):
-        switching = "previous_agent" in record
+        agent = str(record.get("agent", ""))
+        previous = scoped[index - 1] if index > 0 else None
+        previous_agent = str(previous.get("agent", "")) if previous is not None else None
+        transition = previous is not None and agent != previous_agent
+        declares_switch = bool(switch_fields & record.keys())
+        switching = transition or declares_switch
         errors.extend(
             f"record {index}: {error}" for error in _assignment_errors(record, switching=switching)
         )
+        expected_agent = f"{record.get('tool')}/{record.get('os')}"
+        if not agent or agent != expected_agent:
+            errors.append(f"record {index}: agent identity must match tool and os")
+        if agent in seen_agents:
+            errors.append(f"record {index}: repeated agent identity is not allowed")
+        seen_agents.add(agent)
         if record.get("active") is not True and record.get("active") is not False:
             errors.append(f"record {index}: active must be explicit")
         if "stop_head" in record and not SHA_RE.fullmatch(str(record.get("stop_head", ""))):
             errors.append(f"record {index}: stop_head must be an exact SHA")
-        if switching:
-            previous_agent = str(record.get("previous_agent"))
-            prior_matches = [
-                prior for prior in scoped[:index] if str(prior.get("agent")) == previous_agent
-            ]
-            if not prior_matches:
-                if any(str(later.get("agent")) == previous_agent for later in scoped[index + 1 :]):
-                    errors.append(f"record {index}: previous writer must occur before switch")
-                else:
-                    errors.append(f"record {index}: previous writer record is missing")
-            else:
-                previous = prior_matches[-1]
-                if previous.get("active") is not False:
-                    errors.append(f"record {index}: previous writer must be inactive")
-                previous_stop_head = previous.get("stop_head")
-                if not SHA_RE.fullmatch(str(previous_stop_head or "")):
-                    errors.append(f"record {index}: previous writer must record an exact stop_head")
-                elif not (
-                    previous_stop_head
-                    == record.get("previous_agent_stop_head")
-                    == record.get("starting_head")
-                ):
-                    errors.append(f"record {index}: writer switch Head chain does not match")
-            if record.get("next_agent") != record.get("agent"):
+        if switching and previous is None:
+            errors.append(f"record {index}: previous writer record is missing")
+        elif transition and previous is not None:
+            if previous.get("active") is not False:
+                errors.append(f"record {index}: previous writer must be inactive")
+            previous_stop_head = previous.get("stop_head")
+            if not SHA_RE.fullmatch(str(previous_stop_head or "")):
+                errors.append(f"record {index}: previous writer must record an exact stop_head")
+            elif not (
+                previous_stop_head
+                == record.get("previous_agent_stop_head")
+                == record.get("starting_head")
+            ):
+                errors.append(f"record {index}: writer switch Head chain does not match")
+            if record.get("previous_agent") != previous_agent:
+                errors.append(f"record {index}: previous agent must be the adjacent writer")
+            if record.get("next_agent") != agent:
                 errors.append(f"record {index}: next agent identity does not match")
+        elif declares_switch:
+            errors.append(f"record {index}: switch metadata requires an adjacent writer transition")
     return errors
 
 
@@ -1274,6 +1333,71 @@ def test_poetry_gate_rejects_quoted_mutations_and_shell_syntax(command: str) -> 
 
 
 @pytest.mark.parametrize(
+    "command",
+    (
+        "poetry run powershell -Command pip install requests",
+        "poetry run pwsh -Command poetry add requests",
+        "poetry run cmd /c pip uninstall requests",
+        r"poetry run C:\Python312\python.exe -m pip install requests",
+        "poetry run python -m pip.__main__ install requests",
+        "poetry run powershell.exe -Command pytest tests/spec",
+        "poetry run pwsh.exe -Command pytest tests/spec",
+        "poetry run cmd.exe /c pytest tests/spec",
+        "poetry run .venv/Scripts/python.exe scripts/validate_specs.py",
+        'poetry run "future-tool" verify',
+        "PoEtRy run PoWeRsHeLl -Command pytest tests/spec",
+        "poetry run python -c \"print('unexpected-probe')\"",
+        "poetry run mypy --install-types src",
+        "poetry run ruff check --fix .",
+        "poetry run ruff format .",
+    ),
+)
+def test_poetry_gate_rejects_every_unsupported_child_entrypoint(command: str) -> None:
+    assert _poetry_command_errors(command, expected_commands={command})
+
+
+@pytest.mark.parametrize(
+    ("command", "build_reason"),
+    (
+        ("poetry --version", None),
+        ("poetry env info", None),
+        ('poetry run python -c "import sys; print(sys.executable); print(sys.version)"', None),
+        ("poetry run python -c \"import yaml, jsonschema, pytest; print('deps-ok')\"", None),
+        (
+            'poetry run python -c "from scripts.validate_specs import extract_front_matter, '
+            "task_files; active=sorted(str(extract_front_matter(path).get('id')) for path in "
+            "task_files() if extract_front_matter(path).get('status') == 'active'); assert active "
+            "== ['TASK-057'], active\"",
+            None,
+        ),
+        ("poetry run python scripts/validate_specs.py", None),
+        (
+            "poetry run python scripts/validate_ai_handoff.py --task task.md "
+            "--handoff handoff.yaml --base-ref origin/main --head HEAD",
+            None,
+        ),
+        ("poetry run pytest tests/spec", None),
+        ("poetry run mypy src scripts", None),
+        ("poetry run ruff check .", None),
+        ("poetry run ruff format --check .", None),
+        ("poetry run pre-commit run --all-files", None),
+        ("poetry build", "missing_wheel_only_skip"),
+    ),
+)
+def test_poetry_gate_accepts_every_supported_task057_form(
+    command: str, build_reason: str | None
+) -> None:
+    assert (
+        _poetry_command_errors(
+            command,
+            expected_commands={command},
+            build_reason=build_reason,
+        )
+        == []
+    )
+
+
+@pytest.mark.parametrize(
     "timestamp",
     (
         "2026-99-01T09:00:00Z",
@@ -1623,3 +1747,205 @@ def test_assignment_collection_rejects_switch_head_mismatch() -> None:
         ),
     ]
     assert _assignment_collection_errors(records, pr=100, branch="codex/task-057-implementation")
+
+
+def test_assignment_collection_rejects_writer_change_without_switch_fields() -> None:
+    stop_head = "a" * 40
+    records = [
+        _writer_record(
+            "Codex/Windows",
+            active=False,
+            starting_head="9" * 40,
+            stop_head=stop_head,
+        ),
+        _writer_record("Cline/Linux", active=True, starting_head=stop_head),
+    ]
+    assert _assignment_collection_errors(records, pr=100, branch="codex/task-057-implementation")
+
+
+def test_assignment_collection_rejects_non_adjacent_previous_writer_substitution() -> None:
+    first_stop = "a" * 40
+    second_stop = "b" * 40
+    records = [
+        _writer_record(
+            "Codex/Windows",
+            active=False,
+            starting_head="9" * 40,
+            stop_head=first_stop,
+        ),
+        _writer_record(
+            "Cline/Linux",
+            active=False,
+            starting_head=first_stop,
+            previous_agent="Codex/Windows",
+            previous_agent_stop_head=first_stop,
+            stop_head=second_stop,
+        ),
+        _writer_record(
+            "FutureTool/macOS",
+            active=True,
+            starting_head=first_stop,
+            previous_agent="Codex/Windows",
+            previous_agent_stop_head=first_stop,
+        ),
+    ]
+    assert _assignment_collection_errors(records, pr=100, branch="codex/task-057-implementation")
+
+
+def test_assignment_collection_rejects_repeated_agent_identity() -> None:
+    stop_head = "a" * 40
+    records = [
+        _writer_record(
+            "Codex/Windows",
+            active=False,
+            starting_head="9" * 40,
+            stop_head=stop_head,
+        ),
+        _writer_record(
+            "Codex/Windows",
+            active=True,
+            starting_head=stop_head,
+        ),
+    ]
+    assert _assignment_collection_errors(records, pr=100, branch="codex/task-057-implementation")
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    (
+        ("previous_agent", "OtherTool/Linux"),
+        ("next_agent", "OtherTool/Linux"),
+        ("agent", "OtherTool/Linux"),
+    ),
+)
+def test_assignment_collection_rejects_mismatched_switch_identity(field: str, value: str) -> None:
+    stop_head = "a" * 40
+    records = [
+        _writer_record(
+            "Codex/Windows",
+            active=False,
+            starting_head="9" * 40,
+            stop_head=stop_head,
+        ),
+        _writer_record(
+            "Cline/Linux",
+            active=True,
+            starting_head=stop_head,
+            previous_agent="Codex/Windows",
+            previous_agent_stop_head=stop_head,
+        ),
+    ]
+    records[1][field] = value
+    assert _assignment_collection_errors(records, pr=100, branch="codex/task-057-implementation")
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    (
+        ("tool", ""),
+        ("tool", "   "),
+        ("tool", None),
+        ("tool", "Future\nTool"),
+        ("os", ""),
+        ("os", "   "),
+        ("os", None),
+        ("os", "Windows\nLinux"),
+        ("os", "Solaris"),
+    ),
+)
+def test_assignment_identity_rejects_invalid_tool_or_os(field: str, value: object) -> None:
+    record: dict[str, object] = {
+        "role": "Implementation Agent",
+        "tool": "Future-Agent_2.1",
+        "os": "macOS",
+        "starting_head": "a" * 40,
+        "human_evidence_url": "https://github.com/example/repo/pull/1#issuecomment-2",
+        "single_writer": True,
+    }
+    record[field] = value
+    assert _assignment_errors(record)
+
+
+@pytest.mark.parametrize(
+    ("tool", "os_name"),
+    (("Codex", "Windows"), ("Cline", "Linux"), ("Future-Agent_2.1", "macOS")),
+)
+def test_assignment_identity_accepts_bounded_tool_neutral_values(tool: str, os_name: str) -> None:
+    record = {
+        "role": "Implementation Agent",
+        "tool": tool,
+        "os": os_name,
+        "starting_head": "a" * 40,
+        "human_evidence_url": "https://github.com/example/repo/pull/1#issuecomment-2",
+        "single_writer": True,
+    }
+    assert _assignment_errors(record) == []
+
+
+@pytest.mark.parametrize(
+    "xtquant_version",
+    (
+        r"C:\Users\example\userdata_mini\account-12345678\xtquant-build",
+        "userdata_mini",
+        "account-12345678",
+        "credential-build",
+        "secret=abc",
+        "123456789012",
+        "xtquant version 1.0",
+        "xtquant/1.0",
+        "xtquant\\1.0",
+        "x" * 65,
+        "version\n1.0",
+    ),
+)
+def test_windows_miniqmt_schema_rejects_unsanitized_xtquant_versions(
+    xtquant_version: str,
+) -> None:
+    record = _complete_evidence_record("poetry run pytest tests/integration")
+    record.update(
+        {
+            "lane": "windows_miniqmt",
+            "xtquant_version": xtquant_version,
+            "miniqmt_available": True,
+            "xtquant_task_approved": True,
+            "userdata_mini_verified": True,
+            "unique_session_verified": True,
+            "simulation_account_allowlisted": True,
+        }
+    )
+    assert _environment_evidence_schema_errors(
+        record,
+        expected_task="TASK-057",
+        expected_base="c" * 40,
+        expected_head="d" * 40,
+    )
+
+
+@pytest.mark.parametrize(
+    "xtquant_version",
+    ("xtquant-1.0.0", "1.0.0+build.7", "2025.09-release"),
+)
+def test_windows_miniqmt_schema_accepts_sanitized_xtquant_versions(
+    xtquant_version: str,
+) -> None:
+    record = _complete_evidence_record("poetry run pytest tests/integration")
+    record.update(
+        {
+            "lane": "windows_miniqmt",
+            "xtquant_version": xtquant_version,
+            "miniqmt_available": True,
+            "xtquant_task_approved": True,
+            "userdata_mini_verified": True,
+            "unique_session_verified": True,
+            "simulation_account_allowlisted": True,
+        }
+    )
+    assert (
+        _environment_evidence_schema_errors(
+            record,
+            expected_task="TASK-057",
+            expected_base="c" * 40,
+            expected_head="d" * 40,
+        )
+        == []
+    )
