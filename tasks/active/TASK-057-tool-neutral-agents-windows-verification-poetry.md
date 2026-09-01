@@ -67,6 +67,35 @@ verification:
     - poetry run ruff format --check .
     - poetry run pre-commit run --all-files
     - git diff --check origin/main...HEAD
+  required_lanes:
+    - lane: portable
+      capability: portable
+      minimum_records: 1
+      commands:
+        - poetry run python scripts/validate_specs.py
+        - poetry run pytest tests/spec/test_validate_specs.py tests/spec/test_miniqmt_m1_delivery_governance.py tests/spec/test_codex_cline_collaboration_governance.py tests/spec/test_validate_ai_handoff.py tests/spec/test_agent_execution_environment_governance.py tests/spec/test_validate_agent_environment.py
+        - poetry run mypy src scripts
+        - poetry run ruff check scripts/validate_specs.py scripts/validate_agent_environment.py tests/spec/test_agent_execution_environment_governance.py tests/spec/test_validate_agent_environment.py
+        - poetry run ruff format --check scripts/validate_specs.py scripts/validate_agent_environment.py tests/spec/test_agent_execution_environment_governance.py tests/spec/test_validate_agent_environment.py
+        - poetry run python -c "from scripts.validate_specs import extract_front_matter, task_files; active=sorted(str(extract_front_matter(path).get('id')) for path in task_files() if extract_front_matter(path).get('status') == 'active'); assert active == ['TASK-057'], active"
+        - poetry run python scripts/validate_agent_environment.py --help
+        - poetry run python scripts/validate_ai_handoff.py --task tasks/active/TASK-057-tool-neutral-agents-windows-verification-poetry.md --handoff ai/handoffs/TASK-057-REPAIR-v2.yaml --base-ref origin/main --head HEAD
+        - poetry run pytest tests/spec
+        - poetry run pytest tests/contract
+        - poetry run ruff check .
+        - poetry run ruff format --check .
+        - poetry run pre-commit run --all-files
+        - git diff --check origin/main...HEAD
+    - lane: windows
+      capability: windows
+      minimum_records: 1
+      commands:
+        - poetry --version
+        - poetry env info
+        - poetry run python -c "import sys; print(sys.executable); print(sys.version)"
+        - poetry run python -c "import yaml, jsonschema, pytest; print('deps-ok')"
+  prohibited_lanes:
+    - windows_miniqmt
 delivery:
   schema_version: 1
   contract_status: not_applicable
@@ -131,6 +160,10 @@ Windows 验收、环境访问失败冒充 Poetry 损坏，以及代码 Head 与�
 - required lane必须 fail-closed：空 evidence collection、空 expected command set、重复或
   混入其他 task/Base/Head/PR/branch的 record、缺命令、非零 exit、非允许 skip、能力或授权
   不足，任一情况都不能满足 lane。
+- required lanes只能来自精确task的 `verification.required_lanes`，并由Repair v2 Handoff
+  原样冻结。两者必须deep-equal；缺失、空列表、重复/未知lane、空commands、未覆盖或重复覆盖
+  顶层 `verification.commands`、caller/evidence覆盖均失败。TASK-057精确要求 `portable` 和
+  `windows`；`windows_miniqmt` 在本任务中明确prohibited，不能被环境证据提升为required或PASS。
 - assignment使用按序事件而非可选快照字段推断。正式事件只有 `ASSIGN`、`STOP`、`SWITCH`；
   sequence严格递增，任何时刻最多一个 writer。切换必须由 Human GitHub evidence授权，
   前任 `STOP` Head、新任 `SWITCH` starting Head和当时 PR Head三者精确相等。
@@ -202,7 +235,7 @@ Windows 验收、环境访问失败冒充 Poetry 损坏，以及代码 Head 与�
   版本 provenance、命令结果、counts、时间、脱敏和未验证范围字段。
 - `scripts/validate_agent_environment.py`: 实现正式 fail-closed gate；只从 task/Handoff读取
   可信 identity和expected commands，验证 schema、assignment状态机、lane能力/授权、
-  exact Head/PR/branch身份、完整命令覆盖和结果一致性。
+  exact Head/PR/branch身份、required-lane deep equality、完整命令分区覆盖和结果一致性。
 - `tasks/templates/task-template.md`: 增加 implementation assignment、verification lanes、
   environment evidence和精确 Head失效模板，去除固定 Cline角色。
 - `scripts/validate_specs.py`: 仅在 Planning Base可复现时移除导致严格 mypy失败的多余
@@ -225,6 +258,8 @@ Windows 验收、环境访问失败冒充 Poetry 损坏，以及代码 Head 与�
   不得定义同名或等价的主验证逻辑。
 - 可信输入 → evidence伪造expected commands、空task命令集、task/Handoff漂移、错误Base/PR/
   branch/Head和混入record均失败。
+- required lanes → task/Handoff正例，以及缺失、空列表、空lane commands、重复/未知lane、
+  顶层命令遗漏或重复分配、task/Handoff漂移及caller/evidence覆盖的失败样例。
 - 单写者和中途切换 → 有序 `ASSIGN/STOP/SWITCH` 正例，以及乱序、缺人类 evidence、缺
   starting Head、双writer、stop/switch/PR Head不一致的失败样例。
 - portable/windows/windows_miniqmt → capability matrix正反例；Linux声称 Windows/Mini QMT
@@ -252,13 +287,16 @@ Windows 验收、环境访问失败冒充 Poetry 损坏，以及代码 Head 与�
   禁止连接客户端或产生任何Broker副作用。
 - schema版本未知、task/Handoff无法从Git精确读取、required lane为空、record身份混杂、
   assignment事件不可还原或正式 validator与文档冲突时，停止并返回 `PLAN_BLOCKED`。
+- task与Repair v2 Handoff的required-lane声明不完全相等，或required-lane命令不能对顶层
+  `verification.commands`形成无遗漏、无重复的精确分区时，停止并返回 `PLAN_BLOCKED`。
 
 ### Implementation order
 
 1. 独立 Review本 Plan v2 Amendment PR；由人类合并后停止使用 Plan v1继续修补 PR #100。
 2. Coordinator读取 amended main，创建 add-only `ai/handoffs/TASK-057-REPAIR-v2.yaml`：
    expected Base/PR Base均为 amended main，冻结 Plan v2 task blob、完整allowed paths，并在
-   `repair_context.superseded_head_sha`记录 `d2633e79254fe06cc0667dc3659d1946de774982`。
+   `repair_context.superseded_head_sha`记录 `d2633e79254fe06cc0667dc3659d1946de774982`；
+   Handoff还必须原样冻结task的非空`verification.required_lanes`和`prohibited_lanes`。
 3. 人类通过GitHub evidence分配一个 Implementation Agent，并明确授权把 Repair v2 Handoff
    lineage以普通、可审计的同步merge引入 PR #100；禁止rebase、force-push或并发writer。
 4. Implementation Agent先提交正式 schema/validator失败测试，再实现最小 gate；随后调整
@@ -326,7 +364,10 @@ Windows 验收、环境访问失败冒充 Poetry 损坏，以及代码 Head 与�
 - [ ] task template、Mini QMT Prompt、协作workflow和Implementation Report字段一致。
 - [ ] 正式schema和`validate_agent_environment.py`是唯一machine gate；测试不复制主逻辑。
 - [ ] validator只从精确task/Handoff读取identity和expected commands，拒绝caller/evidence覆盖。
-- [ ] required lane在空records、空expected commands、混入identity、缺命令或结果不一致时失败。
+- [ ] task以结构化非空声明要求`portable`和`windows`，并禁止`windows_miniqmt`；Repair v2
+  Handoff必须原样冻结且validator必须deep-equal交叉校验。
+- [ ] required lane在缺失/空声明、空records、空expected commands、重复或未知lane、混入
+  identity、命令分区遗漏/重复、缺命令或结果不一致时失败，caller/evidence不得覆盖。
 - [ ] command evidence精确覆盖冻结task命令；不依赖POSIX parser解释PowerShell，也不过拟合
   当前pytest/mypy参数。
 - [ ] `xtquant`使用可信source + opaque value provenance；未知或敏感值失败，不猜测semver。
@@ -339,7 +380,8 @@ Windows 验收、环境访问失败冒充 Poetry 损坏，以及代码 Head 与�
   superseded Head、按序assignment events、tool/OS、Starting/STOP/SWITCH Head、人类assignment
   URL、GitHub PR Base/Head和完整path audit。
 - Validator：两个schema的版本/路径、validator CLI和导入结果、可信task/Handoff解析、空集合、
-  identity混入、命令覆盖、assignment状态机及version provenance正反测试。
+  required-lane task/Handoff deep equality、identity混入、命令精确分区覆盖、assignment状态机
+  及version provenance正反测试。
 - Poetry：Poetry/Python版本、环境路径/Valid、依赖导入、每条原始命令和exit code；明确区分
   sandbox失败与沙箱外真实结果。
 - Tests：pytest passed/failed/skipped、非skip治理反例、mypy、Ruff、pre-commit和contract
