@@ -2,36 +2,52 @@
 
 本项目允许多名人类成员分别使用 Codex、Claude Code、Gemini、Cursor 等 AI Agent 协作。所有工具共享同一套仓库规则：根 `AGENTS.md`、`spec/README.md`、`tasks/README.md` 和当前 active task 是工作入口。
 
-## 会话角色
+## 工具中立会话角色
 
-每名项目成员建议维护三个会话。
-
-| 会话 | 职责 | 是否写代码 |
+| 角色 | 职责 | 是否写 Implementation PR |
 |---|---|---|
-| 项目协调会话 | 项目进展分析、任务拆分、指令生成、冲突判断、合并后收尾规划 | 默认不写 |
-| 开发会话 | 执行一个 active task，按 allowed_paths 实现、验证、提交、推送 PR | 是 |
-| Review 会话 | 只读审查他人 PR，运行验证，输出 P0/P1/P2/P3 与 `APPROVE`、`REQUEST_CHANGES` 或 `BLOCKED` | 否 |
+| Coordinator | 项目进展、任务拆分、设计、Implementation Packet / Repair Packet 和冲突判断 | 默认不写 |
+| Implementation Agent | 执行一个 active task，测试先行并按冻结路径实现、验证、提交和推送 | 是，且同一 PR 仅一个 writer |
+| Environment Verification Agent | 在实际具备的 OS/外部环境产生 capability-bound environment evidence | 否；只补证据 |
+| Independent Review Agent | 只读审查他人精确 Head，输出 P0/P1/P2/P3 和三种 verdict | 否 |
+| Human | 授权 activation、外部副作用、GitHub Approval/merge 和 closeout | 不由 Agent 代替 |
 
-会话开头必须声明角色、任务 ID、允许路径、禁止路径和是否可以写文件。
+Codex、Cline、Claude Code、Gemini、Cursor 是 tool/adapter，不是权限角色。会话开头必须声明
+role、task ID、tool、OS、允许/禁止路径、是否可以写文件和实际环境能力。
+
+### Implementation assignment 和切换
+
+开始写入前，人类必须在 GitHub 留下可核验的 assignment。Implementation Agent 必须冻结：
+
+- role、tool、OS；
+- 精确 Starting Head；
+- human evidence URL（必须是持久 GitHub comment/review URL，聊天摘要不够）；
+- `single writer: true` 以及 Coordinator/旧 writer 的停止点。
+
+中途切换必须由人类另行记录 previous agent、next agent、授权范围和 previous agent 的
+stop Head；新 Agent 的 Starting Head 必须等于该 stop Head。旧 Agent 从该点停止写入，缺少
+任一字段或存在并发 writer 时返回 `PLAN_BLOCKED`。
 
 ## 分工原则
 
-- 一个开发会话一次只处理一个 active task。
-- 不让两个开发会话同时修改同一任务或同一批文件。
-- 成员 A 的开发 PR 由成员 B 的 Review 会话审查；成员 B 的开发 PR 由成员 A 的 Review 会话审查。
-- 开发者不得自己批准自己的 PR。
-- Review Agent 不得修改文件；发现问题后输出可复现证据和修复方向。
+- 一个 Implementation Agent 一次只处理一个 active task。
+- 不让两个 Implementation Agent 同时修改同一任务、分支或同一批文件。
+- 实现者不得自己批准自己的 PR；Independent Review Agent 必须是未参与该 Head 实现的会话。
+- Independent Review Agent 不得修改文件；发现问题后输出可复现证据和最小修复方向。
 - **任务激活、PR 合并（merge）、closeout 授权、和任务状态转移（active → completed）
-  均为人类独占操作。Review Agent 仅记录结论，不具备授权权。**
+  均为人类独占操作。Independent Review Agent 仅记录结论，不能授权 closeout。**
+- 连接外部 Broker/Mini QMT 或产生委托等副作用同样是 human-only。模拟委托必须由 separate
+  active task 和单独 human evidence URL 明确授权；real-money trading 始终 forbidden。
 
 ## 标准流程
 
 ```text
-协调会话判断下一任务
-→ 生成开发指令
-→ 开发会话实现并推送 PR
-→ 对方 Review 会话只读审查（APPROVE / REQUEST_CHANGES / BLOCKED）
-→ REQUEST_CHANGES 则开发会话修复后重新 Review
+Coordinator 判断下一任务并生成 Packet
+→ Human 在 GitHub 分配唯一 Implementation Agent
+→ Implementation Agent 实现并推送 PR
+→ Environment Verification Agent 对 required lane 补充精确 Head 证据
+→ Independent Review Agent 只读审查（APPROVE / REQUEST_CHANGES / BLOCKED）
+→ REQUEST_CHANGES 则 Implementation Agent 修复后重新 Review
 → APPROVE 后人类合并 PR
 → 人类单独记录并授权 closeout：协调会话仅机械检查 main、创建/执行 completion PR
 → 再选择下一任务
@@ -47,15 +63,15 @@
 
 | 交接物 | 生产者 | 消费者 | 内容 |
 |---|---|---|---|
-| **Implementation Packet** | Codex | Cline | 精确 Implementation Base SHA、设计、文件计划、测试映射、失败设计、PLAN_BLOCKED 条件 |
-| **Implementation Report** | Cline | Codex Review / 人类 | Base/Head SHA、branch/PR、changed files、逐项 acceptance 证据、命令退出码、未验证范围、风险、spec deviations、path audit 结论 |
-| **Repair Packet** | Codex | Cline | 基于精确 Head Review 的修复指令，限定 allowed_paths |
+| **Implementation Packet** | Coordinator（当前为 Codex-authored） | Implementation Agent | 精确 Implementation Base SHA、设计、文件计划、测试映射、失败设计、PLAN_BLOCKED 条件 |
+| **Implementation Report** | Implementation Agent | Independent Review Agent / Human | assignment、Base/Head、branch/PR、changed files、acceptance、命令退出码、environment evidence、未验证范围、风险、spec deviations、path audit |
+| **Repair Packet** | Coordinator（当前为 Codex-authored） | Implementation Agent | 基于精确 Head Review 的修复指令，限定 allowed_paths |
 
 ### 两 PR 生命周期
 
 **Implementation PR** 与 **Closeout PR** 必须分离：
 
-1. **Implementation PR**：Cline 推送实现变更。独立 Codex Review 会话只读审查
+1. **Implementation PR**：唯一 Implementation Agent 推送实现变更。Independent Review Agent 只读审查
    **精确 Head SHA**，结论仅限 `APPROVE`、`REQUEST_CHANGES` 或 `BLOCKED`。
    Head SHA 改变后旧 Review 自动失效（invalidated），必须重新 Review。
 2. **Closeout PR**：在 Implementation PR 合并后且人类授权已经单独记录并可核验时创建，
@@ -72,16 +88,18 @@ Implementation Report 必须包含以 Implementation Base 为左端的完整
 ## 开发指令最小模板
 
 ```text
-你是开发 Agent。只执行 TASK-XXX，不要做其他任务。
+你是被 GitHub assignment 明确分配的 Implementation Agent。只执行 TASK-XXX。
 
 请读取 AGENTS.md、spec/README.md、spec/manifest.yaml、tasks/active/TASK-XXX.md，以及 TASK-XXX 的全部 spec_refs。
 
 只允许修改 TASK-XXX allowed_paths，禁止修改 forbidden_paths。
 
+先记录 implementation assignment、verification lanes、environment evidence 和 exact Head。
 目标：完成 TASK-XXX acceptance criteria，运行 verification.commands，提交并推送。
 
 不要合并 PR，不要把任务移动到 completed。
-最终回复必须包含：提交 SHA、修改文件、逐项验收证据、验证命令和结果、未解决风险。
+最终回复必须包含：提交 SHA、修改文件、逐项验收证据、验证命令和结果、unverified scope、
+环境 lane、未解决风险。
 ```
 
 ## Review 指令最小模板
@@ -116,10 +134,31 @@ Implementation Report 必须包含以 Implementation Base 为左端的完整
 Review 结论由 Review Agent 记录，但**不能授权 closeout**。任务激活、PR 合并、
 和任务状态转移（active → completed）仅由人类授权。
 
+## Verification lanes 与 environment evidence
+
+| lane | 可执行环境 | 证据边界 |
+|---|---|---|
+| `portable` | Linux 或 Windows | 静态检查、spec、unit/contract、Broker Simulator 与不导入 vendor runtime 的测试；Implementation Agent 必须执行环境支持的全部命令，不能全部 skip |
+| `windows` | 实际 Windows Agent | Windows-only compatibility/integration；Linux 结果不得标为通过 |
+| `windows_miniqmt` | 实际 Windows、可用 Mini QMT 和 task-approved `xtquant` | 默认只读；缺客户端、session、模拟账号 allowlist 或授权均为 `BLOCKED` |
+
+每份 environment evidence 必须记录 task、Base、exact Head、role、tool、OS、Python/Poetry
+版本（适用时含脱敏 xtquant 版本）、原始 command、exit code、passed/failed/skipped 数量、时间、
+脱敏证据、unverified scope 和 evidence URL。required lane 缺少能力时保持 pending/`BLOCKED`，
+不能用其他 lane、mock 或文字说明替代。Head 改变后，旧 environment evidence 和 Review verdict
+全部失效，必须在新 Head 重跑。
+
+Environment Verification Agent 只报告实际能力和证据，不授权任务、外部副作用或状态迁移。
+`windows_miniqmt` 还必须证明客户端可用、`xtquant` 已被 task 允许、`userdata_mini` 已核验、
+session 唯一且账号精确命中模拟 allowlist；任一未知即 fail-closed。
+任何模拟委托仍要求 separate active task 和可核验 human evidence URL；real-money trading
+始终 forbidden。
+
 ## 环境门槛
 
 - 需要 PostgreSQL 的 Review 必须设置 `QUANTIQMT_POSTGRES_DSN` 并连接真实 PostgreSQL。
-- 如果 `poetry` 不在 PATH，优先使用 Windows 绝对路径 fallback。
+- Poetry、sandbox、worktree 和 build 验证必须遵循 `ai/workflows/poetry-verification.md`；不得
+  用 bundled Python 或直接 pytest/Ruff/mypy 冒充项目规定的原始 `poetry run` 命令。
 - 测试无法运行时不得 APPROVE；必须明确未验证范围。
 - GitHub connector 不可用时，可使用本地 Git refs、PR head refs 和用户提供的 commit SHA 做只读复验，但必须说明发布/读取限制。
 

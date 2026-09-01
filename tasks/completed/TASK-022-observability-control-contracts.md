@@ -102,6 +102,21 @@ delivery:
 - This closeout accepts and records the L4 specification delivery only. It implements no runtime, migration, monitoring integration, OMS mutation, or release. TASK-023, TASK-025, TASK-027, and every other downstream task remain blocked and unactivated pending separate human authorization; `release_status` remains `prohibited`.
 - The 2026-08-24 human authorization is limited to adding `tasks/completed/TASK-022-observability-control-contracts.md` and performing this active-to-completed governance transition.
 
+## 2026-09-01 environment evidence erratum
+
+- This is an append-only evidence correction. The original 2026-08-17 and 2026-08-24 commands,
+  counts and observations above remain unchanged; they are not rewritten as if newer evidence had
+  existed during TASK-022.
+- Later Windows Codex verification established that sandbox denial and a Windows `SymbolicLink`
+  reporting zero-byte metadata describe a sandbox access boundary. Either observation alone does not prove Poetry is damaged, that project dependencies are missing, or that reinstall is warranted.
+- The dependency-complete existing project environment is authoritative only after `poetry --version`,
+  `poetry env info`, project Python/import checks and the original `poetry run` commands execute in an
+  allowed context. A sandbox failure and the minimally authorized out-of-sandbox result must be
+  reported separately.
+- This correction changes environment root-cause classification only. It does not alter TASK-022
+  contract acceptance, historical test counts, Review/merge evidence, release prohibition or any
+  Mini QMT/trading authority.
+
 ## Review focus
 
 - 一笔交易能否从行情到成交完整还原。
