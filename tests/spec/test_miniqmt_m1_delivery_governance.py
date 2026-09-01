@@ -18,9 +18,13 @@ def _yaml(relative_path: str) -> dict[str, object]:
     return value
 
 
-def test_tasks_054_055_056_are_completed_and_task_053_is_paused() -> None:
+def test_task_057_is_active_and_tasks_054_055_056_are_completed() -> None:
     active = sorted((ROOT / "tasks" / "active").glob("TASK-*.md"))
-    assert active == []
+    task_057_path = (
+        ROOT / "tasks/active/TASK-057-tool-neutral-agents-windows-verification-poetry.md"
+    )
+    assert active == [task_057_path]
+    assert extract_front_matter(task_057_path)["status"] == "active"
 
     completed = ROOT / "tasks/completed/TASK-054-miniqmt-m1-delivery-governance.md"
     task_054 = extract_front_matter(completed)
@@ -59,6 +63,8 @@ def test_tasks_054_055_056_are_completed_and_task_053_is_paused() -> None:
     assert indexed["TASK-055"]["status"] == "completed"
     assert indexed["TASK-056"]["path"].startswith("completed/")
     assert indexed["TASK-056"]["status"] == "completed"
+    assert indexed["TASK-057"]["path"].startswith("active/")
+    assert indexed["TASK-057"]["status"] == "active"
 
 
 def test_product_rules_make_miniqmt_simulation_account_mandatory_for_m1() -> None:
