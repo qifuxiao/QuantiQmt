@@ -34,11 +34,12 @@ One observable outcome.
 - Exact Starting Head: `<40-char SHA>`
 - Human evidence URL: `<durable GitHub comment/review URL>`
 - Single writer: `<true; previous agent / next agent / stop Head when switching>`
-- PR/branch single-writer: `<PR + branch scope; active true/false for every writer record>`
+- PR/branch single-writer: `<ordered PR + branch records; active true/false and stop_head for every previous writer>`
 
 The Environment Verification Agent produces evidence only; the Independent Review Agent reviews the
 exact Head only; Human alone authorizes activation, external side effects, merge and closeout. A switch
-must prove previous/next agent, previous stop Head == next Starting Head, and previous writer inactive.
+must occur after the previous record and prove previous/next agent, previous record `stop_head` == switch
+`previous_agent_stop_head` == next Starting Head, and previous writer inactive.
 
 ### Verification lanes
 
@@ -56,6 +57,7 @@ Single-record schema/identity gate:
 - Producer role / tool / OS / Python / Poetry / sanitized xtquant versions as applicable:
 - Original command / exit code / executed / passed / failed / skipped / RFC3339 timestamp:
 - `sanitized_evidence: true` / explicit `unverified_scope` (empty allowed) / durable GitHub evidence URL:
+- Explicit `real_money: false` / `simulation_order` boolean:
 
 Required-lane satisfaction gate over the complete record set:
 
@@ -68,6 +70,10 @@ Only an Implementation Agent or Environment Verification Agent may produce envir
 Well-formed evidence alone does not satisfy a required lane. Head changes invalidate all environment
 evidence and Independent Review verdicts. A missing or unsatisfied required lane is `BLOCKED`; another
 OS, mock, substitute command or narrative cannot replace it.
+
+An evidence record cannot authorize its own simulation order. The satisfaction caller must supply a
+trusted authorization context binding the active task and durable Human GitHub evidence; real money is
+always forbidden.
 
 ### Design
 

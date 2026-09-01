@@ -28,10 +28,13 @@ role、task ID、tool、OS、允许/禁止路径、是否可以写文件和实�
 stop Head；新 Agent 的 Starting Head 必须等于该 stop Head。旧 Agent 从该点停止写入，缺少
 任一字段或存在并发 writer 时返回 `PLAN_BLOCKED`。
 
-`PR/branch single-writer` 是集合级门槛，不是单条 assignment 写有 `single_writer: true` 就成立。
-按 PR + branch 汇总全部 writer record 后，同时最多一个 `active: true`；Human GitHub evidence
-必须证明 previous/next agent、previous stop Head、next Starting Head 和 previous writer 已
-`active: false`。两条分别格式正确但同时 active 的记录仍必须拒绝。
+`ordered PR/branch single-writer` 是有序集合级门槛，不是单条 assignment 写有
+`single_writer: true` 就成立。
+按 PR + branch 以因果顺序汇总全部 writer record 后，同时最多一个 `active: true`。switch 之前必须
+已有较低序号的 previous writer record；该 record 必须是 `active: false` 并携带精确 `stop_head`。
+Human GitHub evidence 必须证明 previous/next agent，且 previous record 的 `stop_head`、switch 的
+`previous_agent_stop_head` 和 next `Starting Head` 三者相等。两条分别格式正确但同时 active、记录
+逆序或只由 next record 自报 stop Head 时仍必须拒绝。
 
 ## 分工原则
 
@@ -168,8 +171,10 @@ evidence 和 Review verdict 全部失效，必须以新的 expected Base/exact H
 Environment Verification Agent 只报告实际能力和证据，不授权任务、外部副作用或状态迁移。
 `windows_miniqmt` 还必须证明客户端可用、`xtquant` 已被 task 允许、`userdata_mini` 已核验、
 session 唯一且账号精确命中模拟 allowlist；任一未知即 fail-closed。
-任何模拟委托仍要求 separate active task 和可核验 human evidence URL；real-money trading
-始终 forbidden。
+每条 record 必须显式记录 `real_money: false` 和是否包含 `simulation_order`。record 不能自我授权
+模拟委托；只有 satisfaction gate 的调用方提供 trusted caller authorization context，证明当前 separate
+active task 和可核验 Human GitHub evidence 后才能接受。TASK-057 不提供该权限；real-money
+trading 始终 forbidden。
 
 ## 环境门槛
 

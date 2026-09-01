@@ -16,7 +16,7 @@ Implementation assignment:
 - Exact Starting Head:
 - Human evidence URL:
 - Single-writer stop point:
-- PR/branch single-writer records (PR + branch, agent, active true/false):
+- Ordered PR/branch single-writer records (PR + branch, agent, active true/false, previous stop_head):
 
 Verification lanes:
 - portable: required | optional | not_applicable
@@ -28,6 +28,7 @@ Environment evidence:
 - Producer role / tool / OS / Python / Poetry / sanitized xtquant version as applicable:
 - Original command / exit code / executed / passed / failed / skipped / RFC3339 timestamp:
 - sanitized_evidence: true / explicit unverified_scope (empty allowed) / durable GitHub evidence URL:
+- explicit real_money: false / simulation_order boolean:
 
 Required-lane satisfaction:
 - Validate every record's schema and task/Base/Head identity.
@@ -65,7 +66,10 @@ Verification and handoff:
 - Treat well-formed evidence and required-lane satisfaction as separate gates. Only an Implementation
   Agent or Environment Verification Agent may produce environment evidence.
 - Enforce PR/branch single-writer across all records; a Human-authorized switch requires previous/next
-  identity, equal previous stop Head and next Starting Head, and the previous writer inactive.
+  identity, an earlier inactive previous record, and equal previous record stop_head, switch
+  previous_agent_stop_head and next Starting Head.
+- Never accept record-only simulation-order authorization; require trusted caller context binding the
+  active task and durable Human GitHub evidence. Real-money evidence is always invalid.
 - Missing required Windows/Mini QMT capability is BLOCKED, not a reason to downgrade acceptance.
 - Map every acceptance criterion to evidence.
 - Report changed files, environment evidence, unverified scope, risks and spec deviations.

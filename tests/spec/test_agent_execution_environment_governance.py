@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import re
+import shlex
 from collections.abc import Mapping
+from datetime import datetime
 from pathlib import Path
 
 import pytest
@@ -183,6 +185,8 @@ def _complete_evidence_record(
         "sanitized_evidence": True,
         "unverified_scope": "",
         "evidence_url": "https://github.com/example/repo/pull/3#issuecomment-4",
+        "simulation_order": False,
+        "real_money": False,
     }
 
 
@@ -214,6 +218,8 @@ def _environment_evidence_schema_errors(
         "sanitized_evidence",
         "unverified_scope",
         "evidence_url",
+        "simulation_order",
+        "real_money",
     }
     errors = [f"missing {field}" for field in sorted(required - record.keys())]
     if record.get("task") != expected_task:
@@ -252,10 +258,44 @@ def _environment_evidence_schema_errors(
         or not str(record.get("xtquant_version")).strip()
     ):
         errors.append("xtquant_version is required for Windows/Mini QMT evidence")
+    if record.get("lane") == "windows_miniqmt":
+        for capability in (
+            "miniqmt_available",
+            "xtquant_task_approved",
+            "userdata_mini_verified",
+            "unique_session_verified",
+            "simulation_account_allowlisted",
+        ):
+            if record.get(capability) is not True:
+                errors.append(f"Windows/Mini QMT evidence requires {capability}")
+    if record.get("real_money") is not False:
+        errors.append("real_money must be explicit and false")
+    if record.get("simulation_order") is not True and record.get("simulation_order") is not False:
+        errors.append("simulation_order must be an explicit boolean")
     if type(record.get("exit_code")) is not int:
         errors.append("exit_code must be an integer")
-    if not RFC3339_RE.fullmatch(str(record.get("timestamp", ""))):
+    timestamp = record.get("timestamp")
+    if not isinstance(timestamp, str) or not RFC3339_RE.fullmatch(timestamp):
         errors.append("timestamp must be RFC3339")
+    else:
+        try:
+            parsed_timestamp = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+        except ValueError:
+            errors.append("timestamp must be a real RFC3339 datetime")
+        else:
+            if parsed_timestamp.tzinfo is None or parsed_timestamp.utcoffset() is None:
+                errors.append("timestamp must include an explicit timezone")
+    counts: dict[str, int] = {}
+    for field in ("executed", "passed", "failed", "skipped"):
+        value = record.get(field)
+        if type(value) is not int or value < 0:
+            errors.append(f"{field} must be a non-negative integer")
+        else:
+            counts[field] = value
+    if len(counts) == 4 and counts["executed"] != (
+        counts["passed"] + counts["failed"] + counts["skipped"]
+    ):
+        errors.append("result counts must be internally consistent")
     if record.get("sanitized_evidence") is not True:
         errors.append("sanitized_evidence must be true")
     if "unverified_scope" in record and not isinstance(record.get("unverified_scope"), str):
@@ -274,6 +314,7 @@ def _required_lane_satisfaction_errors(
     lane: str,
     expected_commands: set[str],
     skip_allowances: Mapping[str, int],
+    simulation_authorization: Mapping[str, object] | None = None,
 ) -> list[str]:
     errors: list[str] = []
     normalized_expected = {" ".join(command.split()) for command in expected_commands}
@@ -316,6 +357,31 @@ def _required_lane_satisfaction_errors(
                 errors.append(f"record {index}: skipped scope must be explicit")
         if record.get("exit_code") != 0:
             errors.append(f"record {index}: exit code must be zero")
+        if record.get("simulation_order") is True:
+            if expected_task == "TASK-057":
+                errors.append(f"record {index}: TASK-057 cannot authorize a simulation order")
+            elif simulation_authorization is None:
+                errors.append(
+                    f"record {index}: simulation order requires trusted caller authorization"
+                )
+            else:
+                if simulation_authorization.get("task") != expected_task:
+                    errors.append(
+                        f"record {index}: simulation authorization task does not "
+                        "match evidence task"
+                    )
+                if simulation_authorization.get("active") is not True:
+                    errors.append(f"record {index}: simulation authorization task must be active")
+                if simulation_authorization.get("simulation_order_authorized") is not True:
+                    errors.append(
+                        f"record {index}: simulation order is not authorized by trusted context"
+                    )
+                if not GITHUB_EVIDENCE_RE.fullmatch(
+                    str(simulation_authorization.get("human_evidence_url", ""))
+                ):
+                    errors.append(
+                        f"record {index}: simulation order requires durable Human GitHub evidence"
+                    )
 
     observed_set = set(observed)
     missing = normalized_expected - observed_set
@@ -329,37 +395,93 @@ def _required_lane_satisfaction_errors(
     return errors
 
 
+def _semantic_command_tokens(command: str) -> tuple[tuple[str, ...] | None, list[str]]:
+    errors: list[str] = []
+    if any(marker in command for marker in ("`", "$", "@(", "<(", ">(", "^")) or re.search(
+        r"%[^%]+%", command
+    ):
+        errors.append("command substitution is forbidden")
+    if "\n" in command or "\r" in command:
+        errors.append("multiline command is forbidden")
+    lexer = shlex.shlex(command, posix=True, punctuation_chars="|&;<>")
+    lexer.whitespace_split = True
+    lexer.commenters = ""
+    try:
+        tokens = tuple(lexer)
+    except ValueError:
+        return None, [*errors, "command has malformed quoting"]
+    if not tokens:
+        errors.append("command must not be empty")
+    if any(re.fullmatch(r"[|&;<>]+", token) for token in tokens):
+        errors.append("shell control operators and redirection are forbidden")
+    return tokens, errors
+
+
 def _poetry_command_errors(
     command: str,
     *,
     expected_commands: set[str],
     build_reason: str | None = None,
 ) -> list[str]:
-    normalized = " ".join(command.strip().split())
-    normalized_expected = {" ".join(item.strip().split()) for item in expected_commands}
-    errors: list[str] = []
-    if normalized not in normalized_expected:
+    tokens, errors = _semantic_command_tokens(command)
+    expected_tokens: set[tuple[str, ...]] = set()
+    for expected_command in expected_commands:
+        parsed_expected, expected_errors = _semantic_command_tokens(expected_command)
+        if expected_errors or parsed_expected is None:
+            errors.append("task-supplied expected command is not safe canonical syntax")
+        else:
+            expected_tokens.add(parsed_expected)
+    if tokens is None:
+        return errors
+    if tokens not in expected_tokens:
         errors.append("command is not in the task-supplied expected command set")
-    lower = normalized.lower()
-    if not lower.startswith("poetry "):
+    lower_tokens = tuple(token.lower() for token in tokens)
+    if not lower_tokens or lower_tokens[0] != "poetry":
         errors.append("project verification must use the original Poetry entrypoint")
-    mutation_patterns = (
-        r"(?:^| )(?:python -m )?(?:venv|virtualenv)(?: |$)",
-        r"(?:^| )(?:python -m )?pip (?:install|uninstall)(?: |$)",
-        r"^poetry (?:add|install|update|remove|lock)(?: |$)",
-        r"^poetry run poetry (?:add|install|update|remove|lock)(?: |$)",
-        r"^poetry env (?:use|remove)(?: |$)",
-    )
-    errors.extend(
-        f"mutation command is forbidden: {pattern}"
-        for pattern in mutation_patterns
-        if re.search(pattern, lower)
-    )
-    if "bundled" in lower:
+    elif len(lower_tokens) < 2 or lower_tokens[1] not in {
+        "--version",
+        "env",
+        "build",
+        "run",
+    }:
+        errors.append("unexpected Poetry command")
+
+    mutation_commands = {"add", "install", "update", "remove", "lock"}
+    if len(lower_tokens) >= 2 and lower_tokens[1] in mutation_commands:
+        errors.append("Poetry dependency mutation is forbidden")
+    if (
+        len(lower_tokens) >= 3
+        and lower_tokens[:2] == ("poetry", "env")
+        and lower_tokens[2] != "info"
+    ):
+        errors.append("Poetry environment mutation is forbidden")
+    run_tokens = lower_tokens[2:] if lower_tokens[:2] == ("poetry", "run") else ()
+    if run_tokens:
+        if run_tokens[0] in {"venv", "virtualenv"}:
+            errors.append("second-environment creation is forbidden")
+        if run_tokens[0] in {"pip", "pip3"} and any(
+            token in {"install", "uninstall"} for token in run_tokens[1:]
+        ):
+            errors.append("pip mutation is forbidden")
+        if run_tokens[0] == "poetry" and any(
+            token in mutation_commands or token == "env" for token in run_tokens[1:]
+        ):
+            errors.append("nested Poetry mutation is forbidden")
+        python_entrypoint = re.search(
+            r"(?:^|[\\/])(?:python(?:3(?:\.\d+)*)?|py)(?:\.exe)?$",
+            run_tokens[0],
+        )
+        if python_entrypoint is not None and "-m" in run_tokens:
+            module_index = run_tokens.index("-m") + 1
+            if module_index >= len(run_tokens):
+                errors.append("python -m requires an explicit module")
+            elif run_tokens[module_index] in {"pip", "venv", "virtualenv", "ensurepip"}:
+                errors.append("Python environment or dependency mutation is forbidden")
+    if any("bundled" in token for token in lower_tokens):
         errors.append("bundled Python is forbidden")
-    if "--no-verify" in lower:
+    if "--no-verify" in lower_tokens:
         errors.append("--no-verify is forbidden")
-    if normalized == "poetry build" and build_reason not in {
+    if lower_tokens == ("poetry", "build") and build_reason not in {
         "task_required",
         "missing_wheel_only_skip",
     }:
@@ -431,20 +553,38 @@ def _assignment_collection_errors(
     active = [record for record in scoped if record.get("active") is True]
     if len(active) > 1:
         errors.append("PR and branch have more than one active writer")
-    by_agent = {str(record.get("agent")): record for record in scoped}
     for index, record in enumerate(scoped):
         switching = "previous_agent" in record
         errors.extend(
             f"record {index}: {error}" for error in _assignment_errors(record, switching=switching)
         )
-        if record.get("active") not in {True, False}:
+        if record.get("active") is not True and record.get("active") is not False:
             errors.append(f"record {index}: active must be explicit")
+        if "stop_head" in record and not SHA_RE.fullmatch(str(record.get("stop_head", ""))):
+            errors.append(f"record {index}: stop_head must be an exact SHA")
         if switching:
-            previous = by_agent.get(str(record.get("previous_agent")))
-            if previous is None:
-                errors.append(f"record {index}: previous writer record is missing")
-            elif previous.get("active") is not False:
-                errors.append(f"record {index}: previous writer must be inactive")
+            previous_agent = str(record.get("previous_agent"))
+            prior_matches = [
+                prior for prior in scoped[:index] if str(prior.get("agent")) == previous_agent
+            ]
+            if not prior_matches:
+                if any(str(later.get("agent")) == previous_agent for later in scoped[index + 1 :]):
+                    errors.append(f"record {index}: previous writer must occur before switch")
+                else:
+                    errors.append(f"record {index}: previous writer record is missing")
+            else:
+                previous = prior_matches[-1]
+                if previous.get("active") is not False:
+                    errors.append(f"record {index}: previous writer must be inactive")
+                previous_stop_head = previous.get("stop_head")
+                if not SHA_RE.fullmatch(str(previous_stop_head or "")):
+                    errors.append(f"record {index}: previous writer must record an exact stop_head")
+                elif not (
+                    previous_stop_head
+                    == record.get("previous_agent_stop_head")
+                    == record.get("starting_head")
+                ):
+                    errors.append(f"record {index}: writer switch Head chain does not match")
             if record.get("next_agent") != record.get("agent"):
                 errors.append(f"record {index}: next agent identity does not match")
     return errors
@@ -712,6 +852,25 @@ def test_template_prompt_workflow_share_environment_evidence_fields() -> None:
             assert token in text, f"{relative_path}: {token}"
 
 
+def test_template_prompt_workflow_share_causal_switch_and_order_authority_fields() -> None:
+    files = (
+        "tasks/templates/task-template.md",
+        "ai/prompts/miniqmt-m1-task.md",
+        "ai/workflows/team-collaboration.md",
+    )
+    for relative_path in files:
+        text = _text(relative_path).lower()
+        for token in (
+            "ordered",
+            "stop_head",
+            "previous_agent_stop_head",
+            "real_money",
+            "simulation_order",
+            "trusted",
+        ):
+            assert token in text, f"{relative_path}: {token}"
+
+
 def test_codex_and_cline_adapters_report_only_actual_capabilities() -> None:
     codex = _text("ai/adapters/codex.md")
     cline = _text("ai/adapters/cline.md")
@@ -766,6 +925,23 @@ def test_environment_evidence_schema_accepts_complete_current_identity() -> None
     )
 
 
+@pytest.mark.parametrize("replacement", (None, True))
+def test_environment_evidence_schema_requires_explicit_false_real_money(
+    replacement: object,
+) -> None:
+    record = _complete_evidence_record("poetry run pytest tests/spec")
+    if replacement is None:
+        del record["real_money"]
+    else:
+        record["real_money"] = replacement
+    assert _environment_evidence_schema_errors(
+        record,
+        expected_task="TASK-057",
+        expected_base="c" * 40,
+        expected_head="d" * 40,
+    )
+
+
 def test_windows_miniqmt_evidence_requires_applicable_version() -> None:
     record = _complete_evidence_record("poetry run pytest tests/integration")
     record["lane"] = "windows_miniqmt"
@@ -775,7 +951,16 @@ def test_windows_miniqmt_evidence_requires_applicable_version() -> None:
         expected_base="c" * 40,
         expected_head="d" * 40,
     )
-    record["xtquant_version"] = "sanitized-version"
+    record.update(
+        {
+            "xtquant_version": "sanitized-version",
+            "miniqmt_available": True,
+            "xtquant_task_approved": True,
+            "userdata_mini_verified": True,
+            "unique_session_verified": True,
+            "simulation_account_allowlisted": True,
+        }
+    )
     assert (
         _environment_evidence_schema_errors(
             record,
@@ -802,6 +987,134 @@ def test_required_lane_satisfaction_accepts_exact_successful_command_set() -> No
             lane="portable",
             expected_commands=commands,
             skip_allowances={},
+        )
+        == []
+    )
+
+
+@pytest.mark.parametrize(
+    "capability",
+    (
+        "miniqmt_available",
+        "xtquant_task_approved",
+        "userdata_mini_verified",
+        "unique_session_verified",
+        "simulation_account_allowlisted",
+    ),
+)
+@pytest.mark.parametrize("replacement", (None, False))
+def test_windows_miniqmt_schema_fails_closed_on_capability(
+    capability: str, replacement: object
+) -> None:
+    record = _complete_evidence_record("poetry run pytest tests/integration")
+    record.update(
+        {
+            "lane": "windows_miniqmt",
+            "xtquant_version": "sanitized-version",
+            "miniqmt_available": True,
+            "xtquant_task_approved": True,
+            "userdata_mini_verified": True,
+            "unique_session_verified": True,
+            "simulation_account_allowlisted": True,
+        }
+    )
+    if replacement is None:
+        del record[capability]
+    else:
+        record[capability] = replacement
+    assert _environment_evidence_schema_errors(
+        record,
+        expected_task="TASK-057",
+        expected_base="c" * 40,
+        expected_head="d" * 40,
+    )
+
+
+def test_windows_miniqmt_required_lane_rejects_real_money() -> None:
+    command = "poetry run pytest tests/integration"
+    record = _complete_evidence_record(command)
+    record.update(
+        {
+            "lane": "windows_miniqmt",
+            "xtquant_version": "sanitized-version",
+            "miniqmt_available": True,
+            "xtquant_task_approved": True,
+            "userdata_mini_verified": True,
+            "unique_session_verified": True,
+            "simulation_account_allowlisted": True,
+            "real_money": True,
+        }
+    )
+    assert _required_lane_satisfaction_errors(
+        [record],
+        expected_task="TASK-057",
+        expected_base="c" * 40,
+        expected_head="d" * 40,
+        lane="windows_miniqmt",
+        expected_commands={command},
+        skip_allowances={},
+    )
+
+
+def test_task057_record_cannot_self_authorize_a_simulation_order() -> None:
+    command = "poetry run pytest tests/integration"
+    record = _complete_evidence_record(command)
+    record.update(
+        {
+            "lane": "windows_miniqmt",
+            "xtquant_version": "sanitized-version",
+            "miniqmt_available": True,
+            "xtquant_task_approved": True,
+            "userdata_mini_verified": True,
+            "unique_session_verified": True,
+            "simulation_account_allowlisted": True,
+            "simulation_order": True,
+            "separate_active_task": True,
+            "human_evidence_url": "https://github.com/example/repo/pull/3#issuecomment-5",
+        }
+    )
+    assert _required_lane_satisfaction_errors(
+        [record],
+        expected_task="TASK-057",
+        expected_base="c" * 40,
+        expected_head="d" * 40,
+        lane="windows_miniqmt",
+        expected_commands={command},
+        skip_allowances={},
+    )
+
+
+def test_trusted_caller_context_can_authorize_a_separate_task_simulation_order() -> None:
+    command = "poetry run pytest tests/integration"
+    record = _complete_evidence_record(command)
+    record.update(
+        {
+            "task": "TASK-058",
+            "lane": "windows_miniqmt",
+            "xtquant_version": "sanitized-version",
+            "miniqmt_available": True,
+            "xtquant_task_approved": True,
+            "userdata_mini_verified": True,
+            "unique_session_verified": True,
+            "simulation_account_allowlisted": True,
+            "simulation_order": True,
+        }
+    )
+    assert (
+        _required_lane_satisfaction_errors(
+            [record],
+            expected_task="TASK-058",
+            expected_base="c" * 40,
+            expected_head="d" * 40,
+            lane="windows_miniqmt",
+            expected_commands={command},
+            skip_allowances={},
+            simulation_authorization={
+                "task": "TASK-058",
+                "active": True,
+                "simulation_order_authorized": True,
+                "human_evidence_url": ("https://github.com/example/repo/pull/3#issuecomment-5"),
+            },
         )
         == []
     )
@@ -921,6 +1234,106 @@ def test_poetry_gate_uses_exact_normalized_expected_command_set() -> None:
         == []
     )
     assert _poetry_command_errors("poetry run pytest tests/contract", expected_commands=expected)
+
+
+def test_poetry_gate_canonicalizes_semantically_equivalent_quotes() -> None:
+    assert (
+        _poetry_command_errors(
+            'poetry run pytest "tests/spec"',
+            expected_commands={"poetry run pytest tests/spec"},
+        )
+        == []
+    )
+
+
+@pytest.mark.parametrize(
+    "command",
+    (
+        'poetry run python -m "pip" install requests',
+        "poetry run python -m 'pip' install requests",
+        'poetry run python -m "PIP" INSTALL requests',
+        'poetry run python -m "venv" .second-env',
+        'poetry run python -m "virtualenv" .second-env',
+        'poetry run python -m "ensurepip"',
+        'poetry run "pip3" install requests',
+        'poetry run "poetry" add requests',
+        "poetry run poetry --no-interaction add requests",
+        'poetry run .venv/Scripts/python.exe -m "pip" install requests',
+        "poetry run pytest tests/spec && poetry run pytest tests/contract",
+        "poetry run pytest tests/spec | poetry run pytest tests/contract",
+        "poetry run pytest tests/spec > results.txt",
+        "poetry run pytest `Get-ChildItem`",
+        "poetry run pytest $(Get-ChildItem)",
+        "poetry run pytest $env:TEST_TARGET",
+        "poetry run pytest %TEST_TARGET%",
+        'poetry run pytest "tests/spec',
+    ),
+)
+def test_poetry_gate_rejects_quoted_mutations_and_shell_syntax(command: str) -> None:
+    assert _poetry_command_errors(command, expected_commands={command})
+
+
+@pytest.mark.parametrize(
+    "timestamp",
+    (
+        "2026-99-01T09:00:00Z",
+        "2026-02-30T09:00:00Z",
+        "2026-09-01T25:61:61Z",
+        "2026-09-01T09:00:00",
+    ),
+)
+def test_environment_evidence_schema_rejects_semantically_invalid_timestamps(
+    timestamp: str,
+) -> None:
+    record = _complete_evidence_record("poetry run pytest tests/spec")
+    record["timestamp"] = timestamp
+    assert _environment_evidence_schema_errors(
+        record,
+        expected_task="TASK-057",
+        expected_base="c" * 40,
+        expected_head="d" * 40,
+    )
+
+
+@pytest.mark.parametrize(
+    "timestamp",
+    ("2026-09-01T09:00:00Z", "2026-09-01T17:00:00+08:00"),
+)
+def test_environment_evidence_schema_accepts_semantic_rfc3339_timestamps(
+    timestamp: str,
+) -> None:
+    record = _complete_evidence_record("poetry run pytest tests/spec")
+    record["timestamp"] = timestamp
+    assert (
+        _environment_evidence_schema_errors(
+            record,
+            expected_task="TASK-057",
+            expected_base="c" * 40,
+            expected_head="d" * 40,
+        )
+        == []
+    )
+
+
+@pytest.mark.parametrize(
+    "updates",
+    (
+        {"executed": True, "passed": True, "failed": False, "skipped": False},
+        {"executed": -1, "passed": -1},
+        {"executed": 2, "passed": 1, "failed": 0, "skipped": 0},
+    ),
+)
+def test_environment_evidence_schema_rejects_invalid_counts(
+    updates: dict[str, object],
+) -> None:
+    record = _complete_evidence_record("poetry run pytest tests/spec")
+    record.update(updates)
+    assert _environment_evidence_schema_errors(
+        record,
+        expected_task="TASK-057",
+        expected_base="c" * 40,
+        expected_head="d" * 40,
+    )
 
 
 @pytest.mark.parametrize("reason", (None, "unrelated failure", "always build"))
@@ -1071,6 +1484,7 @@ def _writer_record(
     starting_head: str,
     previous_agent: str | None = None,
     previous_agent_stop_head: str | None = None,
+    stop_head: str | None = None,
 ) -> dict[str, object]:
     record: dict[str, object] = {
         "role": "Implementation Agent",
@@ -1092,13 +1506,20 @@ def _writer_record(
                 "previous_agent_stop_head": previous_agent_stop_head,
             }
         )
+    if stop_head is not None:
+        record["stop_head"] = stop_head
     return record
 
 
 def test_assignment_collection_accepts_a_sequential_human_switch() -> None:
     stop_head = "a" * 40
     records = [
-        _writer_record("Codex/Windows", active=False, starting_head="9" * 40),
+        _writer_record(
+            "Codex/Windows",
+            active=False,
+            starting_head="9" * 40,
+            stop_head=stop_head,
+        ),
         _writer_record(
             "Cline/Linux",
             active=True,
@@ -1110,6 +1531,61 @@ def test_assignment_collection_accepts_a_sequential_human_switch() -> None:
     assert (
         _assignment_collection_errors(records, pr=100, branch="codex/task-057-implementation") == []
     )
+
+
+def test_assignment_collection_rejects_reversed_switch_order() -> None:
+    stop_head = "a" * 40
+    previous = _writer_record(
+        "Codex/Windows",
+        active=False,
+        starting_head="9" * 40,
+        stop_head=stop_head,
+    )
+    next_writer = _writer_record(
+        "Cline/Linux",
+        active=True,
+        starting_head=stop_head,
+        previous_agent="Codex/Windows",
+        previous_agent_stop_head=stop_head,
+    )
+    assert _assignment_collection_errors(
+        [next_writer, previous], pr=100, branch="codex/task-057-implementation"
+    )
+
+
+def test_assignment_collection_rejects_missing_previous_record_stop_head() -> None:
+    stop_head = "a" * 40
+    records = [
+        _writer_record("Codex/Windows", active=False, starting_head="9" * 40),
+        _writer_record(
+            "Cline/Linux",
+            active=True,
+            starting_head=stop_head,
+            previous_agent="Codex/Windows",
+            previous_agent_stop_head=stop_head,
+        ),
+    ]
+    assert _assignment_collection_errors(records, pr=100, branch="codex/task-057-implementation")
+
+
+def test_assignment_collection_rejects_previous_record_stop_head_mismatch() -> None:
+    stop_head = "a" * 40
+    records = [
+        _writer_record(
+            "Codex/Windows",
+            active=False,
+            starting_head="9" * 40,
+            stop_head="b" * 40,
+        ),
+        _writer_record(
+            "Cline/Linux",
+            active=True,
+            starting_head=stop_head,
+            previous_agent="Codex/Windows",
+            previous_agent_stop_head=stop_head,
+        ),
+    ]
+    assert _assignment_collection_errors(records, pr=100, branch="codex/task-057-implementation")
 
 
 def test_assignment_collection_rejects_two_active_writers() -> None:
