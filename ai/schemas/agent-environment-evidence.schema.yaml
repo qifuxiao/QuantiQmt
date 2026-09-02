@@ -1,0 +1,147 @@
+$schema: https://json-schema.org/draft/2020-12/schema
+$id: https://quantiqmt.local/schemas/agent-environment-evidence.schema.yaml
+title: QuantiQmt canonical GitHub environment evidence
+type: object
+additionalProperties: false
+required:
+  - schema_version
+  - task_id
+  - plan_version
+  - repository
+  - pull_request_number
+  - base_sha
+  - head_sha
+  - producer
+  - assignment_comment
+  - records
+properties:
+  schema_version: {const: 1}
+  task_id: {$ref: '#/$defs/task'}
+  plan_version: {type: string, minLength: 1, maxLength: 128}
+  repository: {$ref: '#/$defs/repository'}
+  pull_request_number: {type: integer, minimum: 1}
+  base_sha: {$ref: '#/$defs/sha'}
+  head_sha: {$ref: '#/$defs/sha'}
+  producer: {$ref: '#/$defs/producer'}
+  assignment_comment:
+    type: object
+    additionalProperties: false
+    required: [id, url]
+    properties:
+      id: {type: integer, minimum: 1}
+      url: {$ref: '#/$defs/github_comment'}
+  records:
+    type: array
+    minItems: 1
+    items: {$ref: '#/$defs/record'}
+$defs:
+  sha:
+    type: string
+    pattern: '^[0-9a-f]{40}$'
+  task:
+    type: string
+    pattern: '^TASK-[0-9]{3}$'
+  repository:
+    type: string
+    pattern: '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$'
+  agent:
+    type: string
+    pattern: '^[A-Za-z0-9][A-Za-z0-9._:+-]{0,127}$'
+  login:
+    type: string
+    pattern: '^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$'
+  tool:
+    type: string
+    pattern: '^[A-Za-z0-9][A-Za-z0-9._+-]{0,63}$'
+  github_comment:
+    type: string
+    pattern: '^https://github\.com/[^/]+/[^/]+/pull/[0-9]+#issuecomment-[0-9]+$'
+  lanes:
+    type: array
+    minItems: 1
+    uniqueItems: true
+    items: {enum: [portable, windows, windows_miniqmt]}
+  producer:
+    type: object
+    additionalProperties: false
+    required: [agent_id, github_login, role, tool, os, lanes]
+    properties:
+      agent_id: {$ref: '#/$defs/agent'}
+      github_login: {$ref: '#/$defs/login'}
+      role: {enum: [Implementation Agent, Environment Verification Agent]}
+      tool: {$ref: '#/$defs/tool'}
+      os: {enum: [Windows, Linux, macOS]}
+      lanes: {$ref: '#/$defs/lanes'}
+  xtquant_provenance:
+    type: object
+    additionalProperties: false
+    required: [source, value, verified]
+    properties:
+      source: {enum: [package_metadata, vendor_api]}
+      value:
+        type: string
+        pattern: '^[A-Za-z0-9][A-Za-z0-9._+-]{0,63}$'
+      verified: {const: true}
+  capabilities:
+    type: object
+    additionalProperties: false
+    required:
+      - portable
+      - windows
+      - miniqmt_available
+      - userdata_mini_verified
+      - unique_session_verified
+      - simulation_account_allowlisted
+    properties:
+      portable: {type: boolean}
+      windows: {type: boolean}
+      miniqmt_available: {type: boolean}
+      userdata_mini_verified: {type: boolean}
+      unique_session_verified: {type: boolean}
+      simulation_account_allowlisted: {type: boolean}
+  record:
+    type: object
+    additionalProperties: false
+    required:
+      - lane
+      - requirement
+      - python_version
+      - poetry_version
+      - xtquant
+      - command
+      - exit_code
+      - executed
+      - passed
+      - failed
+      - skipped
+      - timestamp
+      - sanitized_evidence
+      - unverified_scope
+      - capabilities
+      - miniqmt_connection
+      - account_query
+      - simulation_order
+      - real_money
+    properties:
+      lane: {enum: [portable, windows, windows_miniqmt]}
+      requirement: {enum: [required, optional, not_applicable]}
+      python_version: {type: string, minLength: 1, maxLength: 64}
+      poetry_version: {type: string, minLength: 1, maxLength: 64}
+      xtquant:
+        oneOf:
+          - type: 'null'
+          - {$ref: '#/$defs/xtquant_provenance'}
+      command: {type: string, minLength: 1, maxLength: 4096}
+      exit_code: {type: integer}
+      executed: {type: integer, minimum: 0}
+      passed: {type: integer, minimum: 0}
+      failed: {type: integer, minimum: 0}
+      skipped: {type: integer, minimum: 0}
+      timestamp: {type: string, format: date-time}
+      sanitized_evidence: {const: true}
+      unverified_scope: {type: string}
+      capabilities: {$ref: '#/$defs/capabilities'}
+      miniqmt_connection: {type: boolean}
+      account_query: {type: boolean}
+      simulation_order: {type: boolean}
+      real_money: {type: boolean}

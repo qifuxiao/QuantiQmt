@@ -1,0 +1,142 @@
+$schema: https://json-schema.org/draft/2020-12/schema
+$id: https://quantiqmt.local/schemas/agent-assignment.schema.yaml
+title: QuantiQmt canonical GitHub assignment authority
+type: object
+additionalProperties: false
+required:
+  - schema_version
+  - task_id
+  - plan_version
+  - repository
+  - pull_request_number
+  - base_branch
+  - head_branch
+  - expected_base_sha
+  - starting_head_sha
+  - events
+  - authorized_producers
+properties:
+  schema_version: {const: 1}
+  task_id: {$ref: '#/$defs/task'}
+  plan_version: {type: string, minLength: 1, maxLength: 128}
+  repository: {$ref: '#/$defs/repository'}
+  pull_request_number: {type: integer, minimum: 1}
+  base_branch: {$ref: '#/$defs/branch'}
+  head_branch: {$ref: '#/$defs/branch'}
+  expected_base_sha: {$ref: '#/$defs/sha'}
+  starting_head_sha: {$ref: '#/$defs/sha'}
+  events:
+    type: array
+    minItems: 1
+    items: {$ref: '#/$defs/event'}
+  authorized_producers:
+    type: array
+    minItems: 1
+    items: {$ref: '#/$defs/producer'}
+$defs:
+  sha:
+    type: string
+    pattern: '^[0-9a-f]{40}$'
+  task:
+    type: string
+    pattern: '^TASK-[0-9]{3}$'
+  repository:
+    type: string
+    pattern: '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$'
+  branch:
+    type: string
+    pattern: '^[A-Za-z0-9][A-Za-z0-9._/-]{0,254}$'
+  agent:
+    type: string
+    pattern: '^[A-Za-z0-9][A-Za-z0-9._:+-]{0,127}$'
+  login:
+    type: string
+    pattern: '^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$'
+  tool:
+    type: string
+    pattern: '^[A-Za-z0-9][A-Za-z0-9._+-]{0,63}$'
+  lanes:
+    type: array
+    minItems: 1
+    uniqueItems: true
+    items: {enum: [portable, windows, windows_miniqmt]}
+  producer:
+    type: object
+    additionalProperties: false
+    required: [agent_id, github_login, role, tool, os, lanes]
+    properties:
+      agent_id: {$ref: '#/$defs/agent'}
+      github_login: {$ref: '#/$defs/login'}
+      role: {enum: [Implementation Agent, Environment Verification Agent]}
+      tool: {$ref: '#/$defs/tool'}
+      os: {enum: [Windows, Linux, macOS]}
+      lanes: {$ref: '#/$defs/lanes'}
+  event:
+    type: object
+    additionalProperties: false
+    required:
+      - event
+      - sequence
+      - task_id
+      - repository
+      - pull_request_number
+      - head_branch
+      - role
+      - agent_id
+      - github_login
+      - tool
+      - os
+      - lanes
+      - pr_head_sha
+      - single_writer
+    properties:
+      event: {enum: [ASSIGN, STOP, SWITCH]}
+      sequence: {type: integer, minimum: 1}
+      task_id: {$ref: '#/$defs/task'}
+      repository: {$ref: '#/$defs/repository'}
+      pull_request_number: {type: integer, minimum: 1}
+      head_branch: {$ref: '#/$defs/branch'}
+      role: {const: Implementation Agent}
+      agent_id: {$ref: '#/$defs/agent'}
+      github_login: {$ref: '#/$defs/login'}
+      tool: {$ref: '#/$defs/tool'}
+      os: {enum: [Windows, Linux, macOS]}
+      lanes: {$ref: '#/$defs/lanes'}
+      pr_head_sha: {$ref: '#/$defs/sha'}
+      single_writer: {const: true}
+      starting_head_sha: {$ref: '#/$defs/sha'}
+      stop_head_sha: {$ref: '#/$defs/sha'}
+      previous_agent_id: {$ref: '#/$defs/agent'}
+      next_agent_id: {$ref: '#/$defs/agent'}
+      previous_agent_stop_head_sha: {$ref: '#/$defs/sha'}
+    allOf:
+      - if:
+          properties: {event: {const: ASSIGN}}
+        then:
+          required: [starting_head_sha]
+          not:
+            anyOf:
+              - required: [stop_head_sha]
+              - required: [previous_agent_id]
+              - required: [next_agent_id]
+              - required: [previous_agent_stop_head_sha]
+      - if:
+          properties: {event: {const: STOP}}
+        then:
+          required: [stop_head_sha]
+          not:
+            anyOf:
+              - required: [starting_head_sha]
+              - required: [previous_agent_id]
+              - required: [next_agent_id]
+              - required: [previous_agent_stop_head_sha]
+      - if:
+          properties: {event: {const: SWITCH}}
+        then:
+          required:
+            - starting_head_sha
+            - previous_agent_id
+            - next_agent_id
+            - previous_agent_stop_head_sha
+          not:
+            required: [stop_head_sha]

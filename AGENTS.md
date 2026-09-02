@@ -75,18 +75,35 @@
 - Task Prompt 必须写明目标、非目标、allowed/forbidden paths、验收、验证命令、失败路径
   和预期演示；可使用 `ai/prompts/miniqmt-m1-task.md` 模板。
 - 没有 active 实现 task 时，Agent 只能报告并请求人类激活精确 task，不得自行开始代码。
-- Codex-Cline 跨服务器协作遵循四角色边界（详见 `ai/workflows/team-collaboration.md`
-  和 `.clinerules/10-codex-handoff.md`）：
-  - **Codex**：任务选择、规范/架构设计、Implementation Packet / Repair Packet 和精确
-    Head 独立 Review（结论仅 APPROVE、REQUEST_CHANGES 或 BLOCKED）。
-  - **Cline**：测试先行、最小实现、验证、commit、push 和 Implementation PR。Cline 必须
-    读取 active task 内 Codex Plan；无 active task、Base 不匹配、dirty worktree 或设计
-    缺口时 fail-closed（返回 PLAN_BLOCKED），不得自行修改 task/spec 或替代设计。
-  - **独立 Codex Review 会话**：只读审查精确 Head；Head 改变后旧 Review 自动失效。
-  - **人类**：任务激活、GitHub Approval/merge 和 closeout 授权。
+- 跨服务器协作使用工具中立角色（详见 `ai/workflows/team-collaboration.md` 和
+  `.clinerules/10-codex-handoff.md`）。Codex、Cline、Claude Code 等只是可分配的工具，
+  不能自行取得角色或权限：
+  - **Coordinator**：任务选择、规范/架构设计以及 Codex-authored Implementation Packet /
+    Repair Packet；默认不写 Implementation PR。
+  - **Implementation Agent**：被人类明确分配后测试先行、最小实现、验证、commit、push 和
+    Implementation PR。同一 PR 同时只能有一个 writer；无 active task、Handoff、Base、
+    assignment、clean worktree 或设计证据时必须返回 `PLAN_BLOCKED`。
+  - **Environment Verification Agent**：只在自己实际具备的 OS、依赖和外部环境中产生验证
+    evidence，不写 Review verdict，不得用 Linux 或 mock 结果冒充 Windows/Mini QMT 验收。
+  - **Independent Review Agent**：未参与该精确 Head 实现的只读会话；结论仅为 `APPROVE`、
+    `REQUEST_CHANGES` 或 `BLOCKED`，Head 改变后旧证据与 Review 自动失效。
+  - **Human**：独占任务 activation、外部副作用授权、GitHub Approval/merge 和 closeout。
+- Implementation assignment 必须以可核验 GitHub evidence URL 和严格递增的 `ASSIGN`、
+  `STOP`、`SWITCH` 事件记录 role、tool、OS、精确 Starting/STOP/PR Head 和 single-writer
+  状态。切换时前任 STOP Head、新任 Starting Head 与当时 PR Head 必须相等；乱序、双 writer
+  或缺失 previous/next agent 时不得继续写入。
+- 验证 lane 分为 `portable`、`windows`、`windows_miniqmt`。每份 environment evidence 必须
+  绑定 task、Base、精确 Head、role/tool/OS、版本、原始 command、exit code、
+  passed/failed/skipped、未验证范围和 evidence URL；required lane 缺失时只能 `BLOCKED`。
+- assignment/environment evidence 分别遵循 `ai/schemas/agent-assignment.schema.yaml` 与
+  `ai/schemas/agent-environment-evidence.schema.yaml`，并仅由
+  `scripts/validate_agent_environment.py` 正式验证。expected commands 只能来自 exact Head
+  的 active task 与冻结 Handoff 的 deep-equal opaque exact lane 声明，caller/evidence 不得覆盖。
+- Linux Implementation Agent 必须完成其支持的 portable 验证，但不能声称 Windows 或
+  Mini QMT 验收。Windows/Mini QMT evidence 只能由实际具备对应环境的 Windows Agent 产生。
 - GitHub commit、branch、PR、CI、Review 和精确 SHA 是跨服务器唯一事实来源，不以聊天
-  摘要代替。Implementation PR 与 Closeout PR 必须分离；Cline 不得 self-approve、merge
-  或 closeout。
+  摘要代替。Implementation PR 与 Closeout PR 必须分离；Implementation Agent 不得
+  self-approve、merge 或 closeout。
 
 ## 完成与证据
 

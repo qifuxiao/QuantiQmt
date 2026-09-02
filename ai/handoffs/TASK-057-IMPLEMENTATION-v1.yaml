@@ -1,0 +1,48 @@
+schema_version: 1
+task_id: TASK-057
+packet_version: TASK-057-IMPLEMENTATION-v1
+plan_version: TASK-057-PLAN-v1
+planning_base_sha: 7d77d87afacae327bc29ba6e2ecfc6b3d72318d1
+expected_base_sha: ec2b95b165619af671a919a9950d40adfa9bbbaf
+expected_pr_base_sha: ec2b95b165619af671a919a9950d40adfa9bbbaf
+task_blob_sha: b5b6206eb9ec39539ea7fb9f474784dcacd950e1
+
+allowed_paths:
+  - AGENTS.md
+  - ai/adapters/codex.md
+  - ai/adapters/cline.md
+  - ai/handoffs/TASK-057-IMPLEMENTATION-v1.yaml
+  - ai/prompts/miniqmt-m1-task.md
+  - ai/workflows/poetry-verification.md
+  - ai/workflows/team-collaboration.md
+  - scripts/validate_specs.py
+  - tasks/templates/task-template.md
+  - tasks/completed/TASK-022-observability-control-contracts.md
+  - tests/spec/test_agent_execution_environment_governance.py
+
+codex_only_paths:
+  - ai/handoffs/TASK-057-IMPLEMENTATION-v1.yaml
+
+repair_context:
+  superseded_head_sha: ec2b95b165619af671a919a9950d40adfa9bbbaf
+  stage: initial_implementation
+  note: No implementation commit exists before this Handoff introduction.
+
+required_outcome:
+  - Replace tool-bound implementation roles in shared governance with tool-neutral roles while preserving tool-specific adapters.
+  - Separate portable, Windows, and Windows/MiniQMT verification lanes and bind every environment evidence record to the exact implementation Head.
+  - Define Codex Poetry sandbox escalation, existing-environment reuse, original-command execution, and build-artifact protection without changing dependencies or CI.
+  - Preserve human-only activation, external-side-effect authorization, merge, and closeout, and prohibit this governance task from connecting to MiniQMT or authorizing an order.
+
+execution_constraints:
+  implementation_pr_must_remain_open: true
+  direct_push_to_main: forbidden
+  rebase: forbidden
+  force_push: forbidden
+  self_approve: forbidden
+  merge: forbidden
+  closeout: forbidden
+  modify_handoff_record: forbidden
+  modify_task_or_spec: forbidden
+  modify_business_code_dependencies_or_ci: forbidden
+  miniqmt_connection_or_order: forbidden
