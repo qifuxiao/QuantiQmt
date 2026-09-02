@@ -11,6 +11,8 @@ allowed_paths:
   - ai/handoffs/TASK-057-IMPLEMENTATION-v1.yaml
   - ai/handoffs/TASK-057-REPAIR-v2.yaml
   - ai/handoffs/TASK-057-REPAIR-v3.yaml
+  - ai/packets/TASK-057-MYPY-STUB-COMPAT-v4.md
+  - ai/handoffs/TASK-057-REPAIR-v4.yaml
   - ai/prompts/miniqmt-m1-task.md
   - ai/schemas/agent-assignment.schema.yaml
   - ai/schemas/agent-environment-evidence.schema.yaml
@@ -135,22 +137,73 @@ Windows 验收、环境访问失败冒充 Poetry 损坏，以及代码 Head 与�
   的独立Review发现实时PR身份、Human assignment和environment producer均可由调用者自报后，
   批准停止Plan v2局部修补并创建本Plan v3 Amendment。授权新增Repair v3 Handoff路径以及
   对公开GitHub PR/comment的只读实时校验；`spec/`、业务代码、依赖、CI和Mini QMT权限仍禁止。
+- 2026-09-02 人类通过
+  `https://github.com/qifuxiao/QuantiQmt/pull/103#issuecomment-5511521778`将失败的Closeout
+  PR #103关闭且明确标记为不得复用，并授权本Plan v4 Amendment。授权只允许本PR修改当前active TASK-057，
+  新增packet与Repair v4 Handoff的精确路径，并冻结“Plan v4 merge → packet-only bootstrap
+  Repair PR → Human canonical assignment → Coordinator add-only v4 Handoff → assigned
+  Implementation Agent首次同步Handoff → 实施修复”的顺序。本授权不分配Implementation
+  Agent，不授权本PR创建packet/Handoff、修改实现或测试，也不授权Review、merge或closeout。
 
 ## Codex Implementation Plan
 
-- Plan version: `TASK-057-PLAN-v3`
-- Planning Base SHA: `7d60e2393412ae5e43c908e10208fa40b20007ef`
-- Superseded Plans: `TASK-057-PLAN-v1`、`TASK-057-PLAN-v2`及其Implementation/Repair增量
-  保留为审计历史，但不得再作为后续实现决策的权威来源。
-- Implementation Base SHA: 只由本 Amendment 合并后 Codex-authored
-  `ai/handoffs/TASK-057-REPAIR-v3.yaml` 的 `expected_base_sha` 提供；任何 Agent不得从
-  移动的 `origin/main`、PR #100 或 task自行推断。
+- Plan version: `TASK-057-PLAN-v4`
+- Planning Base SHA: `40e73e6ada8f26494d2e39a4a46a7ec3e3971b31`
+- Superseded Plans: `TASK-057-PLAN-v1`、`TASK-057-PLAN-v2`、`TASK-057-PLAN-v3`及其
+  Implementation/Repair增量保留为审计历史，但不得作为本次mypy兼容Repair的写入授权。
+- Expected Implementation Base SHA: 本Plan v4 Amendment经独立Review并由Human merge后的
+  精确main merge commit。该SHA在merge前保持pending，不得从移动的`origin/main`、关闭的
+  PR #103、已合并的PR #100或本task自行推断；最终由Coordinator-authored
+  `ai/handoffs/TASK-057-REPAIR-v4.yaml`冻结。
 - Observable outcome: 一个新 task 能明确选择 Cline/Linux 或 Codex/Windows 作为
   Implementation Agent，将 portable、Windows 和 Windows/Mini QMT 验证分配给有能力的
   Agent；所有证据绑定同一精确 Head。Codex 在沙箱访问用户 Poetry 环境受限时请求最小
   沙箱外权限并执行 task冻结的原始 `poetry` 命令，不再误判 SymbolicLink 或创建替代环境。
 
-### Plan v3 authenticated GitHub authority
+### Plan v4 closeout P1 repair amendment
+
+- Superseded Closeout PR #103固定为`CLOSED`且未合并，Head
+  `cecf659f95ca129828f36509a810f2a1cb57b46f`及Review `5091021110`只作为finding证据；不得
+  reopen、追加Implementation变更或复用为后续Closeout。
+- Repair仅处理`scripts/validate_specs.py`与`scripts/validate_agent_environment.py`中
+  `jsonschema` typing import在“无types-jsonschema”和“有types-jsonschema”两种环境下的
+  mypy兼容性。候选`# type: ignore[import-untyped,unused-ignore]`必须先由实际双环境测试证明，
+  未证明前不是最终实现设计。
+- 不得使用裸`# type: ignore`、关闭`warn_unused_ignores`、放宽mypy、修改原始验证命令、使用
+  `Any`或动态导入规避检查、改变validator运行时行为，或增加/删除/同步安装types-jsonschema。
+- `ai/packets/TASK-057-MYPY-STUB-COMPAT-v4.md`只用于在新Repair PR中建立packet-only
+  bootstrap和冻结Repair Packet；`ai/handoffs/TASK-057-REPAIR-v4.yaml`只可由Coordinator在
+  新Repair PR及canonical assignment均已存在后，从amended main创建为add-only Handoff。
+- `TASK-057-IMPLEMENTATION-v1.yaml`、`TASK-057-REPAIR-v2.yaml`和
+  `TASK-057-REPAIR-v3.yaml`必须byte-for-byte不变。v3仍绑定已合并PR #100，不能冒充新Repair
+  PR的Handoff。
+
+### Frozen Plan v4 authorization order
+
+1. 本Plan v4 Amendment PR只修改当前active task；独立Review后仅由Human merge。
+2. Amendment merge commit成为Expected Implementation Base。Coordinator从该精确SHA创建
+   `codex/task-057-mypy-stub-compat-repair`，且首次commit只新增
+   `ai/packets/TASK-057-MYPY-STUB-COMPAT-v4.md`，push后打开packet-only Repair PR以取得精确
+   PR number、Base、branch和Starting/PR Head。
+3. Human在该Repair PR发布未编辑的canonical `QUANTIQMT_GITHUB_AUTHORITY_V1` assignment，
+   绑定finding、唯一Implementation Agent、agent/login/tool/实际OS、`single_writer=true`、
+   authorized producer以及required portable/windows lanes。评论存在前不得实施。
+4. Coordinator从amended main创建add-only `ai/handoffs/TASK-057-REPAIR-v4.yaml`，冻结已存在
+   的Repair PR、canonical assignment、exact Base/Starting Head、allowed/forbidden paths、
+   原始verification commands及双环境证据要求；不得改写v1/v2/v3。
+5. assigned Implementation Agent的首次writer动作只能将Coordinator-authored v4 Handoff
+   commit无改写同步进入Repair PR。Handoff进入Repair Head前不得修改脚本或测试。
+6. 只有上述身份、拓扑与single-writer gate全部通过后，assigned Implementation Agent才可
+   测试先行实施最小修复；其不得self-approve、merge或closeout。
+
+本Plan v4 Amendment PR不得创建Repair Packet、v4 Handoff或Repair branch/PR，不得修改代码、
+测试、依赖、lockfile、CI、spec、completed task或Mini QMT行为。其验证范围仅为规范解析、唯一
+active/index投影、TASK-057治理文本、精确changed-path audit与`git diff --check`。
+
+### Preserved Plan v3 authenticated GitHub authority baseline
+
+以下Plan v3内容记录已合并PR #100的治理基线，继续用于审计既有交付，但不授权或标识Plan v4
+mypy兼容Repair。任何新Repair身份只能来自上述Plan v4顺序及未来不可变v4 Handoff。
 
 - 环境证据不再由治理测试文件中的私有 helper 解释。`scripts/validate_agent_environment.py`
   是唯一正式 machine gate，两个 `ai/schemas/*.schema.yaml` 是其版本化输入契约；测试只验证
@@ -351,7 +404,7 @@ Windows 验收、环境访问失败冒充 Poetry 损坏，以及代码 Head 与�
   或evidence comment不存在/已编辑/作者或digest错误、producer未绑定active assignment/独立
   Human授权时，停止并返回 `PLAN_BLOCKED`，不得以本地文件或caller参数替代。
 
-### Implementation order
+### Historical Plan v3 implementation order (completed; not reusable)
 
 1. 独立Review本Plan v3 Amendment PR；人类合并后，PR #100继续冻结在
    `03d5c425143c2101a82ccd64d752c770886117d6`，不得继续Plan v2局部修补。
@@ -380,17 +433,22 @@ Windows 验收、环境访问失败冒充 Poetry 损坏，以及代码 Head 与�
    Reviewer GitHub login也不得属于Implementation/Coordinator producer。只有人类可merge；
    合并后另建纯治理Closeout PR。
 
-本 Amendment PR 自身只修改 active task，不会提前创建上述新文件；因此本 PR 的验证范围是
-`validate_specs.py`、active/index一致性、现有治理投影、Ruff/format和精确changed-path audit。
-只有 Amendment 合并、Human authority comment发布并冻结 Repair v3 Handoff后，才执行本task
-front matter列出的完整命令和live GitHub gate。
+上述历史Plan v3 Amendment已完成；其PR #100、Repair v3 Handoff、assignment及producer不得
+复用于Plan v4 Repair。Plan v4的当前Amendment验证边界与后续顺序以上述冻结章节为准。
 
 ### PLAN_BLOCKED conditions
 
+- 本Plan v4 Amendment期间live main不再精确等于
+  `40e73e6ada8f26494d2e39a4a46a7ec3e3971b31`，或changed path不只当前active TASK-057。
+- Plan v4 merge后无法以其精确merge commit作为packet-only Repair PR Base，或新Repair PR、
+  branch、Starting Head与canonical assignment尚未形成却要求创建v4 Handoff或开始实现。
+- v4 Handoff不能以单一add-only Coordinator commit引入，或任何流程要求修改v1/v2/v3 Handoff。
+- assigned Implementation Agent首次writer动作不是无改写同步v4 Handoff，或存在并行writer、
+  assignment/producer/OS/lane/Head漂移。
 - 需要修改 forbidden path、`spec/`、业务代码、依赖、CI或真实资金权限。
-- 现有 Handoff validator无法验证 amended-main → add-only Repair v3 Handoff → PR #100同步merge
-  拓扑，或需要修改禁止路径 `scripts/validate_ai_handoff.py`。
-- 无法从active task和Repair v3 Handoff取得唯一可信expected command set，或实现要求接受
+- 现有 Handoff validator无法验证 amended-main → packet-only Repair PR → add-only Repair v4
+  Handoff → assigned writer首次同步拓扑，或需要修改禁止路径`scripts/validate_ai_handoff.py`。
+- 无法从active task和Repair v4 Handoff取得唯一可信expected command set，或实现要求接受
   caller/evidence提供的预期命令。
 - 无法在不修改CI/依赖的前提下通过标准库HTTPS只读访问固定GitHub API，或必须信任caller提供
   PR身份、assignment document、Human author、producer identity或未实际读取的evidence URL。
@@ -420,6 +478,10 @@ front matter列出的完整命令和live GitHub gate。
 
 ## Deliverables
 
+- Plan v4 merge后由packet-only bootstrap建立的新Repair PR，以及随后冻结的
+  `TASK-057-MYPY-STUB-COMPAT-v4.md` Repair Packet和add-only Repair v4 Handoff。
+- 同一Repair Head在无types-jsonschema的lock-compatible Poetry环境和存在types-jsonschema的
+  Reviewer类环境中的独立证据；两环境均执行精确`poetry run mypy src scripts`并exit 0。
 - 工具中立的Agent角色、分配和切换协议。
 - portable、Windows、Windows/Mini QMT验证lane与标准证据格式。
 - Codex/Poetry sandbox、worktree和build验证workflow。
@@ -433,6 +495,11 @@ front matter列出的完整命令和live GitHub gate。
 
 ## Acceptance criteria
 
+- [ ] Plan v4严格执行amendment merge、packet-only PR、Human canonical assignment、add-only
+  v4 Handoff、assigned writer首次同步、再实施修复的顺序，且PR #103永不复用。
+- [ ] v1/v2/v3 Handoff byte-for-byte不变；v4只冻结新Repair PR及双环境mypy兼容Repair。
+- [ ] 同一精确Repair Head在无types-jsonschema和有types-jsonschema环境均通过原始mypy命令，
+  且未改依赖、lockfile、mypy严格度、原始命令或validator运行时行为。
 - [ ] 共享规则使用 Implementation Agent而非把实现角色绑定到Cline；adapter仍可保留工具名。
 - [ ] Agent分配/切换记录tool、OS、starting Head、人类evidence和单写者停止点。
 - [ ] Assignment采用有序事件模型；乱序、双writer或stop/switch/PR Head不一致时fail-closed。
