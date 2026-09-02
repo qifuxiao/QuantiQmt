@@ -271,9 +271,6 @@ def load_authority_from_git(
     actual_blob = _git(repo, "rev-parse", f"{resolved_head}:{task_posix}")
     if actual_blob != authority.task_blob:
         raise ValueError("active task blob does not match the frozen Repair Handoff")
-    merge_base = _git(repo, "merge-base", authority.expected_base, resolved_head)
-    if merge_base != authority.expected_base:
-        raise ValueError("expected Base is not the exact merge-base of the validated Head")
     return authority
 
 
@@ -536,6 +533,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         resolved_base = _git(ROOT, "rev-parse", "--verify", f"{args.base_ref}^{{commit}}")
         if resolved_base != authority.expected_base:
             raise ValueError("base-ref does not resolve to the frozen expected Base")
+        merge_base = _git(ROOT, "merge-base", resolved_base, resolved_head)
+        if merge_base != authority.expected_base:
+            raise ValueError("expected Base is not the exact merge-base of the validated Head")
         evidence = _load_yaml_file(args.evidence, "environment evidence")
         assignments = _load_yaml_file(args.assignments, "assignment events")
         errors = validate_evidence(
