@@ -1,0 +1,126 @@
+schema_version: 1
+task_id: TASK-057
+packet_version: TASK-057-REPAIR-v3
+plan_version: TASK-057-PLAN-v3
+planning_base_sha: 7d60e2393412ae5e43c908e10208fa40b20007ef
+expected_base_sha: 7be471949dbce8278b5ce7681384ef987b0fbc86
+expected_pr_base_sha: 7be471949dbce8278b5ce7681384ef987b0fbc86
+task_blob_sha: 0303391641f72cb314c15c3c90d117ba4069ec45
+
+allowed_paths:
+  - AGENTS.md
+  - ai/adapters/cline.md
+  - ai/adapters/codex.md
+  - ai/handoffs/TASK-057-IMPLEMENTATION-v1.yaml
+  - ai/handoffs/TASK-057-REPAIR-v2.yaml
+  - ai/handoffs/TASK-057-REPAIR-v3.yaml
+  - ai/prompts/miniqmt-m1-task.md
+  - ai/schemas/agent-assignment.schema.yaml
+  - ai/schemas/agent-environment-evidence.schema.yaml
+  - ai/workflows/poetry-verification.md
+  - ai/workflows/team-collaboration.md
+  - scripts/validate_agent_environment.py
+  - scripts/validate_specs.py
+  - tasks/completed/TASK-022-observability-control-contracts.md
+  - tasks/templates/task-template.md
+  - tests/spec/test_agent_execution_environment_governance.py
+  - tests/spec/test_validate_agent_environment.py
+
+codex_only_paths:
+  - ai/handoffs/TASK-057-IMPLEMENTATION-v1.yaml
+  - ai/handoffs/TASK-057-REPAIR-v2.yaml
+  - ai/handoffs/TASK-057-REPAIR-v3.yaml
+
+required_lanes:
+  - lane: portable
+    capability: portable
+    minimum_records: 1
+    commands:
+      - poetry run python scripts/validate_specs.py
+      - poetry run pytest tests/spec/test_validate_specs.py tests/spec/test_miniqmt_m1_delivery_governance.py tests/spec/test_codex_cline_collaboration_governance.py tests/spec/test_validate_ai_handoff.py tests/spec/test_agent_execution_environment_governance.py tests/spec/test_validate_agent_environment.py
+      - poetry run mypy src scripts
+      - poetry run ruff check scripts/validate_specs.py scripts/validate_agent_environment.py tests/spec/test_agent_execution_environment_governance.py tests/spec/test_validate_agent_environment.py
+      - poetry run ruff format --check scripts/validate_specs.py scripts/validate_agent_environment.py tests/spec/test_agent_execution_environment_governance.py tests/spec/test_validate_agent_environment.py
+      - poetry run python -c "from scripts.validate_specs import extract_front_matter, task_files; active=sorted(str(extract_front_matter(path).get('id')) for path in task_files() if extract_front_matter(path).get('status') == 'active'); assert active == ['TASK-057'], active"
+      - poetry run python scripts/validate_agent_environment.py --help
+      - poetry run python scripts/validate_ai_handoff.py --task tasks/active/TASK-057-tool-neutral-agents-windows-verification-poetry.md --handoff ai/handoffs/TASK-057-REPAIR-v3.yaml --base-ref origin/main --head HEAD
+      - poetry run pytest tests/spec
+      - poetry run pytest tests/contract
+      - poetry run ruff check .
+      - poetry run ruff format --check .
+      - poetry run pre-commit run --all-files
+      - git diff --check origin/main...HEAD
+  - lane: windows
+    capability: windows
+    minimum_records: 1
+    commands:
+      - poetry --version
+      - poetry env info
+      - poetry run python -c "import sys; print(sys.executable); print(sys.version)"
+      - poetry run python -c "import yaml, jsonschema, pytest; print('deps-ok')"
+
+prohibited_lanes:
+  - windows_miniqmt
+
+github_authority:
+  api_origin: https://api.github.com
+  repository: qifuxiao/QuantiQmt
+  pull_request_number: 100
+  base_branch: main
+  head_branch: codex/task-057-implementation
+  authorized_human_logins:
+    - qifuxiao
+  assignment_comment:
+    id: 5505098259
+    url: https://github.com/qifuxiao/QuantiQmt/pull/100#issuecomment-5505098259
+    api_url: https://api.github.com/repos/qifuxiao/QuantiQmt/issues/comments/5505098259
+    issue_url: https://api.github.com/repos/qifuxiao/QuantiQmt/issues/100
+    author_login: qifuxiao
+    created_at: "2026-09-02T05:50:34Z"
+    updated_at: "2026-09-02T05:50:34Z"
+    body_sha256: 3911d18003c849ef258dd53078fe3ddffd98624edb6d3e5f4809c1d65e6697af
+    sentinel: QUANTIQMT_GITHUB_AUTHORITY_V1
+    schema_version: 1
+  authorized_producers:
+    - agent_id: task-057-plan-v3-codex-windows-1
+      github_login: qfxyyy
+      role: Implementation Agent
+      tool: Codex
+      os: Windows
+      lanes:
+        - portable
+        - windows
+
+repair_context:
+  superseded_head_sha: 03d5c425143c2101a82ccd64d752c770886117d6
+  stage: plan_v3_authenticated_github_authority
+  note: >-
+    PR #100 Plan v2 implementation remains auditable but must receive no further
+    Plan v2 patches. Repair v3 must synchronize this add-only Handoff lineage
+    into PR #100 without rebase or force-push before any new implementation.
+
+required_outcome:
+  - Replace caller-reported PR, branch, Head, Human assignment, and producer identity with frozen Handoff authority plus live GitHub PR and issue-comment verification.
+  - Bind the canonical unedited Human assignment comment and every environment-evidence producer to the same repository, PR, current Head, active assignment, tool, OS, and authorized lanes.
+  - Use a bounded standard-library HTTPS GET client with fixed origin, timeout and response-size limits, no redirects, no new dependency or CI change, and injected fake transport in tests.
+  - Preserve the exact portable and Windows required lanes, prohibited windows_miniqmt lane, frozen task commands, Poetry governance, and all Mini QMT and trading-side-effect prohibitions.
+
+execution_constraints:
+  implementation_pr_must_remain_open: true
+  direct_push_to_main: forbidden
+  rebase: forbidden
+  force_push: forbidden
+  self_approve: forbidden
+  merge: forbidden
+  closeout: forbidden
+  modify_handoff_records: forbidden
+  modify_task_or_spec: forbidden
+  modify_business_code_dependencies_or_ci: forbidden
+  miniqmt_connection_account_access_or_order: forbidden
+  expected_commands_from_caller_or_evidence: forbidden
+  caller_pr_head_number_or_branch_authority: forbidden
+  local_assignment_document_authority: forbidden
+  github_api_methods_other_than_get: forbidden
+  github_api_redirects: forbidden
+  github_api_failure_mode: fail_closed
+  github_test_network_access: forbidden
