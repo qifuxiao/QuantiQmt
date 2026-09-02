@@ -1,0 +1,157 @@
+$schema: https://json-schema.org/draft/2020-12/schema
+$id: https://quantiqmt.local/schemas/agent-environment-evidence.schema.yaml
+title: QuantiQmt capability-bound environment evidence collection
+type: object
+additionalProperties: false
+required: [schema_version, records]
+properties:
+  schema_version:
+    const: 1
+  records:
+    type: array
+    minItems: 1
+    items:
+      $ref: '#/$defs/record'
+$defs:
+  sha:
+    type: string
+    pattern: '^[0-9a-f]{40}$'
+  github_evidence:
+    type: string
+    pattern: '^https://github\.com/[^/]+/[^/]+/(?:pull|issues)/[0-9]+#(?:issuecomment|pullrequestreview)-[0-9]+$'
+  xtquant_provenance:
+    type: object
+    additionalProperties: false
+    required: [source, value, verified]
+    properties:
+      source:
+        enum: [package_metadata, vendor_api]
+      value:
+        type: string
+        pattern: '^[A-Za-z0-9][A-Za-z0-9._+-]{0,63}$'
+      verified:
+        const: true
+  capabilities:
+    type: object
+    additionalProperties: false
+    required:
+      - portable
+      - windows
+      - miniqmt_available
+      - userdata_mini_verified
+      - unique_session_verified
+      - simulation_account_allowlisted
+    properties:
+      portable: {type: boolean}
+      windows: {type: boolean}
+      miniqmt_available: {type: boolean}
+      userdata_mini_verified: {type: boolean}
+      unique_session_verified: {type: boolean}
+      simulation_account_allowlisted: {type: boolean}
+  record:
+    type: object
+    additionalProperties: false
+    required:
+      - task
+      - base
+      - head
+      - pr
+      - branch
+      - lane
+      - requirement
+      - role
+      - tool
+      - os
+      - python_version
+      - poetry_version
+      - xtquant
+      - command
+      - exit_code
+      - executed
+      - passed
+      - failed
+      - skipped
+      - timestamp
+      - sanitized_evidence
+      - unverified_scope
+      - evidence_url
+      - capabilities
+      - miniqmt_connection
+      - account_query
+      - simulation_order
+      - real_money
+    properties:
+      task:
+        type: string
+        pattern: '^TASK-[0-9]{3}$'
+      base:
+        $ref: '#/$defs/sha'
+      head:
+        $ref: '#/$defs/sha'
+      pr:
+        type: integer
+        minimum: 1
+      branch:
+        type: string
+        minLength: 1
+        maxLength: 255
+      lane:
+        enum: [portable, windows, windows_miniqmt]
+      requirement:
+        enum: [required, optional, not_applicable]
+      role:
+        enum: [Implementation Agent, Environment Verification Agent]
+      tool:
+        type: string
+        pattern: '^[A-Za-z0-9][A-Za-z0-9._+-]{0,63}$'
+      os:
+        enum: [Windows, Linux, macOS]
+      python_version:
+        type: string
+        minLength: 1
+        maxLength: 64
+      poetry_version:
+        type: string
+        minLength: 1
+        maxLength: 64
+      xtquant:
+        oneOf:
+          - type: 'null'
+          - $ref: '#/$defs/xtquant_provenance'
+      command:
+        type: string
+        minLength: 1
+        maxLength: 4096
+      exit_code:
+        type: integer
+      executed:
+        type: integer
+        minimum: 0
+      passed:
+        type: integer
+        minimum: 0
+      failed:
+        type: integer
+        minimum: 0
+      skipped:
+        type: integer
+        minimum: 0
+      timestamp:
+        type: string
+        format: date-time
+      sanitized_evidence:
+        const: true
+      unverified_scope:
+        type: string
+      evidence_url:
+        $ref: '#/$defs/github_evidence'
+      capabilities:
+        $ref: '#/$defs/capabilities'
+      miniqmt_connection:
+        type: boolean
+      account_query:
+        type: boolean
+      simulation_order:
+        type: boolean
+      real_money:
+        type: boolean

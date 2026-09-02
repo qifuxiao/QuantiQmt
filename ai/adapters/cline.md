@@ -35,6 +35,8 @@ must produce an **Implementation Report** in the format defined by
   Mini QMT 环境和 task 要求具备时才能报告 `windows_miniqmt`；mock/Linux 结果不得替代。
 - 每份 environment evidence 必须绑定 exact Head。Head 改变后旧证据失效并重跑；缺 required
   lane 时返回 `BLOCKED`，不得把 acceptance 改成 optional。
+- assignment/evidence 必须由 `scripts/validate_agent_environment.py` 按两个正式 schema 验证；
+  adapter 不解释命令或复制 machine gate。
 - Cline 不得连接 Mini QMT 或发送模拟委托，除非 separate active task 和可核验人类授权同时
   明确允许；real-money trading 始终 forbidden。
 

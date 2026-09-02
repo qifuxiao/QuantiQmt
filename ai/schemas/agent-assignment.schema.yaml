@@ -1,0 +1,117 @@
+$schema: https://json-schema.org/draft/2020-12/schema
+$id: https://quantiqmt.local/schemas/agent-assignment.schema.yaml
+title: QuantiQmt ordered Implementation Agent assignment events
+type: object
+additionalProperties: false
+required: [schema_version, events]
+properties:
+  schema_version:
+    const: 1
+  events:
+    type: array
+    minItems: 1
+    items:
+      $ref: '#/$defs/event'
+$defs:
+  sha:
+    type: string
+    pattern: '^[0-9a-f]{40}$'
+  github_evidence:
+    type: string
+    pattern: '^https://github\.com/[^/]+/[^/]+/(?:pull|issues)/[0-9]+#(?:issuecomment|pullrequestreview)-[0-9]+$'
+  event:
+    type: object
+    additionalProperties: false
+    required:
+      - event
+      - sequence
+      - task
+      - pr
+      - branch
+      - role
+      - agent
+      - tool
+      - os
+      - human_evidence_url
+      - single_writer
+      - pr_head
+    properties:
+      event:
+        enum: [ASSIGN, STOP, SWITCH]
+      sequence:
+        type: integer
+        minimum: 1
+      task:
+        type: string
+        pattern: '^TASK-[0-9]{3}$'
+      pr:
+        type: integer
+        minimum: 1
+      branch:
+        type: string
+        minLength: 1
+        maxLength: 255
+      role:
+        const: Implementation Agent
+      agent:
+        type: string
+        minLength: 3
+        maxLength: 128
+      tool:
+        type: string
+        pattern: '^[A-Za-z0-9][A-Za-z0-9._+-]{0,63}$'
+      os:
+        enum: [Windows, Linux, macOS]
+      human_evidence_url:
+        $ref: '#/$defs/github_evidence'
+      single_writer:
+        const: true
+      pr_head:
+        $ref: '#/$defs/sha'
+      starting_head:
+        $ref: '#/$defs/sha'
+      stop_head:
+        $ref: '#/$defs/sha'
+      previous_agent:
+        type: string
+        minLength: 3
+        maxLength: 128
+      next_agent:
+        type: string
+        minLength: 3
+        maxLength: 128
+      previous_agent_stop_head:
+        $ref: '#/$defs/sha'
+    allOf:
+      - if:
+          properties:
+            event:
+              const: ASSIGN
+        then:
+          required: [starting_head]
+          not:
+            anyOf:
+              - required: [stop_head]
+              - required: [previous_agent]
+              - required: [next_agent]
+              - required: [previous_agent_stop_head]
+      - if:
+          properties:
+            event:
+              const: STOP
+        then:
+          required: [stop_head]
+          not:
+            anyOf:
+              - required: [starting_head]
+              - required: [previous_agent]
+              - required: [next_agent]
+              - required: [previous_agent_stop_head]
+      - if:
+          properties:
+            event:
+              const: SWITCH
+        then:
+          required: [starting_head, previous_agent, next_agent, previous_agent_stop_head]
+          not:
+            required: [stop_head]

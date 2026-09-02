@@ -31,15 +31,12 @@ Windows、Linux 或 macOS。空值、仅空白、非字符串或不受支持的 
 stop Head；新 Agent 的 Starting Head 必须等于该 stop Head。旧 Agent 从该点停止写入，缺少
 任一字段或存在并发 writer 时返回 `PLAN_BLOCKED`。
 
-`ordered PR/branch single-writer` 是有序集合级门槛，不是单条 assignment 写有
-`single_writer: true` 就成立。
-按 PR + branch 以因果顺序汇总全部 writer record 后，同时最多一个 `active: true`。switch 之前必须
-已有较低序号的 previous writer record；该 record 必须是 `active: false` 并携带精确 `stop_head`。
-Human GitHub evidence 必须证明 previous/next agent，且 previous record 的 `stop_head`、switch 的
-`previous_agent_stop_head` 和 next `Starting Head` 三者相等。两条分别格式正确但同时 active、记录
-逆序或只由 next record 自报 stop Head 时仍必须拒绝。相邻 record 的 agent identity 一旦改变，
-即自动视为 switch 并强制要求完整 switch 字段；不得通过省略 `previous_agent` 绕过。previous
-必须是紧邻的前一 writer，且同一有序 PR/branch 集合不得重复使用 agent identity key。
+`ordered PR/branch single-writer` 使用
+`ai/schemas/agent-assignment.schema.yaml` 的有序事件，不从若干可选 snapshot 字段猜测状态。
+正式事件只有 `ASSIGN`、`STOP`、`SWITCH`，`sequence` 必须严格递增；任一时刻最多一个 active
+writer。`SWITCH` 必须紧跟可核验的前任 `STOP`，并由 Human GitHub evidence 证明 previous/next
+agent。前任 `stop_head`、`previous_agent_stop_head`、新任 `starting_head` 和当时 `pr_head`
+必须完全相等；乱序、双 writer、身份复用或任一 Head 漂移均 fail-closed。
 
 ## 分工原则
 
@@ -155,20 +152,29 @@ Review 结论由 Review Agent 记录，但**不能授权 closeout**。任务激�
 | `windows` | 实际 Windows Agent | Windows-only compatibility/integration；Linux 结果不得标为通过 |
 | `windows_miniqmt` | 实际 Windows、可用 Mini QMT 和 task-approved `xtquant` | 默认只读；缺客户端、session、模拟账号 allowlist 或授权均为 `BLOCKED` |
 
+Environment evidence 的版本化契约是
+`ai/schemas/agent-environment-evidence.schema.yaml`，assignment 契约是
+`ai/schemas/agent-assignment.schema.yaml`。`scripts/validate_agent_environment.py` 是唯一正式
+machine gate；文档、adapter 和测试不得维护第二套 parser 或 pseudo-validator。
+
 Environment evidence 有两个互不替代的验证层：
 
 1. **单条 schema/identity gate**：每条 record 必须记录 task、调用方传入的 expected Base、
-   exact Head、lane、`requirement`（`required` / `optional` / `not_applicable`）、producer role、
+   exact Head、PR、branch、lane、`requirement`（`required` / `optional` / `not_applicable`）、producer role、
    tool、OS、Python/Poetry 及适用的脱敏 xtquant 版本、original command、exit code、
    executed/passed/failed/skipped、RFC3339 `timestamp`、`sanitized_evidence: true`、显式
    `unverified_scope`（允许空字符串但不得缺失）和 durable GitHub evidence URL。task/Base/Head
    必须与调用方 expected values 精确相等，不能只检查 SHA 格式。只有 Implementation Agent
    和 Environment Verification Agent 可以生产环境证据；Independent Review Agent 不可以。
-   xtquant 版本必须是最长 64 字符的 metadata-only token，只含字母、数字、点、下划线、加号
-   或连字符；路径、空白、控制字符、`userdata_mini`、账号/secret/credential 标签和长纯数字
-   token 均拒绝。未知或不可解析版本保持 unverified/`BLOCKED`，不得从 runtime path 猜测。
-2. **required-lane satisfaction gate**：对 required lane 的完整 record set 核对 task 提供的
-   exact expected command set。必须无缺失、无意外或替代命令；每条 schema/identity 均有效、
+   xtquant 使用 `{source, value, verified}` provenance；source 只接受可信 package metadata 或
+   vendor API，value 是最长 64 字符的 opaque sanitized token，不猜测 semver。路径、空白、
+   `userdata_mini`、账号/secret/credential 标签和长纯数字 token 均拒绝；未知 source/value
+   保持 unverified/`BLOCKED`，不得从 runtime path 猜测。
+2. **required-lane satisfaction gate**：validator 从 exact Head 的唯一 active task 与冻结 Handoff
+   自行读取 deep-equal 的 required lanes、prohibited lanes 和 opaque exact command strings。
+   lane commands 必须对 `verification.commands` 形成无遗漏、无重复的精确分区；caller/evidence
+   不得提供、覆盖或缩减 expected commands。完整 record set 必须无缺失、无意外或替代命令；
+   每条 schema/identity 均有效、
    `exit_code == 0`、`failed == 0`、计数为非负整数且内部一致、`executed > 0`。skip 只能在
    task 对该 command 明确给出 allowance 时出现，且必须写入非空 `unverified_scope`。
 
@@ -179,7 +185,8 @@ evidence 和 Review verdict 全部失效，必须以新的 expected Base/exact H
 Environment Verification Agent 只报告实际能力和证据，不授权任务、外部副作用或状态迁移。
 `windows_miniqmt` 还必须证明客户端可用、`xtquant` 已被 task 允许、`userdata_mini` 已核验、
 session 唯一且账号精确命中模拟 allowlist；任一未知即 fail-closed。
-每条 record 必须显式记录 `real_money: false` 和是否包含 `simulation_order`。record 不能自我授权
+每条 record 必须显式记录 `real_money: false`、`miniqmt_connection`、`account_query` 和
+`simulation_order`。capability 与 side-effect authorization 是不同字段；record 不能自我授权
 模拟委托；只有 satisfaction gate 的调用方提供 trusted caller authorization context，证明当前 separate
 active task 和可核验 Human GitHub evidence 后才能接受。TASK-057 不提供该权限；real-money
 trading 始终 forbidden。
@@ -189,10 +196,9 @@ trading 始终 forbidden。
 - 需要 PostgreSQL 的 Review 必须设置 `QUANTIQMT_POSTGRES_DSN` 并连接真实 PostgreSQL。
 - Poetry、sandbox、worktree 和 build 验证必须遵循 `ai/workflows/poetry-verification.md`；不得
   用 bundled Python 或直接 pytest/Ruff/mypy 冒充项目规定的原始 `poetry run` 命令。
-- TASK-057 的命令 gate 在 quote-aware tokenization 和 exact expected-set 之外使用封闭 grammar：
-  `poetry run` child 只允许 `python`、`pytest`、`mypy`、`ruff`、`pre-commit` 的规定形式；未知
-  entrypoint、shell trampoline、`.exe`/drive/UNC/含路径 entrypoint 和不支持的 Python form
-  即使误入 expected set 也必须拒绝。
+- TASK-057 不构建通用 PowerShell/POSIX parser，也不使用有限 shell 关键词黑名单。task/Handoff
+  冻结的 command 是 opaque exact string；可执行性和宿主权限仍由 task review、adapter 与最小
+  sandbox authorization 控制，evidence 只能逐字覆盖该集合。
 - 测试无法运行时不得 APPROVE；必须明确未验证范围。
 - GitHub connector 不可用时，可使用本地 Git refs、PR head refs 和用户提供的 commit SHA 做只读复验，但必须说明发布/读取限制。
 

@@ -88,12 +88,17 @@
   - **Independent Review Agent**：未参与该精确 Head 实现的只读会话；结论仅为 `APPROVE`、
     `REQUEST_CHANGES` 或 `BLOCKED`，Head 改变后旧证据与 Review 自动失效。
   - **Human**：独占任务 activation、外部副作用授权、GitHub Approval/merge 和 closeout。
-- Implementation assignment 必须以可核验 GitHub evidence URL 记录 role、tool、OS、精确
-  Starting Head 和 single-writer 停止点。Agent 切换还必须记录 previous agent、next agent
-  和旧 writer 的 stop Head；未记录时不得继续写入。
+- Implementation assignment 必须以可核验 GitHub evidence URL 和严格递增的 `ASSIGN`、
+  `STOP`、`SWITCH` 事件记录 role、tool、OS、精确 Starting/STOP/PR Head 和 single-writer
+  状态。切换时前任 STOP Head、新任 Starting Head 与当时 PR Head 必须相等；乱序、双 writer
+  或缺失 previous/next agent 时不得继续写入。
 - 验证 lane 分为 `portable`、`windows`、`windows_miniqmt`。每份 environment evidence 必须
   绑定 task、Base、精确 Head、role/tool/OS、版本、原始 command、exit code、
   passed/failed/skipped、未验证范围和 evidence URL；required lane 缺失时只能 `BLOCKED`。
+- assignment/environment evidence 分别遵循 `ai/schemas/agent-assignment.schema.yaml` 与
+  `ai/schemas/agent-environment-evidence.schema.yaml`，并仅由
+  `scripts/validate_agent_environment.py` 正式验证。expected commands 只能来自 exact Head
+  的 active task 与冻结 Handoff 的 deep-equal opaque exact lane 声明，caller/evidence 不得覆盖。
 - Linux Implementation Agent 必须完成其支持的 portable 验证，但不能声称 Windows 或
   Mini QMT 验收。Windows/Mini QMT evidence 只能由实际具备对应环境的 Windows Agent 产生。
 - GitHub commit、branch、PR、CI、Review 和精确 SHA 是跨服务器唯一事实来源，不以聊天

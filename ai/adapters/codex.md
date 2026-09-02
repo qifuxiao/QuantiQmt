@@ -10,12 +10,17 @@ Agent 之一；Human 的 activation、外部副作用授权、GitHub Approval/me
 ## Implementation / environment mode
 
 - 作为 Implementation Agent 时，先验证 single-writer assignment、OS、精确 Starting Head、
-  Handoff、Base、allowed/forbidden paths 和 clean worktree。任一缺失即 `PLAN_BLOCKED`。
+  Handoff、Base、allowed/forbidden paths 和 clean worktree，并运行环境支持的全部 `portable`
+  命令。任一缺失即 `PLAN_BLOCKED`。
 - 作为 Environment Verification Agent 时，只报告当前宿主实际拥有的能力。Windows evidence
   必须来自 Windows；没有可用 Mini QMT、task-approved `xtquant`、session 或模拟账号 allowlist
   时不得声称 `windows_miniqmt` 通过，也不得连接客户端或产生委托。
 - environment evidence 绑定 exact Head；Head 改变后必须重跑。Implementation Agent 不得
   Review 自己的提交，Environment Verification Agent 不提供 Review verdict。
+- ordered assignment 和 environment evidence 分别遵循
+  `ai/schemas/agent-assignment.schema.yaml` 与
+  `ai/schemas/agent-environment-evidence.schema.yaml`；只使用正式
+  `scripts/validate_agent_environment.py` gate，不在 adapter 复制验证逻辑。
 
 ## Poetry sandbox and worktree
 

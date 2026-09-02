@@ -8,6 +8,12 @@ allowed_paths: []
 forbidden_paths: []
 verification:
   commands: []
+  required_lanes:
+    - lane: portable
+      capability: portable
+      minimum_records: 1
+      commands: []
+  prohibited_lanes: []
 delivery:
   schema_version: 1
   contract_status: not_applicable
@@ -34,16 +40,17 @@ One observable outcome.
 - Exact Starting Head: `<40-char SHA>`
 - Human evidence URL: `<durable GitHub comment/review URL>`
 - Single writer: `<true; previous agent / next agent / stop Head when switching>`
-- PR/branch single-writer: `<ordered PR + branch records; active true/false and stop_head for every previous writer>`
+- PR/branch single-writer: `<ordered ASSIGN / STOP / SWITCH events with strictly increasing sequence>`
 
 Tool 使用最长 64 字符、无空白/控制字符的工具中立安全标识符；OS 必须是 Windows、Linux 或
-macOS。相邻 record 的 agent identity 改变即构成 switch，完整 previous/next/stop Head 字段不能
-省略；previous 必须是紧邻的前一 record，同一集合不得重复 agent identity key。
+macOS。assignment 必须符合 `ai/schemas/agent-assignment.schema.yaml`：正式事件只有 `ASSIGN`、
+`STOP`、`SWITCH`。前任 STOP Head、SWITCH starting Head 与当时 PR Head 必须完全相等，且
+Human GitHub evidence 可核验；事件乱序或双 writer 均 fail-closed。
 
 The Environment Verification Agent produces evidence only; the Independent Review Agent reviews the
 exact Head only; Human alone authorizes activation, external side effects, merge and closeout. A switch
-must occur after the previous record and prove previous/next agent, previous record `stop_head` == switch
-`previous_agent_stop_head` == next Starting Head, and previous writer inactive.
+must follow the previous STOP event and prove previous/next agent, `stop_head` ==
+`previous_agent_stop_head` == next Starting Head == the then-current PR Head.
 
 ### Verification lanes
 
@@ -55,21 +62,29 @@ must occur after the previous record and prove previous/next agent, previous rec
 
 ### Environment evidence
 
+Formal contracts and gate:
+
+- `ai/schemas/agent-assignment.schema.yaml`
+- `ai/schemas/agent-environment-evidence.schema.yaml`
+- `scripts/validate_agent_environment.py` (the only formal machine gate)
+
 Single-record schema/identity gate:
 
-- Task / expected Base / exact Head / lane / requirement (`required`, `optional`, `not_applicable`):
-- Producer role / tool / OS / Python / Poetry / sanitized xtquant versions as applicable:
+- Task / expected Base / exact Head / PR / branch / lane / requirement (`required`, `optional`, `not_applicable`):
+- Producer role / tool / OS / Python / Poetry / trusted xtquant provenance as applicable:
 - Original command / exit code / executed / passed / failed / skipped / RFC3339 timestamp:
 - `sanitized_evidence: true` / explicit `unverified_scope` (empty allowed) / durable GitHub evidence URL:
-- Explicit `real_money: false` / `simulation_order` boolean:
+- Explicit `real_money: false` / `miniqmt_connection` / `account_query` / `simulation_order` booleans:
 
-Applicable xtquant version is a bounded metadata-only token (maximum 64 characters; letters, digits,
-dot, underscore, plus or hyphen). Paths, whitespace/control characters, `userdata_mini`, account or
-secret-like labels, and long digit-only values are invalid and remain unverified/`BLOCKED`.
+Applicable xtquant version is `{source, value, verified}` provenance. Source must be trusted package
+metadata or vendor API; value is a bounded opaque token and is not guessed as semver. Paths,
+whitespace/control characters, `userdata_mini`, account or secret-like labels, and long digit-only
+values are invalid and remain unverified/`BLOCKED`.
 
 Required-lane satisfaction gate over the complete record set:
 
-- Exact expected command set / observed command set / missing or unexpected commands:
+- Task/Handoff deep-equal required lanes and prohibited lanes:
+- Frozen opaque exact command set / observed command set / missing or unexpected commands:
 - Every record schema and task/Base/Head identity valid:
 - Every exit code 0, failed 0, counts non-negative and internally consistent, executed greater than 0:
 - Per-command skip allowance / skipped scope recorded in non-empty `unverified_scope`:
@@ -83,9 +98,9 @@ An evidence record cannot authorize its own simulation order. The satisfaction c
 trusted authorization context binding the active task and durable Human GitHub evidence; real money is
 always forbidden.
 
-Poetry command validation uses quote-aware semantic tokens, exact task command membership and a closed
-child-entrypoint grammar. A task must enumerate its supported `python`, `pytest`, `mypy`, `ruff` and
-`pre-commit` forms; unknown, shell, executable-path or arbitrary child entrypoints fail even if expected.
+The formal gate reads expected commands only from the exact active task and frozen Handoff. Lane
+commands form an exact partition of `verification.commands`; caller/evidence cannot override them.
+Commands are opaque exact strings. This template does not define a universal PowerShell/POSIX parser.
 
 ### Design
 
