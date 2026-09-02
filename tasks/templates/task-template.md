@@ -43,8 +43,9 @@ One observable outcome.
 - PR/branch single-writer: `<ordered ASSIGN / STOP / SWITCH events with strictly increasing sequence>`
 
 Tool 使用最长 64 字符、无空白/控制字符的工具中立安全标识符；OS 必须是 Windows、Linux 或
-macOS。assignment 必须符合 `ai/schemas/agent-assignment.schema.yaml`：正式事件只有 `ASSIGN`、
-`STOP`、`SWITCH`。前任 STOP Head、SWITCH starting Head 与当时 PR Head 必须完全相等，且
+macOS。agent identity 是独立且不复用的 writer/session 标识，不等于 tool/OS；同一 tool/OS
+的不同会话可使用不同 identity。assignment 必须符合 `ai/schemas/agent-assignment.schema.yaml`：
+正式事件只有 `ASSIGN`、`STOP`、`SWITCH`。前任 STOP Head、SWITCH starting Head 与当时 PR Head 必须完全相等，且
 Human GitHub evidence 可核验；事件乱序或双 writer 均 fail-closed。
 
 The Environment Verification Agent produces evidence only; the Independent Review Agent reviews the

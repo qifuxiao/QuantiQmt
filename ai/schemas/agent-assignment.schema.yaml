@@ -55,8 +55,7 @@ $defs:
         const: Implementation Agent
       agent:
         type: string
-        minLength: 3
-        maxLength: 128
+        pattern: '^[A-Za-z0-9][A-Za-z0-9._:+-]{0,127}$'
       tool:
         type: string
         pattern: '^[A-Za-z0-9][A-Za-z0-9._+-]{0,63}$'
@@ -74,12 +73,10 @@ $defs:
         $ref: '#/$defs/sha'
       previous_agent:
         type: string
-        minLength: 3
-        maxLength: 128
+        pattern: '^[A-Za-z0-9][A-Za-z0-9._:+-]{0,127}$'
       next_agent:
         type: string
-        minLength: 3
-        maxLength: 128
+        pattern: '^[A-Za-z0-9][A-Za-z0-9._:+-]{0,127}$'
       previous_agent_stop_head:
         $ref: '#/$defs/sha'
     allOf:

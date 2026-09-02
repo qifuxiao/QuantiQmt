@@ -321,9 +321,6 @@ def validate_assignments(document: object, *, task_id: str, pr: int, branch: str
             if event.get(field) != expected:
                 errors.append(f"{prefix}: {field} identity does not match")
         agent = event.get("agent")
-        expected_agent = f"{event.get('tool')}/{event.get('os')}"
-        if agent != expected_agent:
-            errors.append(f"{prefix}: agent identity must equal tool/os")
         kind = event.get("event")
         if kind == "ASSIGN":
             if active_agent is not None:

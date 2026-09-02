@@ -34,8 +34,9 @@ stop Head；新 Agent 的 Starting Head 必须等于该 stop Head。旧 Agent �
 `ordered PR/branch single-writer` 使用
 `ai/schemas/agent-assignment.schema.yaml` 的有序事件，不从若干可选 snapshot 字段猜测状态。
 正式事件只有 `ASSIGN`、`STOP`、`SWITCH`，`sequence` 必须严格递增；任一时刻最多一个 active
-writer。`SWITCH` 必须紧跟可核验的前任 `STOP`，并由 Human GitHub evidence 证明 previous/next
-agent。前任 `stop_head`、`previous_agent_stop_head`、新任 `starting_head` 和当时 `pr_head`
+writer。agent identity 是不复用的会话/writer 标识，不等同于 tool/OS；因此同一 tool/OS 的两个
+独立会话仍可在 Human 授权下切换。`SWITCH` 必须紧跟可核验的前任 `STOP`，并由 Human GitHub
+evidence 证明 previous/next agent。前任 `stop_head`、`previous_agent_stop_head`、新任 `starting_head` 和当时 `pr_head`
 必须完全相等；乱序、双 writer、身份复用或任一 Head 漂移均 fail-closed。
 
 ## 分工原则

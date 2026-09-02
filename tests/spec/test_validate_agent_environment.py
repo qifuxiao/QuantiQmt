@@ -47,13 +47,14 @@ def _assignment_event(
     sequence: int,
     agent: str,
     *,
+    tool: str,
+    os_name: str,
     pr_head: str,
     starting_head: str | None = None,
     stop_head: str | None = None,
     previous_agent: str | None = None,
     previous_agent_stop_head: str | None = None,
 ) -> dict[str, Any]:
-    tool, os_name = agent.split("/", maxsplit=1)
     record: dict[str, Any] = {
         "event": event,
         "sequence": sequence,
@@ -87,24 +88,30 @@ def _assignments() -> dict[str, Any]:
             _assignment_event(
                 "ASSIGN",
                 1,
-                "Cline/Windows",
+                "cline-windows-plan-v1",
+                tool="Cline",
+                os_name="Windows",
                 pr_head="b" * 40,
                 starting_head="b" * 40,
             ),
             _assignment_event(
                 "STOP",
                 2,
-                "Cline/Windows",
+                "cline-windows-plan-v1",
+                tool="Cline",
+                os_name="Windows",
                 pr_head=SWITCH_HEAD,
                 stop_head=SWITCH_HEAD,
             ),
             _assignment_event(
                 "SWITCH",
                 3,
-                "Codex/Windows",
+                "codex-windows-plan-v2",
+                tool="Codex",
+                os_name="Windows",
                 pr_head=SWITCH_HEAD,
                 starting_head=SWITCH_HEAD,
-                previous_agent="Cline/Windows",
+                previous_agent="cline-windows-plan-v1",
                 previous_agent_stop_head=SWITCH_HEAD,
             ),
         ],
@@ -372,7 +379,9 @@ def test_assignment_event_order_and_single_writer_fail_closed(case: str) -> None
             _assignment_event(
                 "ASSIGN",
                 2,
-                "Codex/Windows",
+                "codex-windows-concurrent",
+                tool="Codex",
+                os_name="Windows",
                 pr_head=SWITCH_HEAD,
                 starting_head=SWITCH_HEAD,
             ),
@@ -382,6 +391,30 @@ def test_assignment_event_order_and_single_writer_fail_closed(case: str) -> None
     else:
         assignments["events"][2]["human_evidence_url"] = "chat://not-durable"
     assert validator.validate_assignments(assignments, task_id="TASK-057", pr=PR, branch=BRANCH)
+
+
+def test_switch_allows_distinct_agent_sessions_with_the_same_tool_and_os() -> None:
+    assignments = _assignments()
+    for event in assignments["events"][:2]:
+        event.update(
+            {
+                "agent": "codex-windows-plan-v1",
+                "tool": "Codex",
+                "os": "Windows",
+            }
+        )
+    assignments["events"][2].update(
+        {
+            "agent": "codex-windows-plan-v2",
+            "tool": "Codex",
+            "os": "Windows",
+            "previous_agent": "codex-windows-plan-v1",
+            "next_agent": "codex-windows-plan-v2",
+        }
+    )
+    assert (
+        validator.validate_assignments(assignments, task_id="TASK-057", pr=PR, branch=BRANCH) == []
+    )
 
 
 @pytest.mark.parametrize("field", ("stop_head", "starting_head", "pr_head"))
