@@ -44,4 +44,4 @@ tasks:
   - {id: TASK-054, path: completed/TASK-054-miniqmt-m1-delivery-governance.md, status: completed, depends_on: []}
   - {id: TASK-055, path: completed/TASK-055-miniqmt-readonly-environment-probe.md, status: completed, depends_on: [TASK-054]}
   - {id: TASK-056, path: completed/TASK-056-codex-cline-collaboration.md, status: completed, depends_on: [TASK-054, TASK-055]}
-  - {id: TASK-057, path: active/TASK-057-tool-neutral-agents-windows-verification-poetry.md, status: active, depends_on: [TASK-055, TASK-056]}
+  - {id: TASK-057, path: completed/TASK-057-tool-neutral-agents-windows-verification-poetry.md, status: completed, depends_on: [TASK-055, TASK-056]}

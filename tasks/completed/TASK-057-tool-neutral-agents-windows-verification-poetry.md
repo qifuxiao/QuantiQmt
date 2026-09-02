@@ -1,7 +1,7 @@
 ---
 id: TASK-057
 title: Generalize implementation agents and environment verification lanes
-status: active
+status: completed
 depends_on: [TASK-055, TASK-056]
 spec_refs: []
 allowed_paths:
@@ -100,10 +100,29 @@ verification:
 delivery:
   schema_version: 1
   contract_status: not_applicable
-  implementation_status: in_progress
-  acceptance_status: partial
-  review_status: changes_requested
+  implementation_status: merged
+  acceptance_status: passed
+  review_status: approved
   release_status: prohibited
+  completion_evidence:
+    mode: governance_closeout_after_independent_review
+    change_pr: https://github.com/qifuxiao/QuantiQmt/pull/100
+    reviewed_head_sha: 86b5a75585f646c7faf667645694776ac4273c20
+    review_verdict: APPROVE
+    reviewer: qifuxiao
+    evidence_url: https://github.com/qifuxiao/QuantiQmt/pull/100#pullrequestreview-5088182195
+    merge_commit_sha: 40e73e6ada8f26494d2e39a4a46a7ec3e3971b31
+    review_submitted_at: '2026-09-02T09:57:04Z'
+    merge_completed_at: '2026-09-02T09:57:39Z'
+    ci_evidence: >-
+      4/4 GitHub checks completed successfully on reviewed Head
+      86b5a75585f646c7faf667645694776ac4273c20: two quality and two
+      persistence-postgresql jobs from workflow runs 33613130869 and 33613126653.
+    human_authorization_evidence: >-
+      https://github.com/qifuxiao/QuantiQmt/pull/100#issuecomment-5507807554;
+      comment ID 5507807554; author qfxyyy; created_at equals updated_at at
+      2026-09-02T09:59:57Z; raw-body SHA-256
+      42211efc3b7e8bbb24238f2fc614bd1ce672de55f10a31256164d636edce5fa1.
 ---
 
 # Objective
@@ -433,37 +452,37 @@ front matter列出的完整命令和live GitHub gate。
 
 ## Acceptance criteria
 
-- [ ] 共享规则使用 Implementation Agent而非把实现角色绑定到Cline；adapter仍可保留工具名。
-- [ ] Agent分配/切换记录tool、OS、starting Head、人类evidence和单写者停止点。
-- [ ] Assignment采用有序事件模型；乱序、双writer或stop/switch/PR Head不一致时fail-closed。
-- [ ] Repair v3 Handoff冻结repository、PR、base/head branch、Human allowlist、assignment
+- [x] 共享规则使用 Implementation Agent而非把实现角色绑定到Cline；adapter仍可保留工具名。
+- [x] Agent分配/切换记录tool、OS、starting Head、人类evidence和单写者停止点。
+- [x] Assignment采用有序事件模型；乱序、双writer或stop/switch/PR Head不一致时fail-closed。
+- [x] Repair v3 Handoff冻结repository、PR、base/head branch、Human allowlist、assignment
   comment identity/digest和授权producer；CLI/evidence不得覆盖。
-- [ ] 正式gate通过固定GitHub API实时确认PR OPEN及当前Base/Head/branch；旧Head即使同时作为
+- [x] 正式gate通过固定GitHub API实时确认PR OPEN及当前Base/Head/branch；旧Head即使同时作为
   两个caller参数也不能通过，且不再暴露不可信`--pr-head/--pr/--branch`authority接口。
-- [ ] Human assignment comment必须实际存在于同repo/PR、由授权Human发布、未编辑且正文digest/
+- [x] Human assignment comment必须实际存在于同repo/PR、由授权Human发布、未编辑且正文digest/
   machine-readable事件匹配；不存在、跨repo、错误author或事件错配失败。
-- [ ] Environment evidence comment必须实际存在、未编辑且author/producer identity绑定active
+- [x] Environment evidence comment必须实际存在、未编辑且author/producer identity绑定active
   assignment；Cline/Linux assignment不能被未单独授权的Codex/Windows自报满足。
-- [ ] portable、windows、windows_miniqmt lane职责、能力和required/pending/BLOCKED语义明确。
-- [ ] Linux Cline执行全部可移植验证，但不能执行或声称Windows/Mini QMT验收。
-- [ ] Windows环境证据绑定精确Head；Head变化使旧证据和Review失效。
-- [ ] 模拟委托需要独立active task和人类明确授权；真实资金始终禁止。
-- [ ] Codex adapter要求最小沙箱外Poetry权限、原始命令和worktree环境兼容检查。
-- [ ] SymbolicLink零长度或sandbox拒绝不能被当作Poetry损坏、依赖缺失或重装理由。
-- [ ] build/contract流程保护既有dist，只清理本轮可归因产物，最终contract为0 skipped。
-- [ ] TASK-022保留历史并追加可审计勘误，当前结论明确为sandbox访问边界。
-- [ ] task template、Mini QMT Prompt、协作workflow和Implementation Report字段一致。
-- [ ] 正式schema和`validate_agent_environment.py`是唯一machine gate；测试不复制主逻辑。
-- [ ] validator只从精确task/Handoff读取identity和expected commands，拒绝caller/evidence覆盖。
-- [ ] task以结构化非空声明要求`portable`和`windows`，并禁止`windows_miniqmt`；Repair v3
+- [x] portable、windows、windows_miniqmt lane职责、能力和required/pending/BLOCKED语义明确。
+- [x] Linux Cline执行全部可移植验证，但不能执行或声称Windows/Mini QMT验收。
+- [x] Windows环境证据绑定精确Head；Head变化使旧证据和Review失效。
+- [x] 模拟委托需要独立active task和人类明确授权；真实资金始终禁止。
+- [x] Codex adapter要求最小沙箱外Poetry权限、原始命令和worktree环境兼容检查。
+- [x] SymbolicLink零长度或sandbox拒绝不能被当作Poetry损坏、依赖缺失或重装理由。
+- [x] build/contract流程保护既有dist，只清理本轮可归因产物，最终contract为0 skipped。
+- [x] TASK-022保留历史并追加可审计勘误，当前结论明确为sandbox访问边界。
+- [x] task template、Mini QMT Prompt、协作workflow和Implementation Report字段一致。
+- [x] 正式schema和`validate_agent_environment.py`是唯一machine gate；测试不复制主逻辑。
+- [x] validator只从精确task/Handoff读取identity和expected commands，拒绝caller/evidence覆盖。
+- [x] task以结构化非空声明要求`portable`和`windows`，并禁止`windows_miniqmt`；Repair v3
   Handoff必须原样冻结且validator必须deep-equal交叉校验。
-- [ ] required lane在缺失/空声明、空records、空expected commands、重复或未知lane、混入
+- [x] required lane在缺失/空声明、空records、空expected commands、重复或未知lane、混入
   identity、命令分区遗漏/重复、缺命令或结果不一致时失败，caller/evidence不得覆盖。
-- [ ] command evidence精确覆盖冻结task命令；不依赖POSIX parser解释PowerShell，也不过拟合
+- [x] command evidence精确覆盖冻结task命令；不依赖POSIX parser解释PowerShell，也不过拟合
   当前pytest/mypy参数。
-- [ ] `xtquant`使用可信source + opaque value provenance；未知或敏感值失败，不猜测semver。
-- [ ] 全部治理正反测试、task verification、mypy、Ruff、pre-commit和path audit通过。
-- [ ] 未修改spec、业务代码、migration、依赖、CI、`.clinerules`或其他任务范围。
+- [x] `xtquant`使用可信source + opaque value provenance；未知或敏感值失败，不猜测semver。
+- [x] 全部治理正反测试、task verification、mypy、Ruff、pre-commit和path audit通过。
+- [x] 未修改spec、业务代码、migration、依赖、CI、`.clinerules`或其他任务范围。
 
 ## Required evidence
 

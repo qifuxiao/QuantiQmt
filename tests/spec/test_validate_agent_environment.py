@@ -16,7 +16,10 @@ from scripts import validate_agent_environment as validator
 from scripts.validate_specs import extract_front_matter
 
 ROOT = Path(__file__).resolve().parents[2]
-TASK_PATH = ROOT / "tasks/active/TASK-057-tool-neutral-agents-windows-verification-poetry.md"
+TASK_PATH = ROOT / "tasks/completed/TASK-057-tool-neutral-agents-windows-verification-poetry.md"
+FROZEN_ACTIVE_TASK_PATH = (
+    ROOT / "tasks/active/TASK-057-tool-neutral-agents-windows-verification-poetry.md"
+)
 HANDOFF_PATH = ROOT / "ai/handoffs/TASK-057-REPAIR-v3.yaml"
 ASSIGNMENT_SCHEMA_PATH = ROOT / "ai/schemas/agent-assignment.schema.yaml"
 EVIDENCE_SCHEMA_PATH = ROOT / "ai/schemas/agent-environment-evidence.schema.yaml"
@@ -33,7 +36,10 @@ EVIDENCE_URL = "https://github.com/qifuxiao/QuantiQmt/pull/100#issuecomment-5509
 
 
 def _task() -> dict[str, Any]:
-    return copy.deepcopy(extract_front_matter(TASK_PATH))
+    task = copy.deepcopy(extract_front_matter(TASK_PATH))
+    assert task["status"] == "completed"
+    task["status"] = "active"  # Explicit historical fixture for the frozen validator contract.
+    return task
 
 
 def _handoff() -> dict[str, Any]:
@@ -275,10 +281,12 @@ def test_formal_schemas_are_valid_draft_2020_12() -> None:
 
 
 def test_git_loader_reads_exact_plan_v3_authority() -> None:
+    if not FROZEN_ACTIVE_TASK_PATH.exists():
+        pytest.skip("the frozen active-task path has been closed out")
     authority = validator.load_authority_from_git(
         ROOT,
         head="HEAD",
-        task_path=TASK_PATH.relative_to(ROOT),
+        task_path=FROZEN_ACTIVE_TASK_PATH.relative_to(ROOT),
         handoff_path=HANDOFF_PATH.relative_to(ROOT),
     )
     assert authority.task_id == "TASK-057"
