@@ -88,6 +88,54 @@ def _assignment_document() -> dict[str, Any]:
     }
 
 
+def _switched_assignment_document() -> dict[str, Any]:
+    document = _assignment_document()
+    first_event = document["events"][0]
+    next_producer = {
+        "agent_id": "task-057-plan-v3-codex-windows-2",
+        "github_login": "next-writer",
+        "role": "Implementation Agent",
+        "tool": "Codex",
+        "os": "Windows",
+        "lanes": ["portable", "windows"],
+    }
+    stop_event = {
+        "event": "STOP",
+        "sequence": 2,
+        "task_id": first_event["task_id"],
+        "repository": first_event["repository"],
+        "pull_request_number": first_event["pull_request_number"],
+        "head_branch": first_event["head_branch"],
+        "role": first_event["role"],
+        "agent_id": first_event["agent_id"],
+        "github_login": first_event["github_login"],
+        "tool": first_event["tool"],
+        "os": first_event["os"],
+        "lanes": copy.deepcopy(first_event["lanes"]),
+        "stop_head_sha": HEAD,
+        "pr_head_sha": HEAD,
+        "single_writer": True,
+    }
+    switch_event = {
+        "event": "SWITCH",
+        "sequence": 3,
+        "task_id": first_event["task_id"],
+        "repository": first_event["repository"],
+        "pull_request_number": first_event["pull_request_number"],
+        "head_branch": first_event["head_branch"],
+        **copy.deepcopy(next_producer),
+        "starting_head_sha": HEAD,
+        "previous_agent_id": first_event["agent_id"],
+        "next_agent_id": next_producer["agent_id"],
+        "previous_agent_stop_head_sha": HEAD,
+        "pr_head_sha": HEAD,
+        "single_writer": True,
+    }
+    document["events"].extend((stop_event, switch_event))
+    document["authorized_producers"].append(next_producer)
+    return document
+
+
 def _authority() -> validator.Authority:
     handoff = _handoff()
     assignment_body = _canonical_body(validator.AUTHORITY_SENTINEL, _assignment_document())
@@ -543,6 +591,72 @@ def test_assignment_order_single_writer_and_head_binding_fail_closed(case: str) 
     else:
         document["events"][0]["starting_head_sha"] = "a" * 40
     assert validator.validate_assignments(document, authority=authority)
+
+
+def test_complete_assign_stop_switch_sequence_passes() -> None:
+    document = _switched_assignment_document()
+    authority = _authority()
+    authority.github.authorized_producers = tuple(document["authorized_producers"])
+
+    assert validator.validate_assignments(document, authority=authority) == []
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    (
+        ("agent_id", "different-writer"),
+        ("github_login", "different-login"),
+        ("role", "Environment Verification Agent"),
+        ("tool", "Cline"),
+        ("os", "Linux"),
+        ("lanes", ["windows", "portable"]),
+    ),
+)
+def test_stop_must_match_full_active_writer_identity(field: str, value: object) -> None:
+    document = _switched_assignment_document()
+    document["events"][1][field] = value
+    authority = _authority()
+    authority.github.authorized_producers = tuple(document["authorized_producers"])
+
+    errors = validator.validate_assignments(document, authority=authority)
+
+    assert errors
+    assert any("STOP identity" in error for error in errors)
+    assert any("SWITCH requires the previous writer to be stopped" in error for error in errors)
+
+
+@pytest.mark.parametrize(
+    "timestamp",
+    (
+        "2026-09-02T09:00:00Z",
+        "2026-09-02T09:00:00+08:00",
+        "2026-09-02T09:00:00-05:30",
+        "2026-09-02T09:00:00.123456Z",
+        "2026-09-02T07:54:09Z",
+    ),
+)
+def test_rfc3339_timestamps_pass(timestamp: str) -> None:
+    assert validator._timestamp_errors(timestamp) == []
+
+
+@pytest.mark.parametrize(
+    "timestamp",
+    (
+        "2026-09-02 09:00:00+00:00",
+        "2026-W36-3T09:00:00+00:00",
+        "2026-09-02T09:00:00+0000",
+        "2026-09-02T09:00:00",
+        "2026-02-30T09:00:00Z",
+        "2026-09-02T24:00:00Z",
+        "2026-09-02T09:00:00+24:00",
+        "2026-09-02T09:00:00+00:60",
+        "",
+        None,
+        0,
+    ),
+)
+def test_non_rfc3339_timestamps_fail_closed(timestamp: object) -> None:
+    assert validator._timestamp_errors(timestamp)
 
 
 @pytest.mark.parametrize(

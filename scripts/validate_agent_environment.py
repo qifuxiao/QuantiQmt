@@ -48,6 +48,10 @@ BRANCH_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]{0,254}$")
 LOGIN_RE = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$")
 AGENT_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:+-]{0,127}$")
 TOOL_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._+-]{0,63}$")
+RFC3339_RE = re.compile(
+    r"^\d{4}-\d{2}-\d{2}[Tt](?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d"
+    r"(?:\.\d+)?(?:[Zz]|[+-](?:[01]\d|2[0-3]):[0-5]\d)$"
+)
 SENSITIVE_VERSION_RE = re.compile(
     r"(?:userdata_mini|account|acct|credential|secret|token|password|passwd|pwd|api[-_]?key)",
     re.IGNORECASE,
@@ -738,12 +742,18 @@ def validate_assignments(document: object, *, authority: Authority) -> list[str]
             if isinstance(agent, str):
                 assigned_agents.add(agent)
         elif kind == "STOP":
-            if active is None or active.get("agent_id") != agent:
-                errors.append(f"{prefix}: STOP must name the active writer")
-            if event.get("stop_head_sha") != event.get("pr_head_sha"):
+            identity_matches = active is not None and all(
+                active.get(field) == event.get(field)
+                for field in ("agent_id", "github_login", "role", "tool", "os", "lanes")
+            )
+            if not identity_matches:
+                errors.append(f"{prefix}: STOP identity must exactly match the active writer")
+            head_matches = event.get("stop_head_sha") == event.get("pr_head_sha")
+            if not head_matches:
                 errors.append(f"{prefix}: STOP Head must equal the then-current PR Head")
-            stopped = event
-            active = None
+            if identity_matches and head_matches:
+                stopped = event
+                active = None
         elif kind == "SWITCH":
             if active is not None:
                 errors.append(f"{prefix}: SWITCH requires the previous writer to be stopped")
@@ -797,10 +807,13 @@ def _active_assignment(document: Mapping[str, Any]) -> Mapping[str, Any] | None:
 
 
 def _timestamp_errors(value: object) -> list[str]:
-    if not isinstance(value, str):
+    if not isinstance(value, str) or RFC3339_RE.fullmatch(value) is None:
         return ["timestamp must be RFC3339 with an explicit timezone"]
+    normalized = f"{value[:10]}T{value[11:]}"
+    if normalized.endswith(("Z", "z")):
+        normalized = f"{normalized[:-1]}+00:00"
     try:
-        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        parsed = datetime.fromisoformat(normalized)
     except ValueError:
         return ["timestamp must be a real RFC3339 datetime"]
     if parsed.tzinfo is None or parsed.utcoffset() is None:
