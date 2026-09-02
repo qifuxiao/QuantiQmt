@@ -12,6 +12,7 @@ Task: TASK-XXX
 Role: Implementation Agent
 
 Implementation assignment:
+- Agent ID / GitHub login / repository / PR:
 - Tool / OS:
 - Exact Starting Head:
 - Human evidence URL:
@@ -19,6 +20,10 @@ Implementation assignment:
 - Ordered ASSIGN / STOP / SWITCH events (strict sequence, PR + branch + then-current PR Head):
 - Tool is a bounded safe identifier; OS is Windows, Linux or macOS. An adjacent agent change is always
   a switch requiring complete previous/next/stop-Head fields and no repeated agent identity key.
+- Use an unedited canonical `QUANTIQMT_GITHUB_AUTHORITY_V1` PR issue comment. The Handoff freezes its
+  ID/URL/author/timestamps/raw-body SHA-256 and producer allowlist; the formal gate reads it and the
+  live PR through the fixed GitHub API. Caller PR/branch/Head fields or local assignment files are not authority.
+  The GitHub API validates the canonical environment evidence comment with no redirects.
 
 Verification lanes:
 - portable: required | optional | not_applicable
@@ -26,10 +31,12 @@ Verification lanes:
 - windows_miniqmt: required | optional | not_applicable
 
 Environment evidence:
-- Task / expected Base / exact Head / lane / requirement:
-- Producer role / tool / OS / Python / Poetry / trusted xtquant provenance as applicable:
+- Publish one unedited canonical `QUANTIQMT_ENVIRONMENT_EVIDENCE_V1` PR issue comment.
+- Envelope task / Plan / repository / PR / expected Base / live exact Head / assignment comment:
+- Producer agent ID / GitHub login / role / tool / OS / authorized lanes:
+- Record lane / requirement / Python / Poetry / trusted xtquant provenance as applicable:
 - Original command / exit code / executed / passed / failed / skipped / RFC3339 timestamp:
-- sanitized_evidence: true / explicit unverified_scope (empty allowed) / durable GitHub evidence URL:
+- sanitized_evidence: true / explicit unverified_scope (empty allowed); GitHub API object supplies comment ID/URL:
 - explicit real_money: false / miniqmt_connection / account_query / simulation_order booleans:
 - xtquant provenance uses trusted source + opaque sanitized value + verified; no semver guess, path,
   whitespace/control, userdata/account/secret label or long digit-only value:
@@ -67,6 +74,8 @@ Verification and handoff:
 - Run every verification.commands entry and report exit codes.
 - Run every supported portable command; Linux evidence cannot satisfy Windows or Windows/Mini QMT lanes.
 - Bind all evidence to the exact Head. A Head change invalidates environment evidence and Review.
+- Use bounded, no-redirect HTTPS GET to the fixed GitHub API to verify live PR OPEN/Base/Head/branches,
+  canonical Human authority and evidence comment author/content. Any API failure is `BLOCKED`.
 - Validate ordered assignment and evidence with `ai/schemas/agent-assignment.schema.yaml`,
   `ai/schemas/agent-environment-evidence.schema.yaml`, and the only formal machine gate
   `scripts/validate_agent_environment.py`.
@@ -77,7 +86,7 @@ Verification and handoff:
   Agent or Environment Verification Agent may produce environment evidence.
 - Enforce PR/branch single-writer through strictly ordered `ASSIGN`, `STOP`, `SWITCH` events. A
   Human-authorized switch requires previous/next identity and equal STOP Head,
-  `previous_agent_stop_head`, next Starting Head and then-current PR Head.
+  `previous_agent_stop_head_sha`, next `starting_head_sha` and then-current `pr_head_sha`.
 - Never accept record-only simulation-order authorization; require trusted caller context binding the
   active task and durable Human GitHub evidence. Real-money evidence is always invalid.
 - Missing required Windows/Mini QMT capability is BLOCKED, not a reason to downgrade acceptance.

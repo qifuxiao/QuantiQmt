@@ -36,8 +36,19 @@ stop Head；新 Agent 的 Starting Head 必须等于该 stop Head。旧 Agent �
 正式事件只有 `ASSIGN`、`STOP`、`SWITCH`，`sequence` 必须严格递增；任一时刻最多一个 active
 writer。agent identity 是不复用的会话/writer 标识，不等同于 tool/OS；因此同一 tool/OS 的两个
 独立会话仍可在 Human 授权下切换。`SWITCH` 必须紧跟可核验的前任 `STOP`，并由 Human GitHub
-evidence 证明 previous/next agent。前任 `stop_head`、`previous_agent_stop_head`、新任 `starting_head` 和当时 `pr_head`
+evidence 证明 previous/next agent。前任 `stop_head_sha`、`previous_agent_stop_head_sha`、
+新任 `starting_head_sha` 和当时 `pr_head_sha`
 必须完全相等；乱序、双 writer、身份复用或任一 Head 漂移均 fail-closed。
+
+### Live GitHub authority
+
+Assignment 不是 caller 参数或本地文件。Human 必须在目标 PR 发布未编辑的 canonical
+`QUANTIQMT_GITHUB_AUTHORITY_V1` issue comment，Repair Handoff 冻结 repository、PR、Base/Head
+branch、comment ID/URL/author/timestamps/raw-body digest 以及 producer allowlist。正式 gate 使用
+固定 `https://api.github.com` 的有界、禁止重定向 HTTPS GET，实时确认 PR OPEN、非 draft、
+Base/Head/branch 和 assignment comment；API 错误、超时、限流、编辑、跨 PR 或 digest 漂移均
+`BLOCKED`。caller 不得用 `--pr-head`、`--pr`、`--branch` 或本地 assignment authority。
+The GitHub API validates the canonical environment evidence comment with no redirects.
 
 ## 分工原则
 
@@ -160,12 +171,15 @@ machine gate；文档、adapter 和测试不得维护第二套 parser 或 pseudo
 
 Environment evidence 有两个互不替代的验证层：
 
-1. **单条 schema/identity gate**：每条 record 必须记录 task、调用方传入的 expected Base、
-   exact Head、PR、branch、lane、`requirement`（`required` / `optional` / `not_applicable`）、producer role、
-   tool、OS、Python/Poetry 及适用的脱敏 xtquant 版本、original command、exit code、
+1. **canonical comment/schema gate**：environment evidence 必须是目标 PR 上未编辑的
+   `QUANTIQMT_ENVIRONMENT_EVIDENCE_V1` issue comment。envelope 记录 task、Plan、frozen Base、
+   live exact Head、repository/PR、assignment comment 和 producer agent/login/role/tool/OS/lanes；
+   每条 record 记录 lane、`requirement`（`required` / `optional` / `not_applicable`）、Python/Poetry
+   及适用的脱敏 xtquant 版本、original command、exit code、
    executed/passed/failed/skipped、RFC3339 `timestamp`、`sanitized_evidence: true`、显式
-   `unverified_scope`（允许空字符串但不得缺失）和 durable GitHub evidence URL。task/Base/Head
-   必须与调用方 expected values 精确相等，不能只检查 SHA 格式。只有 Implementation Agent
+   `unverified_scope`（允许空字符串但不得缺失）。task/Base/Head 必须与 frozen Handoff 和 live
+   PR 精确相等，不能只检查 SHA 格式。GitHub API 回读 comment author、URL、issue URL、
+   created/updated 和正文；只有 Implementation Agent
    和 Environment Verification Agent 可以生产环境证据；Independent Review Agent 不可以。
    xtquant 使用 `{source, value, verified}` provenance；source 只接受可信 package metadata 或
    vendor API，value 是最长 64 字符的 opaque sanitized token，不猜测 semver。路径、空白、
@@ -177,7 +191,8 @@ Environment evidence 有两个互不替代的验证层：
    不得提供、覆盖或缩减 expected commands。完整 record set 必须无缺失、无意外或替代命令；
    每条 schema/identity 均有效、
    `exit_code == 0`、`failed == 0`、计数为非负整数且内部一致、`executed > 0`。skip 只能在
-   task 对该 command 明确给出 allowance 时出现，且必须写入非空 `unverified_scope`。
+   task 对该 command 明确给出 allowance 时出现，且必须写入非空 `unverified_scope`。producer
+   必须命中 Handoff allowlist；Implementation Agent 还必须等于 canonical assignment 的 active writer。
 
 单条格式正确不等于 required lane 已满足。required lane 缺少能力或 satisfaction gate 未通过时
 保持 pending/`BLOCKED`，不能用其他 lane、mock 或文字说明替代。Head 改变后，旧 environment

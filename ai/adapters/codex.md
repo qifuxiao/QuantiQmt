@@ -17,6 +17,10 @@ Agent 之一；Human 的 activation、外部副作用授权、GitHub Approval/me
   时不得声称 `windows_miniqmt` 通过，也不得连接客户端或产生委托。
 - environment evidence 绑定 exact Head；Head 改变后必须重跑。Implementation Agent 不得
   Review 自己的提交，Environment Verification Agent 不提供 Review verdict。
+- Assignment 与 environment evidence 必是目标 PR 上未编辑的 canonical issue comments。
+  Codex 使用正式 gate 的固定 GitHub API 有界 HTTPS GET 实时核验 PR、Human author/body digest、
+  active writer 和 producer login/tool/OS/lanes；不得接受 caller PR/branch/Head 或本地 assignment。
+  The GitHub API validates the canonical environment evidence comment with no redirects.
 - ordered assignment 和 environment evidence 分别遵循
   `ai/schemas/agent-assignment.schema.yaml` 与
   `ai/schemas/agent-environment-evidence.schema.yaml`；只使用正式

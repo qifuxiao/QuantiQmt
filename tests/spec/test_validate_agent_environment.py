@@ -1,8 +1,10 @@
-"""Formal environment-evidence validator tests for TASK-057 Plan v2."""
+"""Formal live GitHub environment-evidence validator tests for TASK-057 Plan v3."""
 
 from __future__ import annotations
 
 import copy
+import hashlib
+import json
 from collections import Counter
 from pathlib import Path
 from typing import Any
@@ -15,13 +17,19 @@ from scripts.validate_specs import extract_front_matter
 
 ROOT = Path(__file__).resolve().parents[2]
 TASK_PATH = ROOT / "tasks/active/TASK-057-tool-neutral-agents-windows-verification-poetry.md"
-HANDOFF_PATH = ROOT / "ai/handoffs/TASK-057-REPAIR-v2.yaml"
+HANDOFF_PATH = ROOT / "ai/handoffs/TASK-057-REPAIR-v3.yaml"
 ASSIGNMENT_SCHEMA_PATH = ROOT / "ai/schemas/agent-assignment.schema.yaml"
 EVIDENCE_SCHEMA_PATH = ROOT / "ai/schemas/agent-environment-evidence.schema.yaml"
+REPOSITORY = "qifuxiao/QuantiQmt"
 PR = 100
 BRANCH = "codex/task-057-implementation"
-HEAD = "d" * 40
-SWITCH_HEAD = "c" * 40
+BASE = "7be471949dbce8278b5ce7681384ef987b0fbc86"
+STARTING_HEAD = "03d5c425143c2101a82ccd64d752c770886117d6"
+HEAD = "f" * 40
+ASSIGNMENT_COMMENT_ID = 5505098259
+EVIDENCE_COMMENT_ID = 5509999999
+ASSIGNMENT_URL = "https://github.com/qifuxiao/QuantiQmt/pull/100#issuecomment-5505098259"
+EVIDENCE_URL = "https://github.com/qifuxiao/QuantiQmt/pull/100#issuecomment-5509999999"
 
 
 def _task() -> dict[str, Any]:
@@ -34,102 +42,65 @@ def _handoff() -> dict[str, Any]:
     return copy.deepcopy(value)
 
 
-def _authority() -> validator.Authority:
-    return validator.build_authority(_task(), _handoff())
+def _canonical_body(sentinel: str, document: dict[str, Any]) -> str:
+    return f"{sentinel}\n```json\n{json.dumps(document, indent=2)}\n```"
 
 
-def _github_url(suffix: int) -> str:
-    return f"https://github.com/example/repo/pull/100#issuecomment-{suffix}"
-
-
-def _assignment_event(
-    event: str,
-    sequence: int,
-    agent: str,
-    *,
-    tool: str,
-    os_name: str,
-    pr_head: str,
-    starting_head: str | None = None,
-    stop_head: str | None = None,
-    previous_agent: str | None = None,
-    previous_agent_stop_head: str | None = None,
-) -> dict[str, Any]:
-    record: dict[str, Any] = {
-        "event": event,
-        "sequence": sequence,
-        "task": "TASK-057",
-        "pr": PR,
-        "branch": BRANCH,
-        "role": "Implementation Agent",
-        "agent": agent,
-        "tool": tool,
-        "os": os_name,
-        "human_evidence_url": _github_url(sequence),
-        "single_writer": True,
-        "pr_head": pr_head,
-    }
-    if starting_head is not None:
-        record["starting_head"] = starting_head
-    if stop_head is not None:
-        record["stop_head"] = stop_head
-    if previous_agent is not None:
-        record["previous_agent"] = previous_agent
-        record["next_agent"] = agent
-    if previous_agent_stop_head is not None:
-        record["previous_agent_stop_head"] = previous_agent_stop_head
-    return record
-
-
-def _assignments() -> dict[str, Any]:
-    return {
-        "schema_version": 1,
-        "events": [
-            _assignment_event(
-                "ASSIGN",
-                1,
-                "cline-windows-plan-v1",
-                tool="Cline",
-                os_name="Windows",
-                pr_head="b" * 40,
-                starting_head="b" * 40,
-            ),
-            _assignment_event(
-                "STOP",
-                2,
-                "cline-windows-plan-v1",
-                tool="Cline",
-                os_name="Windows",
-                pr_head=SWITCH_HEAD,
-                stop_head=SWITCH_HEAD,
-            ),
-            _assignment_event(
-                "SWITCH",
-                3,
-                "codex-windows-plan-v2",
-                tool="Codex",
-                os_name="Windows",
-                pr_head=SWITCH_HEAD,
-                starting_head=SWITCH_HEAD,
-                previous_agent="cline-windows-plan-v1",
-                previous_agent_stop_head=SWITCH_HEAD,
-            ),
-        ],
-    }
-
-
-def _evidence_record(command: str, lane: str, authority: validator.Authority) -> dict[str, Any]:
-    return {
-        "task": authority.task_id,
-        "base": authority.expected_base,
-        "head": HEAD,
-        "pr": PR,
-        "branch": BRANCH,
-        "lane": lane,
-        "requirement": "required",
+def _assignment_document() -> dict[str, Any]:
+    producer = {
+        "agent_id": "task-057-plan-v3-codex-windows-1",
+        "github_login": "qfxyyy",
         "role": "Implementation Agent",
         "tool": "Codex",
         "os": "Windows",
+        "lanes": ["portable", "windows"],
+    }
+    return {
+        "schema_version": 1,
+        "task_id": "TASK-057",
+        "plan_version": "TASK-057-PLAN-v3",
+        "repository": REPOSITORY,
+        "pull_request_number": PR,
+        "base_branch": "main",
+        "head_branch": BRANCH,
+        "expected_base_sha": BASE,
+        "starting_head_sha": STARTING_HEAD,
+        "events": [
+            {
+                "event": "ASSIGN",
+                "sequence": 1,
+                "task_id": "TASK-057",
+                "repository": REPOSITORY,
+                "pull_request_number": PR,
+                "head_branch": BRANCH,
+                "role": "Implementation Agent",
+                "agent_id": producer["agent_id"],
+                "github_login": producer["github_login"],
+                "tool": producer["tool"],
+                "os": producer["os"],
+                "lanes": producer["lanes"],
+                "starting_head_sha": STARTING_HEAD,
+                "pr_head_sha": STARTING_HEAD,
+                "single_writer": True,
+            }
+        ],
+        "authorized_producers": [producer],
+    }
+
+
+def _authority() -> validator.Authority:
+    handoff = _handoff()
+    assignment_body = _canonical_body(validator.AUTHORITY_SENTINEL, _assignment_document())
+    handoff["github_authority"]["assignment_comment"]["body_sha256"] = hashlib.sha256(
+        assignment_body.encode("utf-8")
+    ).hexdigest()
+    return validator.build_authority(_task(), handoff)
+
+
+def _record(command: str, lane: str) -> dict[str, Any]:
+    return {
+        "lane": lane,
+        "requirement": "required",
         "python_version": "3.12.10",
         "poetry_version": "2.4.1",
         "xtquant": None,
@@ -142,7 +113,6 @@ def _evidence_record(command: str, lane: str, authority: validator.Authority) ->
         "timestamp": "2026-09-02T09:00:00+08:00",
         "sanitized_evidence": True,
         "unverified_scope": "",
-        "evidence_url": _github_url(20),
         "capabilities": {
             "portable": True,
             "windows": True,
@@ -158,26 +128,96 @@ def _evidence_record(command: str, lane: str, authority: validator.Authority) ->
     }
 
 
-def _evidence() -> dict[str, Any]:
+def _evidence_document(authority: validator.Authority) -> dict[str, Any]:
+    producer = copy.deepcopy(_assignment_document()["authorized_producers"][0])
+    return {
+        "schema_version": 1,
+        "task_id": authority.task_id,
+        "plan_version": authority.plan_version,
+        "repository": REPOSITORY,
+        "pull_request_number": PR,
+        "base_sha": authority.expected_base,
+        "head_sha": HEAD,
+        "producer": producer,
+        "assignment_comment": {
+            "id": ASSIGNMENT_COMMENT_ID,
+            "url": ASSIGNMENT_URL,
+        },
+        "records": [
+            _record(command, lane.lane)
+            for lane in authority.required_lanes
+            for command in lane.commands
+        ],
+    }
+
+
+def _pull() -> dict[str, Any]:
+    return {
+        "number": PR,
+        "state": "open",
+        "draft": False,
+        "base": {"ref": "main", "sha": BASE, "repo": {"full_name": REPOSITORY}},
+        "head": {"ref": BRANCH, "sha": HEAD, "repo": {"full_name": REPOSITORY}},
+    }
+
+
+def _comment(comment_id: int, url: str, author: str, body: str) -> dict[str, Any]:
+    return {
+        "id": comment_id,
+        "url": (f"https://api.github.com/repos/{REPOSITORY}/issues/comments/{comment_id}"),
+        "html_url": url,
+        "issue_url": f"https://api.github.com/repos/{REPOSITORY}/issues/{PR}",
+        "user": {"login": author},
+        "created_at": "2026-09-02T09:00:00Z",
+        "updated_at": "2026-09-02T09:00:00Z",
+        "body": body,
+    }
+
+
+class FakeTransport:
+    def __init__(self, responses: dict[str, object]) -> None:
+        self.responses = responses
+        self.calls: list[tuple[str, float, int]] = []
+
+    def __call__(self, url: str, headers: dict[str, str], timeout: float, max_bytes: int) -> bytes:
+        del headers
+        self.calls.append((url, timeout, max_bytes))
+        response = self.responses[url]
+        if isinstance(response, Exception):
+            raise response
+        if isinstance(response, bytes):
+            return response
+        return json.dumps(response).encode("utf-8")
+
+
+def _live_fixture() -> tuple[validator.Authority, validator.GitHubApiClient, FakeTransport]:
     authority = _authority()
-    records = [
-        _evidence_record(command, lane.lane, authority)
-        for lane in authority.required_lanes
-        for command in lane.commands
-    ]
-    return {"schema_version": 1, "records": records}
-
-
-def _validate_evidence(document: dict[str, Any]) -> list[str]:
-    return validator.validate_evidence(
-        document,
-        authority=_authority(),
-        expected_head=HEAD,
-        pr=PR,
-        branch=BRANCH,
-        pr_head=HEAD,
-        assignments=_assignments(),
+    assignment_body = _canonical_body(validator.AUTHORITY_SENTINEL, _assignment_document())
+    evidence_body = _canonical_body(validator.EVIDENCE_SENTINEL, _evidence_document(authority))
+    assignment_comment = _comment(
+        ASSIGNMENT_COMMENT_ID, ASSIGNMENT_URL, "qifuxiao", assignment_body
     )
+    assignment_comment["created_at"] = authority.github.assignment_comment.created_at
+    assignment_comment["updated_at"] = authority.github.assignment_comment.updated_at
+    pull_url = f"https://api.github.com/repos/{REPOSITORY}/pulls/{PR}"
+    assignment_api_url = (
+        f"https://api.github.com/repos/{REPOSITORY}/issues/comments/{ASSIGNMENT_COMMENT_ID}"
+    )
+    evidence_api_url = (
+        f"https://api.github.com/repos/{REPOSITORY}/issues/comments/{EVIDENCE_COMMENT_ID}"
+    )
+    responses: dict[str, object] = {
+        pull_url: _pull(),
+        assignment_api_url: assignment_comment,
+        evidence_api_url: _comment(EVIDENCE_COMMENT_ID, EVIDENCE_URL, "qfxyyy", evidence_body),
+    }
+    transport = FakeTransport(responses)
+    return authority, validator.GitHubApiClient(transport=transport), transport
+
+
+def _replace_response(transport: FakeTransport, suffix: str, value: object) -> None:
+    url = next(url for url in transport.responses if url.endswith(suffix))
+    transport.responses[url] = value
 
 
 def test_formal_schemas_are_valid_draft_2020_12() -> None:
@@ -186,7 +226,7 @@ def test_formal_schemas_are_valid_draft_2020_12() -> None:
         Draft202012Validator.check_schema(schema)
 
 
-def test_git_loader_reads_the_exact_active_task_and_repair_handoff() -> None:
+def test_git_loader_reads_exact_plan_v3_authority() -> None:
     authority = validator.load_authority_from_git(
         ROOT,
         head="HEAD",
@@ -194,120 +234,276 @@ def test_git_loader_reads_the_exact_active_task_and_repair_handoff() -> None:
         handoff_path=HANDOFF_PATH.relative_to(ROOT),
     )
     assert authority.task_id == "TASK-057"
+    assert authority.plan_version == "TASK-057-PLAN-v3"
+    assert authority.expected_base == BASE
+    assert authority.github.repository == REPOSITORY
     assert [lane.lane for lane in authority.required_lanes] == ["portable", "windows"]
     assert authority.prohibited_lanes == ("windows_miniqmt",)
 
 
-def test_task_and_handoff_required_lanes_are_deep_equal_and_partition_commands() -> None:
+def test_task_and_handoff_lanes_deep_equal_and_partition_commands() -> None:
     authority = _authority()
     assert validator.authority_errors(_task(), _handoff()) == []
-    assert [lane.lane for lane in authority.required_lanes] == ["portable", "windows"]
     assert Counter(
         command for lane in authority.required_lanes for command in lane.commands
     ) == Counter(authority.verification_commands)
 
 
-@pytest.mark.parametrize("location", ("task", "handoff"))
-def test_required_lane_drift_fails_closed(location: str) -> None:
-    task = _task()
+@pytest.mark.parametrize(
+    "field",
+    (
+        "api_origin",
+        "repository",
+        "pull_request_number",
+        "base_branch",
+        "head_branch",
+        "authorized_human_logins",
+        "assignment_comment",
+        "authorized_producers",
+    ),
+)
+def test_missing_github_trust_anchor_fails_closed(field: str) -> None:
     handoff = _handoff()
-    target = (
-        task["verification"]["required_lanes"] if location == "task" else handoff["required_lanes"]
-    )
-    target[0]["minimum_records"] = 99
-    assert validator.authority_errors(task, handoff)
+    del handoff["github_authority"][field]
+    assert validator.authority_errors(_task(), handoff)
 
 
-@pytest.mark.parametrize("case", ("missing", "empty", "duplicate", "unknown", "empty_commands"))
-def test_invalid_required_lane_declarations_fail_closed(case: str) -> None:
-    task = _task()
-    handoff = _handoff()
-    if case == "missing":
-        del task["verification"]["required_lanes"]
-    elif case == "empty":
-        task["verification"]["required_lanes"] = []
-        handoff["required_lanes"] = []
-    elif case == "duplicate":
-        duplicate = copy.deepcopy(task["verification"]["required_lanes"][0])
-        task["verification"]["required_lanes"].append(duplicate)
-        handoff["required_lanes"].append(copy.deepcopy(duplicate))
-    elif case == "unknown":
-        task["verification"]["required_lanes"][0]["lane"] = "remote_magic"
-        handoff["required_lanes"][0]["lane"] = "remote_magic"
-    else:
-        task["verification"]["required_lanes"][0]["commands"] = []
-        handoff["required_lanes"][0]["commands"] = []
-    assert validator.authority_errors(task, handoff)
-
-
-def test_empty_top_level_verification_commands_fail_closed() -> None:
-    task = _task()
-    task["verification"]["commands"] = []
-    assert validator.authority_errors(task, _handoff())
-
-
-@pytest.mark.parametrize("case", ("omitted", "duplicated"))
-def test_required_lane_commands_must_exactly_partition_top_level_commands(case: str) -> None:
-    task = _task()
-    handoff = _handoff()
-    if case == "omitted":
-        task["verification"]["required_lanes"][0]["commands"].pop()
-        handoff["required_lanes"][0]["commands"].pop()
-    else:
-        duplicate = task["verification"]["required_lanes"][0]["commands"][0]
-        task["verification"]["required_lanes"][1]["commands"].append(duplicate)
-        handoff["required_lanes"][1]["commands"].append(duplicate)
-    assert validator.authority_errors(task, handoff)
-
-
-def test_exact_complete_evidence_and_ordered_assignment_events_pass() -> None:
+def test_live_pr_assignment_and_environment_evidence_pass() -> None:
+    authority, client, transport = _live_fixture()
     assert (
-        validator.validate_assignments(_assignments(), task_id="TASK-057", pr=PR, branch=BRANCH)
+        validator.validate_live_environment(
+            authority=authority,
+            expected_head=HEAD,
+            evidence_comment=EVIDENCE_URL,
+            github=client,
+        )
         == []
     )
-    assert _validate_evidence(_evidence()) == []
+    assert [url for url, _, _ in transport.calls] == [
+        f"https://api.github.com/repos/{REPOSITORY}/pulls/{PR}",
+        f"https://api.github.com/repos/{REPOSITORY}/issues/comments/{ASSIGNMENT_COMMENT_ID}",
+        f"https://api.github.com/repos/{REPOSITORY}/issues/comments/{EVIDENCE_COMMENT_ID}",
+    ]
+    assert all(timeout > 0 and max_bytes > 0 for _, timeout, max_bytes in transport.calls)
 
 
-def test_empty_evidence_collection_fails_closed() -> None:
-    assert _validate_evidence({"schema_version": 1, "records": []})
+@pytest.mark.parametrize(
+    ("path", "value"),
+    (
+        (("state",), "closed"),
+        (("draft",), True),
+        (("base", "ref"), "release"),
+        (("base", "sha"), "a" * 40),
+        (("head", "ref"), "other/branch"),
+        (("head", "sha"), "b" * 40),
+        (("base", "repo", "full_name"), "example/repo"),
+    ),
+)
+def test_live_pr_identity_drift_fails_closed(path: tuple[str, ...], value: object) -> None:
+    authority, client, transport = _live_fixture()
+    pull = _pull()
+    target: dict[str, Any] = pull
+    for key in path[:-1]:
+        target = target[key]
+    target[path[-1]] = value
+    _replace_response(transport, "/pulls/100", pull)
+    assert validator.validate_live_environment(
+        authority=authority,
+        expected_head=HEAD,
+        evidence_comment=EVIDENCE_COMMENT_ID,
+        github=client,
+    )
 
 
-@pytest.mark.parametrize("location", ("envelope", "record"))
-def test_evidence_cannot_supply_or_override_expected_commands(location: str) -> None:
-    evidence = _evidence()
-    if location == "envelope":
-        evidence["expected_commands"] = ["poetry run pytest -q"]
+@pytest.mark.parametrize("case", ("wrong_author", "edited", "digest", "cross_pr"))
+def test_human_assignment_comment_must_be_frozen_unedited_and_same_pr(case: str) -> None:
+    authority, client, transport = _live_fixture()
+    body = _canonical_body(validator.AUTHORITY_SENTINEL, _assignment_document())
+    comment = _comment(ASSIGNMENT_COMMENT_ID, ASSIGNMENT_URL, "qifuxiao", body)
+    if case == "wrong_author":
+        comment["user"]["login"] = "qfxyyy"
+    elif case == "edited":
+        comment["updated_at"] = "2026-09-02T09:01:00Z"
+    elif case == "digest":
+        comment["body"] += "\n"
     else:
-        evidence["records"][0]["expected_commands"] = ["poetry run pytest -q"]
-    assert _validate_evidence(evidence)
+        comment["issue_url"] = f"https://api.github.com/repos/{REPOSITORY}/issues/999"
+    _replace_response(transport, f"/comments/{ASSIGNMENT_COMMENT_ID}", comment)
+    assert validator.validate_live_environment(
+        authority=authority,
+        expected_head=HEAD,
+        evidence_comment=EVIDENCE_COMMENT_ID,
+        github=client,
+    )
 
 
 @pytest.mark.parametrize(
     ("field", "value"),
     (
-        ("task", "TASK-999"),
-        ("base", "a" * 40),
-        ("head", "a" * 40),
-        ("pr", 999),
-        ("branch", "other/branch"),
+        ("repository", "example/repo"),
+        ("pull_request_number", 999),
+        ("head_branch", "other/branch"),
+        ("github_login", "someone-else"),
+        ("tool", "Cline"),
+        ("os", "Linux"),
+        ("pr_head_sha", "a" * 40),
     ),
 )
-def test_mixed_record_identity_fails_closed(field: str, value: Any) -> None:
-    evidence = _evidence()
-    evidence["records"][0][field] = value
-    assert _validate_evidence(evidence)
+def test_assignment_event_identity_mismatch_fails_closed(field: str, value: object) -> None:
+    authority, client, transport = _live_fixture()
+    assignment = _assignment_document()
+    assignment["events"][0][field] = value
+    body = _canonical_body(validator.AUTHORITY_SENTINEL, assignment)
+    authority.github.assignment_comment.body_sha256 = hashlib.sha256(
+        body.encode("utf-8")
+    ).hexdigest()
+    comment = _comment(ASSIGNMENT_COMMENT_ID, ASSIGNMENT_URL, "qifuxiao", body)
+    comment["created_at"] = authority.github.assignment_comment.created_at
+    comment["updated_at"] = authority.github.assignment_comment.updated_at
+    _replace_response(transport, f"/comments/{ASSIGNMENT_COMMENT_ID}", comment)
+    assert validator.validate_live_environment(
+        authority=authority,
+        expected_head=HEAD,
+        evidence_comment=EVIDENCE_COMMENT_ID,
+        github=client,
+    )
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    (
+        ("github_login", "someone-else"),
+        ("agent_id", "unassigned-agent"),
+        ("role", "Environment Verification Agent"),
+        ("tool", "Cline"),
+        ("os", "Linux"),
+        ("lanes", ["portable"]),
+    ),
+)
+def test_evidence_producer_must_match_active_authorized_assignment(
+    field: str, value: object
+) -> None:
+    authority, client, transport = _live_fixture()
+    document = _evidence_document(authority)
+    document["producer"][field] = value
+    body = _canonical_body(validator.EVIDENCE_SENTINEL, document)
+    _replace_response(
+        transport,
+        f"/comments/{EVIDENCE_COMMENT_ID}",
+        _comment(EVIDENCE_COMMENT_ID, EVIDENCE_URL, "qfxyyy", body),
+    )
+    assert validator.validate_live_environment(
+        authority=authority,
+        expected_head=HEAD,
+        evidence_comment=EVIDENCE_COMMENT_ID,
+        github=client,
+    )
+
+
+def test_linux_assignment_cannot_be_satisfied_by_unrelated_windows_evidence() -> None:
+    authority, client, transport = _live_fixture()
+    assignment = _assignment_document()
+    assignment["events"][0].update(
+        {
+            "agent_id": "cline-linux-writer",
+            "github_login": "linux-login",
+            "tool": "Cline",
+            "os": "Linux",
+            "lanes": ["portable"],
+        }
+    )
+    assignment["authorized_producers"] = [
+        {
+            "agent_id": "cline-linux-writer",
+            "github_login": "linux-login",
+            "role": "Implementation Agent",
+            "tool": "Cline",
+            "os": "Linux",
+            "lanes": ["portable"],
+        }
+    ]
+    assignment_body = _canonical_body(validator.AUTHORITY_SENTINEL, assignment)
+    authority.github.assignment_comment.body_sha256 = hashlib.sha256(
+        assignment_body.encode("utf-8")
+    ).hexdigest()
+    authority.github.authorized_producers = tuple(assignment["authorized_producers"])
+    _replace_response(
+        transport,
+        f"/comments/{ASSIGNMENT_COMMENT_ID}",
+        _comment(ASSIGNMENT_COMMENT_ID, ASSIGNMENT_URL, "qifuxiao", assignment_body),
+    )
+    assert validator.validate_live_environment(
+        authority=authority,
+        expected_head=HEAD,
+        evidence_comment=EVIDENCE_COMMENT_ID,
+        github=client,
+    )
+
+
+@pytest.mark.parametrize("case", ("edited", "cross_pr", "wrong_author", "bad_body"))
+def test_environment_comment_must_be_unedited_same_pr_and_canonical(case: str) -> None:
+    authority, client, transport = _live_fixture()
+    document = _evidence_document(authority)
+    body = _canonical_body(validator.EVIDENCE_SENTINEL, document)
+    comment = _comment(EVIDENCE_COMMENT_ID, EVIDENCE_URL, "qfxyyy", body)
+    if case == "edited":
+        comment["updated_at"] = "2026-09-02T09:01:00Z"
+    elif case == "cross_pr":
+        comment["issue_url"] = f"https://api.github.com/repos/{REPOSITORY}/issues/999"
+    elif case == "wrong_author":
+        comment["user"]["login"] = "qifuxiao"
+    else:
+        comment["body"] = "not canonical"
+    _replace_response(transport, f"/comments/{EVIDENCE_COMMENT_ID}", comment)
+    assert validator.validate_live_environment(
+        authority=authority,
+        expected_head=HEAD,
+        evidence_comment=EVIDENCE_COMMENT_ID,
+        github=client,
+    )
+
+
+def _validate_document(document: dict[str, Any]) -> list[str]:
+    authority = _authority()
+    return validator.validate_evidence_document(
+        document,
+        authority=authority,
+        expected_head=HEAD,
+        active_assignment=_assignment_document()["events"][0],
+        comment_author="qfxyyy",
+    )
 
 
 @pytest.mark.parametrize("case", ("missing", "duplicate", "substitute"))
-def test_command_coverage_is_opaque_exact_and_complete(case: str) -> None:
-    evidence = _evidence()
+def test_command_coverage_remains_opaque_exact_and_complete(case: str) -> None:
+    authority = _authority()
+    document = _evidence_document(authority)
     if case == "missing":
-        evidence["records"].pop(0)
+        document["records"].pop(0)
     elif case == "duplicate":
-        evidence["records"].append(copy.deepcopy(evidence["records"][0]))
+        document["records"].append(copy.deepcopy(document["records"][0]))
     else:
-        evidence["records"][0]["command"] += " "
-    assert _validate_evidence(evidence)
+        document["records"][0]["command"] += " "
+    assert _validate_document(document)
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    (
+        ("task_id", "TASK-999"),
+        ("plan_version", "TASK-057-PLAN-v2"),
+        ("repository", "example/repo"),
+        ("pull_request_number", 999),
+        ("base_sha", "a" * 40),
+        ("head_sha", "b" * 40),
+    ),
+)
+def test_evidence_envelope_identity_must_match_frozen_and_live_authority(
+    field: str, value: object
+) -> None:
+    document = _evidence_document(_authority())
+    document[field] = value
+    assert _validate_document(document)
 
 
 @pytest.mark.parametrize(
@@ -317,29 +513,123 @@ def test_command_coverage_is_opaque_exact_and_complete(case: str) -> None:
         ("executed", 0),
         ("failed", 1),
         ("skipped", 1),
+        ("executed", True),
     ),
 )
-def test_unsuccessful_or_inconsistent_command_results_fail(field: str, value: int) -> None:
-    evidence = _evidence()
-    evidence["records"][0][field] = value
-    assert _validate_evidence(evidence)
+def test_unsuccessful_or_inconsistent_results_fail_closed(field: str, value: object) -> None:
+    document = _evidence_document(_authority())
+    document["records"][0][field] = value
+    assert _validate_document(document)
 
 
-def test_windows_lane_requires_actual_windows_capability() -> None:
-    evidence = _evidence()
-    record = next(item for item in evidence["records"] if item["lane"] == "windows")
+def test_windows_lane_requires_windows_assignment_and_capability() -> None:
+    document = _evidence_document(_authority())
+    record = next(item for item in document["records"] if item["lane"] == "windows")
     record["capabilities"]["windows"] = False
-    assert _validate_evidence(evidence)
+    assert _validate_document(document)
 
 
-def test_task057_prohibits_windows_miniqmt_and_every_broker_side_effect() -> None:
+@pytest.mark.parametrize("case", ("sequence", "double_writer", "head"))
+def test_assignment_order_single_writer_and_head_binding_fail_closed(case: str) -> None:
+    authority = _authority()
+    document = _assignment_document()
+    if case == "sequence":
+        document["events"][0]["sequence"] = 0
+    elif case == "double_writer":
+        second = copy.deepcopy(document["events"][0])
+        second["sequence"] = 2
+        second["agent_id"] = "second-writer"
+        document["events"].append(second)
+    else:
+        document["events"][0]["starting_head_sha"] = "a" * 40
+    assert validator.validate_assignments(document, authority=authority)
+
+
+@pytest.mark.parametrize(
+    "failure",
+    (
+        validator.GitHubApiError("404 not found"),
+        validator.GitHubApiError("403 forbidden"),
+        validator.GitHubApiError("429 rate limited"),
+        validator.GitHubApiError("timeout"),
+        validator.GitHubApiError("redirect forbidden"),
+    ),
+)
+def test_github_api_failures_fail_closed(failure: Exception) -> None:
+    authority, client, transport = _live_fixture()
+    _replace_response(transport, "/pulls/100", failure)
+    assert validator.validate_live_environment(
+        authority=authority,
+        expected_head=HEAD,
+        evidence_comment=EVIDENCE_COMMENT_ID,
+        github=client,
+    )
+
+
+@pytest.mark.parametrize(
+    "response",
+    (
+        b"not-json",
+        b"{" + b"x" * (validator.MAX_GITHUB_RESPONSE_BYTES + 1) + b"}",
+        b'{"state":"open","state":"closed"}',
+    ),
+    ids=("invalid-json", "oversized", "duplicate-key"),
+)
+def test_invalid_oversized_or_duplicate_key_json_fails_closed(response: bytes) -> None:
+    authority, client, transport = _live_fixture()
+    _replace_response(transport, "/pulls/100", response)
+    assert validator.validate_live_environment(
+        authority=authority,
+        expected_head=HEAD,
+        evidence_comment=EVIDENCE_COMMENT_ID,
+        github=client,
+    )
+
+
+def test_evidence_locator_cannot_inject_cross_repository_or_pr() -> None:
+    authority, client, _ = _live_fixture()
+    for locator in (
+        "https://github.com/example/repo/pull/100#issuecomment-5509999999",
+        "https://github.com/qifuxiao/QuantiQmt/pull/999#issuecomment-5509999999",
+        "https://api.github.com/repos/qifuxiao/QuantiQmt/issues/comments/5509999999",
+    ):
+        assert validator.validate_live_environment(
+            authority=authority,
+            expected_head=HEAD,
+            evidence_comment=locator,
+            github=client,
+        )
+
+
+def test_cli_removes_caller_reported_pr_branch_head_and_local_assignment_authority() -> None:
+    parser = validator._parser()
+    options = {option for action in parser._actions for option in action.option_strings}
+    assert "--evidence-comment" in options
+    assert "--pr-head" not in options
+    assert "--pr" not in options
+    assert "--branch" not in options
+    assert "--assignments" not in options
+    assert "--task" not in options
+    assert "--handoff" not in options
+
+
+def test_task057_prohibits_miniqmt_and_broker_side_effects() -> None:
+    authority, client, transport = _live_fixture()
     for field in ("miniqmt_connection", "account_query", "simulation_order", "real_money"):
-        evidence = _evidence()
-        evidence["records"][0][field] = True
-        assert _validate_evidence(evidence), field
-    evidence = _evidence()
-    evidence["records"][0]["lane"] = "windows_miniqmt"
-    assert _validate_evidence(evidence)
+        document = _evidence_document(authority)
+        document["records"][0][field] = True
+        body = _canonical_body(validator.EVIDENCE_SENTINEL, document)
+        _replace_response(
+            transport,
+            f"/comments/{EVIDENCE_COMMENT_ID}",
+            _comment(EVIDENCE_COMMENT_ID, EVIDENCE_URL, "qfxyyy", body),
+        )
+        assert validator.validate_live_environment(
+            authority=authority,
+            expected_head=HEAD,
+            evidence_comment=EVIDENCE_COMMENT_ID,
+            github=client,
+        )
 
 
 @pytest.mark.parametrize(
@@ -366,75 +656,3 @@ def test_xtquant_unknown_or_sensitive_provenance_fails(provenance: dict[str, Any
 )
 def test_xtquant_trusted_opaque_provenance_passes(provenance: dict[str, Any]) -> None:
     assert validator.xtquant_provenance_errors(provenance) == []
-
-
-@pytest.mark.parametrize("case", ("sequence", "double_writer", "bad_switch_url"))
-def test_assignment_event_order_and_single_writer_fail_closed(case: str) -> None:
-    assignments = _assignments()
-    if case == "sequence":
-        assignments["events"][2]["sequence"] = 2
-    elif case == "double_writer":
-        assignments["events"].insert(
-            1,
-            _assignment_event(
-                "ASSIGN",
-                2,
-                "codex-windows-concurrent",
-                tool="Codex",
-                os_name="Windows",
-                pr_head=SWITCH_HEAD,
-                starting_head=SWITCH_HEAD,
-            ),
-        )
-        assignments["events"][2]["sequence"] = 3
-        assignments["events"][3]["sequence"] = 4
-    else:
-        assignments["events"][2]["human_evidence_url"] = "chat://not-durable"
-    assert validator.validate_assignments(assignments, task_id="TASK-057", pr=PR, branch=BRANCH)
-
-
-def test_switch_allows_distinct_agent_sessions_with_the_same_tool_and_os() -> None:
-    assignments = _assignments()
-    for event in assignments["events"][:2]:
-        event.update(
-            {
-                "agent": "codex-windows-plan-v1",
-                "tool": "Codex",
-                "os": "Windows",
-            }
-        )
-    assignments["events"][2].update(
-        {
-            "agent": "codex-windows-plan-v2",
-            "tool": "Codex",
-            "os": "Windows",
-            "previous_agent": "codex-windows-plan-v1",
-            "next_agent": "codex-windows-plan-v2",
-        }
-    )
-    assert (
-        validator.validate_assignments(assignments, task_id="TASK-057", pr=PR, branch=BRANCH) == []
-    )
-
-
-@pytest.mark.parametrize("field", ("stop_head", "starting_head", "pr_head"))
-def test_assignment_switch_heads_must_match_exactly(field: str) -> None:
-    assignments = _assignments()
-    if field == "stop_head":
-        assignments["events"][1][field] = "e" * 40
-    else:
-        assignments["events"][2][field] = "e" * 40
-    assert validator.validate_assignments(assignments, task_id="TASK-057", pr=PR, branch=BRANCH)
-
-
-def test_evidence_head_must_equal_current_pr_head() -> None:
-    errors = validator.validate_evidence(
-        _evidence(),
-        authority=_authority(),
-        expected_head=HEAD,
-        pr=PR,
-        branch=BRANCH,
-        pr_head="e" * 40,
-        assignments=_assignments(),
-    )
-    assert errors

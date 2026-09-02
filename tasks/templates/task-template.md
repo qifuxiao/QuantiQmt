@@ -36,6 +36,8 @@ One observable outcome.
 ### Implementation assignment
 
 - Role: `Implementation Agent`
+- Agent ID / GitHub login: `<authorized producer identity>`
+- Repository / PR / Base branch / Head branch: `<frozen GitHub identity>`
 - Tool / OS: `<assigned tool and actual operating system>`
 - Exact Starting Head: `<40-char SHA>`
 - Human evidence URL: `<durable GitHub comment/review URL>`
@@ -48,10 +50,16 @@ macOS。agent identity 是独立且不复用的 writer/session 标识，不等�
 正式事件只有 `ASSIGN`、`STOP`、`SWITCH`。前任 STOP Head、SWITCH starting Head 与当时 PR Head 必须完全相等，且
 Human GitHub evidence 可核验；事件乱序或双 writer 均 fail-closed。
 
+Human assignment 必须是目标 PR 上未编辑的 canonical
+`QUANTIQMT_GITHUB_AUTHORITY_V1` issue comment。Repair Handoff 冻结 comment identity、raw-body
+SHA-256 和 producer allowlist；正式 gate 通过固定 GitHub API 有界 HTTPS GET 实时读取 PR 与
+comment。不得用 caller `--pr-head`/`--pr`/`--branch`、聊天或本地 assignment 文件替代。
+The GitHub API validates the canonical environment evidence comment with no redirects.
+
 The Environment Verification Agent produces evidence only; the Independent Review Agent reviews the
 exact Head only; Human alone authorizes activation, external side effects, merge and closeout. A switch
-must follow the previous STOP event and prove previous/next agent, `stop_head` ==
-`previous_agent_stop_head` == next Starting Head == the then-current PR Head.
+must follow the previous STOP event and prove previous/next agent, `stop_head_sha` ==
+`previous_agent_stop_head_sha` == next `starting_head_sha` == the then-current `pr_head_sha`.
 
 ### Verification lanes
 
@@ -69,12 +77,14 @@ Formal contracts and gate:
 - `ai/schemas/agent-environment-evidence.schema.yaml`
 - `scripts/validate_agent_environment.py` (the only formal machine gate)
 
-Single-record schema/identity gate:
+Canonical GitHub environment evidence gate:
 
-- Task / expected Base / exact Head / PR / branch / lane / requirement (`required`, `optional`, `not_applicable`):
-- Producer role / tool / OS / Python / Poetry / trusted xtquant provenance as applicable:
+- 未编辑 `QUANTIQMT_ENVIRONMENT_EVIDENCE_V1` PR issue comment ID/URL/author/timestamps:
+- Envelope task / Plan / repository / PR / expected Base / live exact Head / assignment comment:
+- Producer agent ID / GitHub login / role / tool / OS / authorized lanes:
+- Record lane / requirement (`required`, `optional`, `not_applicable`) / Python / Poetry / trusted xtquant provenance:
 - Original command / exit code / executed / passed / failed / skipped / RFC3339 timestamp:
-- `sanitized_evidence: true` / explicit `unverified_scope` (empty allowed) / durable GitHub evidence URL:
+- `sanitized_evidence: true` / explicit `unverified_scope` (empty allowed):
 - Explicit `real_money: false` / `miniqmt_connection` / `account_query` / `simulation_order` booleans:
 
 Applicable xtquant version is `{source, value, verified}` provenance. Source must be trusted package
@@ -99,7 +109,8 @@ An evidence record cannot authorize its own simulation order. The satisfaction c
 trusted authorization context binding the active task and durable Human GitHub evidence; real money is
 always forbidden.
 
-The formal gate reads expected commands only from the exact active task and frozen Handoff. Lane
+The formal gate reads the live PR, canonical assignment and evidence comments through the fixed GitHub
+API, then reads expected commands only from the exact active task and frozen Handoff. Lane
 commands form an exact partition of `verification.commands`; caller/evidence cannot override them.
 Commands are opaque exact strings. This template does not define a universal PowerShell/POSIX parser.
 

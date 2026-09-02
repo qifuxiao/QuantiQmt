@@ -10,7 +10,7 @@ from scripts.validate_specs import extract_front_matter
 
 ROOT = Path(__file__).resolve().parents[2]
 TASK = ROOT / "tasks/active/TASK-057-tool-neutral-agents-windows-verification-poetry.md"
-HANDOFF = ROOT / "ai/handoffs/TASK-057-REPAIR-v2.yaml"
+HANDOFF = ROOT / "ai/handoffs/TASK-057-REPAIR-v3.yaml"
 
 SHARED_GOVERNANCE_FILES = (
     "AGENTS.md",
@@ -48,6 +48,23 @@ def test_workflow_and_template_name_the_only_formal_machine_gate() -> None:
         assert "SWITCH" in text
         assert "opaque exact" in text
     assert "唯一" in workflow or "only formal" in workflow.lower()
+
+
+def test_shared_governance_requires_live_canonical_github_authority() -> None:
+    for relative_path in (
+        "ai/workflows/team-collaboration.md",
+        "tasks/templates/task-template.md",
+        "ai/prompts/miniqmt-m1-task.md",
+        "ai/adapters/codex.md",
+    ):
+        text = _text(relative_path)
+        for phrase in (
+            "GitHub API",
+            "canonical",
+            "environment evidence comment",
+            "no redirects",
+        ):
+            assert phrase.lower() in text.lower(), (relative_path, phrase)
 
 
 def test_workflow_freezes_capability_lanes_and_head_invalidation() -> None:
