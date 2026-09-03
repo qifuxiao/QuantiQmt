@@ -1,4 +1,4 @@
-"""Formal live GitHub environment-evidence validator tests for TASK-057 Plan v3."""
+"""Formal live GitHub environment-evidence validator tests for TASK-057."""
 
 from __future__ import annotations
 
@@ -17,7 +17,8 @@ from scripts.validate_specs import extract_front_matter
 
 ROOT = Path(__file__).resolve().parents[2]
 TASK_PATH = ROOT / "tasks/active/TASK-057-tool-neutral-agents-windows-verification-poetry.md"
-HANDOFF_PATH = ROOT / "ai/handoffs/TASK-057-REPAIR-v3.yaml"
+HANDOFF_V3_PATH = ROOT / "ai/handoffs/TASK-057-REPAIR-v3.yaml"
+HANDOFF_V4_PATH = ROOT / "ai/handoffs/TASK-057-REPAIR-v4.yaml"
 ASSIGNMENT_SCHEMA_PATH = ROOT / "ai/schemas/agent-assignment.schema.yaml"
 EVIDENCE_SCHEMA_PATH = ROOT / "ai/schemas/agent-environment-evidence.schema.yaml"
 REPOSITORY = "qifuxiao/QuantiQmt"
@@ -37,8 +38,8 @@ def _task() -> dict[str, Any]:
     return copy.deepcopy(extract_front_matter(TASK_PATH))
 
 
-def _handoff() -> dict[str, Any]:
-    value = yaml.safe_load(HANDOFF_PATH.read_text(encoding="utf-8"))
+def _handoff(path: Path = HANDOFF_V3_PATH) -> dict[str, Any]:
+    value = yaml.safe_load(path.read_text(encoding="utf-8"))
     assert isinstance(value, dict)
     return copy.deepcopy(value)
 
@@ -280,7 +281,7 @@ def test_git_loader_reads_exact_plan_v3_authority() -> None:
         ROOT,
         head=PLAN_V3_HEAD,
         task_path=TASK_PATH.relative_to(ROOT),
-        handoff_path=HANDOFF_PATH.relative_to(ROOT),
+        handoff_path=HANDOFF_V3_PATH.relative_to(ROOT),
     )
     assert authority.task_id == "TASK-057"
     assert authority.plan_version == "TASK-057-PLAN-v3"
@@ -288,6 +289,61 @@ def test_git_loader_reads_exact_plan_v3_authority() -> None:
     assert authority.github.repository == REPOSITORY
     assert [lane.lane for lane in authority.required_lanes] == ["portable", "windows"]
     assert authority.prohibited_lanes == ("windows_miniqmt",)
+
+
+def test_git_loader_reads_exact_plan_v4_authority() -> None:
+    authority = validator.load_authority_from_git(
+        ROOT,
+        head="HEAD",
+    )
+    assert authority.task_id == "TASK-057"
+    assert authority.plan_version == "TASK-057-PLAN-v4"
+    assert authority.expected_base == "872aa7666f8811ad3a1e49b671a9c1290085330a"
+    assert authority.github.pull_request_number == 106
+    assert authority.github.head_branch == "codex/task-057-final-repair"
+
+
+@pytest.mark.parametrize(
+    ("plan_version", "packet_version"),
+    (
+        ("TASK-057-PLAN-v3", "TASK-057-REPAIR-v3"),
+        ("TASK-057-PLAN-v4", "TASK-057-REPAIR-v4"),
+    ),
+)
+def test_only_exact_plan_handoff_identity_pairs_are_supported(
+    plan_version: str, packet_version: str
+) -> None:
+    path = HANDOFF_V3_PATH if plan_version.endswith("v3") else HANDOFF_V4_PATH
+    handoff = _handoff(path)
+    handoff["plan_version"] = plan_version
+    handoff["packet_version"] = packet_version
+    assert validator.authority_errors(_task(), handoff) == []
+
+
+@pytest.mark.parametrize(
+    ("plan_version", "packet_version"),
+    (
+        ("TASK-057-PLAN-v5", "TASK-057-REPAIR-v5"),
+        ("TASK-057-PLAN-v3", "TASK-057-REPAIR-v4"),
+        ("TASK-057-PLAN-v4", "TASK-057-REPAIR-v3"),
+    ),
+)
+def test_unknown_or_mismatched_plan_handoff_identity_fails_closed(
+    plan_version: str, packet_version: str
+) -> None:
+    handoff = _handoff()
+    handoff["plan_version"] = plan_version
+    handoff["packet_version"] = packet_version
+    assert validator.authority_errors(_task(), handoff)
+
+
+def test_handoff_filename_must_match_packet_version() -> None:
+    handoff = _handoff(HANDOFF_V4_PATH)
+    assert validator.authority_errors(
+        _task(),
+        handoff,
+        handoff_path=HANDOFF_V3_PATH.relative_to(ROOT),
+    )
 
 
 def test_task_and_handoff_lanes_deep_equal_and_partition_commands() -> None:

@@ -25,13 +25,20 @@ from typing import Any
 from urllib.parse import urlsplit
 
 import yaml
-from jsonschema.validators import Draft202012Validator  # type: ignore[import-untyped]
+from jsonschema.validators import Draft202012Validator  # type: ignore[import-untyped,unused-ignore]
 
 ROOT = Path(__file__).resolve().parents[1]
 TASK_PATH = PurePosixPath(
     "tasks/active/TASK-057-tool-neutral-agents-windows-verification-poetry.md"
 )
-HANDOFF_PATH = PurePosixPath("ai/handoffs/TASK-057-REPAIR-v3.yaml")
+HANDOFF_IDENTITIES = {
+    ("TASK-057-PLAN-v3", "TASK-057-REPAIR-v3"): PurePosixPath(
+        "ai/handoffs/TASK-057-REPAIR-v3.yaml"
+    ),
+    ("TASK-057-PLAN-v4", "TASK-057-REPAIR-v4"): PurePosixPath(
+        "ai/handoffs/TASK-057-REPAIR-v4.yaml"
+    ),
+}
 ASSIGNMENT_SCHEMA = ROOT / "ai/schemas/agent-assignment.schema.yaml"
 EVIDENCE_SCHEMA = ROOT / "ai/schemas/agent-environment-evidence.schema.yaml"
 SUPPORTED_LANES = {"portable", "windows", "windows_miniqmt"}
@@ -302,19 +309,29 @@ def _github_authority_errors(value: object) -> list[str]:
     return errors
 
 
-def authority_errors(task: Mapping[str, Any], handoff: Mapping[str, Any]) -> list[str]:
+def authority_errors(
+    task: Mapping[str, Any],
+    handoff: Mapping[str, Any],
+    *,
+    handoff_path: Path | PurePosixPath | None = None,
+) -> list[str]:
     """Validate frozen task/Handoff authority without caller identity input."""
 
     errors: list[str] = []
     task_id = task.get("id")
     if task_id != "TASK-057" or task.get("status") != "active":
         errors.append("the exact active task must be TASK-057")
-    if (
-        handoff.get("task_id") != task_id
-        or handoff.get("packet_version") != "TASK-057-REPAIR-v3"
-        or handoff.get("plan_version") != "TASK-057-PLAN-v3"
-    ):
-        errors.append("Repair Handoff identity does not match TASK-057 Plan v3")
+    plan_version = handoff.get("plan_version")
+    packet_version = handoff.get("packet_version")
+    expected_handoff_path = (
+        HANDOFF_IDENTITIES.get((plan_version, packet_version))
+        if isinstance(plan_version, str) and isinstance(packet_version, str)
+        else None
+    )
+    if handoff.get("task_id") != task_id or expected_handoff_path is None:
+        errors.append("Repair Handoff identity is not a supported TASK-057 Plan/Handoff pair")
+    if handoff_path is not None and PurePosixPath(handoff_path) != expected_handoff_path:
+        errors.append("Repair Handoff filename does not match packet_version")
     for field in ("expected_base_sha", "expected_pr_base_sha", "task_blob_sha"):
         raw = handoff.get(field)
         if not isinstance(raw, str) or SHA_RE.fullmatch(raw) is None:
@@ -387,8 +404,13 @@ def authority_errors(task: Mapping[str, Any], handoff: Mapping[str, Any]) -> lis
     return errors
 
 
-def build_authority(task: Mapping[str, Any], handoff: Mapping[str, Any]) -> Authority:
-    errors = authority_errors(task, handoff)
+def build_authority(
+    task: Mapping[str, Any],
+    handoff: Mapping[str, Any],
+    *,
+    handoff_path: Path | PurePosixPath | None = None,
+) -> Authority:
+    errors = authority_errors(task, handoff, handoff_path=handoff_path)
     if errors:
         raise ValueError("; ".join(errors))
     verification = task["verification"]
@@ -435,16 +457,34 @@ def load_authority_from_git(
     *,
     head: str,
     task_path: Path | PurePosixPath = TASK_PATH,
-    handoff_path: Path | PurePosixPath = HANDOFF_PATH,
+    handoff_path: Path | PurePosixPath | None = None,
 ) -> Authority:
-    """Read the unique active task and frozen Repair v3 Handoff from an exact tree."""
+    """Read the unique active task and supported Repair Handoff from an exact tree."""
 
     repo = repo.resolve()
     resolved_head = _git(repo, "rev-parse", "--verify", f"{head}^{{commit}}")
     task_posix = PurePosixPath(task_path).as_posix()
-    handoff_posix = PurePosixPath(handoff_path).as_posix()
-    if task_posix != TASK_PATH.as_posix() or handoff_posix != HANDOFF_PATH.as_posix():
-        raise ValueError("task and Handoff paths are fixed by TASK-057 Plan v3")
+    if task_posix != TASK_PATH.as_posix():
+        raise ValueError("active task path is fixed by TASK-057")
+    supported_paths = tuple(HANDOFF_IDENTITIES.values())
+    if handoff_path is None:
+        tree_paths = set(
+            _git(repo, "ls-tree", "-r", "--name-only", resolved_head, "--", "ai/handoffs")
+            .strip()
+            .splitlines()
+        )
+        selected_path = next(
+            (path for path in reversed(supported_paths) if path.as_posix() in tree_paths),
+            None,
+        )
+        if selected_path is None:
+            raise ValueError("exact Git Head has no supported TASK-057 Repair Handoff")
+        handoff_posix = selected_path.as_posix()
+    else:
+        selected_path = PurePosixPath(handoff_path)
+        if selected_path not in supported_paths:
+            raise ValueError("Handoff path is not supported by TASK-057")
+        handoff_posix = selected_path.as_posix()
     task_files = _git(repo, "ls-tree", "-r", "--name-only", resolved_head, "--", "tasks/active")
     active: list[str] = []
     for path in task_files.splitlines():
@@ -461,7 +501,7 @@ def load_authority_from_git(
     handoff = _load_yaml_text(
         _git(repo, "show", f"{resolved_head}:{handoff_posix}"), "Repair Handoff"
     )
-    authority = build_authority(task, handoff)
+    authority = build_authority(task, handoff, handoff_path=selected_path)
     actual_blob = _git(repo, "rev-parse", f"{resolved_head}:{task_posix}")
     if actual_blob != authority.task_blob:
         raise ValueError("active task blob does not match the frozen Repair Handoff")
