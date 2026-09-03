@@ -1,0 +1,154 @@
+schema_version: 1
+task_id: TASK-057
+packet_version: TASK-057-REPAIR-v4
+plan_version: TASK-057-PLAN-v4
+planning_base_sha: 40e73e6ada8f26494d2e39a4a46a7ec3e3971b31
+expected_base_sha: 872aa7666f8811ad3a1e49b671a9c1290085330a
+expected_pr_base_sha: 872aa7666f8811ad3a1e49b671a9c1290085330a
+task_blob_sha: 3c0abe0055e0eb545d5e8dcbba5b7a88010f8717
+
+allowed_paths:
+  - ai/packets/TASK-057-MYPY-STUB-COMPAT-v4.md
+  - ai/handoffs/TASK-057-REPAIR-v4.yaml
+  - scripts/validate_specs.py
+  - scripts/validate_agent_environment.py
+  - tests/spec/test_validate_agent_environment.py
+
+codex_only_paths:
+  - ai/handoffs/TASK-057-IMPLEMENTATION-v1.yaml
+  - ai/handoffs/TASK-057-REPAIR-v2.yaml
+  - ai/handoffs/TASK-057-REPAIR-v3.yaml
+  - ai/handoffs/TASK-057-REPAIR-v4.yaml
+
+required_lanes:
+  - lane: portable
+    capability: portable
+    minimum_records: 1
+    commands:
+      - poetry run python scripts/validate_specs.py
+      - poetry run pytest tests/spec/test_validate_specs.py tests/spec/test_miniqmt_m1_delivery_governance.py tests/spec/test_codex_cline_collaboration_governance.py tests/spec/test_validate_ai_handoff.py tests/spec/test_agent_execution_environment_governance.py tests/spec/test_validate_agent_environment.py
+      - poetry run mypy src scripts
+      - poetry run ruff check scripts/validate_specs.py scripts/validate_agent_environment.py tests/spec/test_agent_execution_environment_governance.py tests/spec/test_validate_agent_environment.py
+      - poetry run ruff format --check scripts/validate_specs.py scripts/validate_agent_environment.py tests/spec/test_agent_execution_environment_governance.py tests/spec/test_validate_agent_environment.py
+      - poetry run python -c "from scripts.validate_specs import extract_front_matter, task_files; active=sorted(str(extract_front_matter(path).get('id')) for path in task_files() if extract_front_matter(path).get('status') == 'active'); assert active == ['TASK-057'], active"
+      - poetry run python scripts/validate_agent_environment.py --help
+      - poetry run python scripts/validate_ai_handoff.py --task tasks/active/TASK-057-tool-neutral-agents-windows-verification-poetry.md --handoff ai/handoffs/TASK-057-REPAIR-v3.yaml --base-ref origin/main --head HEAD
+      - poetry run pytest tests/spec
+      - poetry run pytest tests/contract
+      - poetry run ruff check .
+      - poetry run ruff format --check .
+      - poetry run pre-commit run --all-files
+      - git diff --check origin/main...HEAD
+  - lane: windows
+    capability: windows
+    minimum_records: 1
+    commands:
+      - poetry --version
+      - poetry env info
+      - poetry run python -c "import sys; print(sys.executable); print(sys.version)"
+      - poetry run python -c "import yaml, jsonschema, pytest; print('deps-ok')"
+
+prohibited_lanes:
+  - windows_miniqmt
+
+github_authority:
+  api_origin: https://api.github.com
+  repository: qifuxiao/QuantiQmt
+  pull_request_number: 106
+  base_branch: main
+  head_branch: codex/task-057-final-repair
+  authorized_human_logins:
+    - qifuxiao
+  assignment_comment:
+    id: 5521989518
+    url: https://github.com/qifuxiao/QuantiQmt/pull/106#issuecomment-5521989518
+    api_url: https://api.github.com/repos/qifuxiao/QuantiQmt/issues/comments/5521989518
+    issue_url: https://api.github.com/repos/qifuxiao/QuantiQmt/issues/106
+    author_login: qifuxiao
+    created_at: "2026-09-03T07:11:43Z"
+    updated_at: "2026-09-03T07:11:43Z"
+    body_sha256: 0b25107c5d835871c021450f7ddeaec6b0036dba30511d4fb74367a0a9cef2f0
+    sentinel: QUANTIQMT_GITHUB_AUTHORITY_V1
+    schema_version: 1
+  authorized_producers:
+    - agent_id: task-057-plan-v4-final-codex-windows-1
+      github_login: qfxyyy
+      role: Implementation Agent
+      tool: Codex
+      os: Windows
+      lanes:
+        - portable
+        - windows
+
+repair_context:
+  superseded_head_sha: a268722c4f4d7c25439deb10b0b667895b4aba4f
+  stage: plan_v4_packet_only_human_assignment_frozen
+  packet_identity: TASK-057-MYPY-STUB-COMPAT-v4
+  packet_path: ai/packets/TASK-057-MYPY-STUB-COMPAT-v4.md
+  packet_blob_sha: 9167e7194f8711c50c345524b61232005c48dddf
+  repair_pr_number: 106
+  repair_pr_url: https://github.com/qifuxiao/QuantiQmt/pull/106
+  repair_pr_base_sha: 872aa7666f8811ad3a1e49b671a9c1290085330a
+  packet_only_head_sha: a268722c4f4d7c25439deb10b0b667895b4aba4f
+  assignment:
+    comment_id: 5521989518
+    url: https://github.com/qifuxiao/QuantiQmt/pull/106#issuecomment-5521989518
+    api_url: https://api.github.com/repos/qifuxiao/QuantiQmt/issues/comments/5521989518
+    author_login: qifuxiao
+    created_at: "2026-09-03T07:11:43Z"
+    updated_at: "2026-09-03T07:11:43Z"
+    raw_body_sha256: 0b25107c5d835871c021450f7ddeaec6b0036dba30511d4fb74367a0a9cef2f0
+    sentinel: QUANTIQMT_GITHUB_AUTHORITY_V1
+    schema_version: 1
+    event: ASSIGN
+    sequence: 1
+    single_writer: true
+    agent_id: task-057-plan-v4-final-codex-windows-1
+    github_login: qfxyyy
+    role: Implementation Agent
+    tool: Codex
+    os: Windows
+    lanes:
+      - portable
+      - windows
+    starting_head_sha: a268722c4f4d7c25439deb10b0b667895b4aba4f
+    pr_head_sha: a268722c4f4d7c25439deb10b0b667895b4aba4f
+  note: >-
+    PR #106 remains the packet-only Implementation PR. The assigned
+    Implementation Agent's first writer action must synchronize this exact
+    Coordinator-authored Handoff commit into that PR without rewriting the
+    Handoff, rebasing, force-pushing, or changing implementation paths first.
+
+required_outcome:
+  - Preserve historical TASK-057-PLAN-v3 and TASK-057-REPAIR-v3 authority while adding exact TASK-057-PLAN-v4 and TASK-057-REPAIR-v4 identity support.
+  - Reject unknown, mixed, or mismatched Plan and Handoff identities while preserving the exact historical PR #100 Head test.
+  - Add current v4 positive and identity-mismatch tests before implementation.
+  - Make only the two jsonschema imports in scripts/validate_specs.py and scripts/validate_agent_environment.py compatible with strict mypy without changing validator runtime behavior.
+  - Prove the same exact implementation Head passes poetry run mypy src scripts with exit code 0 in an actual lock-compatible environment without types-jsonschema and an actual Reviewer-class environment with types-jsonschema.
+  - Preserve the exact required portable and Windows lanes, prohibit windows_miniqmt, and retain every Mini QMT and trading-side-effect prohibition.
+
+execution_constraints:
+  handoff_branch: codex/task-057-final-repair-handoff
+  handoff_commit_must_be_add_only_from_exact_base: true
+  assigned_writer_first_action_must_sync_handoff_without_rewrite: true
+  implementation_pr_must_remain_open: true
+  direct_push_to_implementation_pr_by_coordinator: forbidden
+  direct_push_to_main: forbidden
+  rebase: forbidden
+  force_push: forbidden
+  self_approve: forbidden
+  merge: forbidden
+  closeout: forbidden
+  modify_handoff_records: forbidden
+  modify_historical_handoffs_v1_v2_v3: forbidden
+  modify_task_or_spec: forbidden
+  modify_business_code_dependencies_lockfile_mypy_config_or_ci: forbidden
+  modify_scripts_or_tests_before_handoff_sync: forbidden
+  miniqmt_connection_account_access_order_or_cancellation: forbidden
+  expected_commands_from_caller_or_evidence: forbidden
+  caller_pr_head_number_or_branch_authority: forbidden
+  local_assignment_document_authority: forbidden
+  github_api_methods_other_than_get: forbidden
+  github_api_redirects: forbidden
+  github_api_failure_mode: fail_closed
+  github_test_network_access: forbidden
