@@ -6,6 +6,7 @@ depends_on: [TASK-055, TASK-056]
 spec_refs: []
 allowed_paths:
   - AGENTS.md
+  - .github/workflows/ci.yml
   - ai/adapters/codex.md
   - ai/adapters/cline.md
   - ai/handoffs/TASK-057-IMPLEMENTATION-v1.yaml
@@ -38,7 +39,6 @@ forbidden_paths:
   - pyproject.toml
   - poetry.lock
   - poetry.toml
-  - .github/**
   - .clinerules/**
   - scripts/validate_ai_handoff.py
   - tests/unit/**
