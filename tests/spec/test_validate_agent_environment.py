@@ -22,6 +22,7 @@ ASSIGNMENT_SCHEMA_PATH = ROOT / "ai/schemas/agent-assignment.schema.yaml"
 EVIDENCE_SCHEMA_PATH = ROOT / "ai/schemas/agent-environment-evidence.schema.yaml"
 REPOSITORY = "qifuxiao/QuantiQmt"
 PR = 100
+PLAN_V3_HEAD = "86b5a75585f646c7faf667645694776ac4273c20"
 BRANCH = "codex/task-057-implementation"
 BASE = "7be471949dbce8278b5ce7681384ef987b0fbc86"
 STARTING_HEAD = "03d5c425143c2101a82ccd64d752c770886117d6"
@@ -277,7 +278,7 @@ def test_formal_schemas_are_valid_draft_2020_12() -> None:
 def test_git_loader_reads_exact_plan_v3_authority() -> None:
     authority = validator.load_authority_from_git(
         ROOT,
-        head="HEAD",
+        head=PLAN_V3_HEAD,
         task_path=TASK_PATH.relative_to(ROOT),
         handoff_path=HANDOFF_PATH.relative_to(ROOT),
     )
