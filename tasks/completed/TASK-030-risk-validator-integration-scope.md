@@ -19,19 +19,34 @@ delivery:
   schema_version: 1
   contract_status: accepted
   implementation_status: merged
-  acceptance_status: unverified
-  review_status: reported_unverified
+  acceptance_status: passed
+  review_status: approved
   release_status: prohibited
-  remediation_task: TASK-031
   completion_evidence:
-    mode: historical_git_verified_review_unavailable
+    mode: present_day_retrospective_revalidation_with_human_accepted_historical_exceptions
     change_pr: https://github.com/qifuxiao/QuantiQmt/pull/44
     reviewed_head_sha: e7c087fc1292f1c57d8352112802ed60f99e9466
-    review_verdict: reported_unverified
-    reviewer: unverifiable
-    evidence_url: unverifiable
+    review_verdict: APPROVE
+    reviewer: qfxyyy
+    evidence_url: https://github.com/qifuxiao/QuantiQmt/pull/44#issuecomment-5537520348
     merge_commit_sha: 238b0ac2c3c82de88c59a900feca8cbb71d38863
-    human_authorization_evidence: unverifiable
+    scope_change_pr: https://github.com/qifuxiao/QuantiQmt/pull/42
+    scope_reviewed_head_sha: c9b2ce5895a7ffce109ee3e391fc633304415f0f
+    scope_merge_commit_sha: 03cdc5b816e1b5ec7c40a63929ed35f486abe9dd
+    retrospective_review_created_at: '2026-09-04T07:59:47Z'
+    retrospective_review_body_sha256: df3e5858b7b28e7598279a484d4bec18bcb9130280d78010602ad67709096e54
+    historical_exceptions: >-
+      PR #44 performed ready-to-completed rather than active-to-completed, and
+      the completed TASK-030 destination path was absent from the historical
+      allowed_paths. Neither PR #42 nor PR #44 had a historical GitHub Review.
+      These facts remain disclosed and were accepted only as TASK-030
+      retrospective non-product governance exceptions by Human comment
+      5537337617; this record does not claim historical pre-merge Approval.
+    human_authorization_evidence: >-
+      Retrospective authorization comment 5536869310 by qifuxiao, prior
+      REQUEST_CHANGES comment 5537295515, and historical exception resolution
+      comment 5537337617 by qifuxiao. The final present-day independent
+      retrospective APPROVE is comment 5537520348 by qfxyyy.
 ---
 
 # Objective
@@ -48,12 +63,12 @@ delivery:
 
 ## Acceptance criteria
 
-- [ ] TASK-029 allowed_paths 包含 Risk DTO/Audit/Runner/Evaluator 及对应 unit/property tests；
-- [ ] TASK-029 的 forbidden_paths 不再与上述 Risk 路径冲突；
-- [ ] TASK-029 明确 Schema → semantic → freeze 的统一生产调用路径；
-- [ ] 不扩大到其他任务；
-- [ ] 任务依赖无循环，TASK-005 仍为 blocked；
-- [ ] TASK-030 仅修改任务治理元数据，不修改业务代码或规范实现。
+- [x] TASK-029 allowed_paths 包含 Risk DTO/Audit/Runner/Evaluator 及对应 unit/property tests；
+- [x] TASK-029 的 forbidden_paths 不再与上述 Risk 路径冲突；
+- [x] TASK-029 明确 Schema → semantic → freeze 的统一生产调用路径；
+- [x] 不扩大到其他任务；
+- [x] 任务依赖无循环，TASK-005 仍为 blocked；
+- [x] TASK-030 仅修改任务治理元数据，不修改业务代码或规范实现。
 
 ## Risks and rollback
 
