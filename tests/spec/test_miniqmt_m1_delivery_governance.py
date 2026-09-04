@@ -18,9 +18,36 @@ def _yaml(relative_path: str) -> dict[str, object]:
     return value
 
 
-def test_tasks_054_055_056_057_are_completed_and_no_task_is_active() -> None:
+def test_tasks_054_055_056_057_are_completed_and_task_029_is_active() -> None:
     active = sorted((ROOT / "tasks" / "active").glob("TASK-*.md"))
-    assert active == []
+    task_029_path = ROOT / "tasks/active/TASK-029-risk-runtime-schema-contract.md"
+    assert active == [task_029_path]
+
+    task_029 = extract_front_matter(task_029_path)
+    assert task_029["status"] == "active"
+    assert task_029["depends_on"] == ["TASK-015", "TASK-030", "TASK-031"]
+    assert task_029["delivery"] == {
+        "schema_version": 1,
+        "contract_status": "accepted",
+        "implementation_status": "not_started",
+        "acceptance_status": "not_run",
+        "review_status": "pending",
+        "release_status": "prohibited",
+    }
+    assert "remediation_task" not in task_029["delivery"]
+    assert "completion_evidence" not in task_029["delivery"]
+    for authorized_path in (
+        "ai/packets/TASK-029-IMPLEMENTATION-v1.md",
+        "ai/handoffs/TASK-029-IMPLEMENTATION-v1.yaml",
+        "tasks/completed/TASK-029-risk-runtime-schema-contract.md",
+    ):
+        assert authorized_path in task_029["allowed_paths"]
+
+    task_029_text = _text("tasks/active/TASK-029-risk-runtime-schema-contract.md")
+    assert "TASK-029-PLAN-v1" in task_029_text
+    assert "286c3901b3801fd752feaaf615167cef248a9494" in task_029_text
+    assert "无需读取源码 `spec/**`" in task_029_text
+    assert "Schema validation → semantic validation → freeze" in task_029_text
 
     completed = ROOT / "tasks/completed/TASK-054-miniqmt-m1-delivery-governance.md"
     task_054 = extract_front_matter(completed)
@@ -71,10 +98,16 @@ def test_tasks_054_055_056_057_are_completed_and_no_task_is_active() -> None:
 
     paused = ROOT / "tasks/backlog/TASK-053-dependency-sequencing-governance.md"
     assert extract_front_matter(paused)["status"] == "blocked"
+    task_005_path = ROOT / "tasks/backlog/TASK-005-risk-engine.md"
+    assert extract_front_matter(task_005_path)["status"] == "blocked"
 
     entries = _yaml("tasks/index.yaml")["tasks"]
     assert isinstance(entries, list)
     indexed = {entry["id"]: entry for entry in entries}
+    assert indexed["TASK-005"]["path"].startswith("backlog/")
+    assert indexed["TASK-005"]["status"] == "blocked"
+    assert indexed["TASK-029"]["path"] == ("active/TASK-029-risk-runtime-schema-contract.md")
+    assert indexed["TASK-029"]["status"] == "active"
     assert indexed["TASK-053"]["path"].startswith("backlog/")
     assert indexed["TASK-053"]["status"] == "blocked"
     assert indexed["TASK-054"]["path"].startswith("completed/")
