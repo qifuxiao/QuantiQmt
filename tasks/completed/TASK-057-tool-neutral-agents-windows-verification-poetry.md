@@ -120,10 +120,11 @@ delivery:
       4/4 exact-Head GitHub jobs succeeded: quality and persistence-postgresql
       in workflow runs 33735706608 and 33735710134.
     environment_evidence: >-
-      Corrected dual-environment evidence is the unedited Human-authored comment
+      Corrected dual-environment evidence is the unedited Implementation-Agent-authored comment
       https://github.com/qifuxiao/QuantiQmt/pull/106#issuecomment-5526914844;
-      both retained environments ran the original mypy command at reviewed Head
-      with exit 0, respectively without and with types-jsonschema.
+      it was subsequently accepted by the Human closeout authorization. Both retained
+      environments ran the original mypy command at reviewed Head with exit 0,
+      respectively without and with types-jsonschema.
     waiver_evidence: >-
       The historical Plan v3 Handoff command remains exit 1 and is
       WAIVED_BY_HUMAN only under
