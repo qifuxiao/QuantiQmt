@@ -16,7 +16,10 @@ from scripts import validate_agent_environment as validator
 from scripts.validate_specs import extract_front_matter
 
 ROOT = Path(__file__).resolve().parents[2]
-TASK_PATH = ROOT / "tasks/active/TASK-057-tool-neutral-agents-windows-verification-poetry.md"
+TASK_PATH = ROOT / "tasks/completed/TASK-057-tool-neutral-agents-windows-verification-poetry.md"
+FROZEN_ACTIVE_TASK_PATH = (
+    ROOT / "tasks/active/TASK-057-tool-neutral-agents-windows-verification-poetry.md"
+)
 HANDOFF_V3_PATH = ROOT / "ai/handoffs/TASK-057-REPAIR-v3.yaml"
 HANDOFF_V4_PATH = ROOT / "ai/handoffs/TASK-057-REPAIR-v4.yaml"
 ASSIGNMENT_SCHEMA_PATH = ROOT / "ai/schemas/agent-assignment.schema.yaml"
@@ -24,6 +27,7 @@ EVIDENCE_SCHEMA_PATH = ROOT / "ai/schemas/agent-environment-evidence.schema.yaml
 REPOSITORY = "qifuxiao/QuantiQmt"
 PR = 100
 PLAN_V3_HEAD = "86b5a75585f646c7faf667645694776ac4273c20"
+PLAN_V4_HEAD = "07c3abd29fd1d7b5feffa5c8b5845c2c4d057d1c"
 BRANCH = "codex/task-057-implementation"
 BASE = "7be471949dbce8278b5ce7681384ef987b0fbc86"
 STARTING_HEAD = "03d5c425143c2101a82ccd64d752c770886117d6"
@@ -35,7 +39,10 @@ EVIDENCE_URL = "https://github.com/qifuxiao/QuantiQmt/pull/100#issuecomment-5509
 
 
 def _task() -> dict[str, Any]:
-    return copy.deepcopy(extract_front_matter(TASK_PATH))
+    task = copy.deepcopy(extract_front_matter(TASK_PATH))
+    assert task["status"] == "completed"
+    task["status"] = "active"  # Explicit historical fixture for the frozen validator contract.
+    return task
 
 
 def _handoff(path: Path = HANDOFF_V3_PATH) -> dict[str, Any]:
@@ -280,7 +287,7 @@ def test_git_loader_reads_exact_plan_v3_authority() -> None:
     authority = validator.load_authority_from_git(
         ROOT,
         head=PLAN_V3_HEAD,
-        task_path=TASK_PATH.relative_to(ROOT),
+        task_path=FROZEN_ACTIVE_TASK_PATH.relative_to(ROOT),
         handoff_path=HANDOFF_V3_PATH.relative_to(ROOT),
     )
     assert authority.task_id == "TASK-057"
@@ -294,7 +301,8 @@ def test_git_loader_reads_exact_plan_v3_authority() -> None:
 def test_git_loader_reads_exact_plan_v4_authority() -> None:
     authority = validator.load_authority_from_git(
         ROOT,
-        head="HEAD",
+        head=PLAN_V4_HEAD,
+        task_path=FROZEN_ACTIVE_TASK_PATH.relative_to(ROOT),
     )
     assert authority.task_id == "TASK-057"
     assert authority.plan_version == "TASK-057-PLAN-v4"

@@ -9,7 +9,7 @@ from scripts import validate_agent_environment
 from scripts.validate_specs import extract_front_matter
 
 ROOT = Path(__file__).resolve().parents[2]
-TASK = ROOT / "tasks/active/TASK-057-tool-neutral-agents-windows-verification-poetry.md"
+TASK = ROOT / "tasks/completed/TASK-057-tool-neutral-agents-windows-verification-poetry.md"
 HANDOFF = ROOT / "ai/handoffs/TASK-057-REPAIR-v3.yaml"
 
 SHARED_GOVERNANCE_FILES = (
@@ -154,6 +154,8 @@ def test_task022_keeps_history_and_appends_environment_erratum() -> None:
 
 def test_formal_validator_is_integrated_with_frozen_task_and_handoff() -> None:
     task = extract_front_matter(TASK)
+    assert task["status"] == "completed"
+    task["status"] = "active"  # Historical validator fixture from implementation time.
     handoff = yaml.safe_load(HANDOFF.read_text(encoding="utf-8"))
     authority = validate_agent_environment.build_authority(task, handoff)
     assert authority.task_id == "TASK-057"

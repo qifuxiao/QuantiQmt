@@ -1,7 +1,7 @@
 ---
 id: TASK-057
 title: Generalize implementation agents and environment verification lanes
-status: active
+status: completed
 depends_on: [TASK-055, TASK-056]
 spec_refs: []
 allowed_paths:
@@ -102,10 +102,39 @@ verification:
 delivery:
   schema_version: 1
   contract_status: not_applicable
-  implementation_status: in_progress
-  acceptance_status: partial
-  review_status: changes_requested
+  implementation_status: merged
+  acceptance_status: passed
+  review_status: approved
   release_status: prohibited
+  completion_evidence:
+    mode: governance_closeout_after_independent_review
+    change_pr: https://github.com/qifuxiao/QuantiQmt/pull/106
+    reviewed_head_sha: 07c3abd29fd1d7b5feffa5c8b5845c2c4d057d1c
+    review_verdict: APPROVE
+    reviewer: qifuxiao
+    evidence_url: https://github.com/qifuxiao/QuantiQmt/pull/106#pullrequestreview-5103285031
+    merge_commit_sha: 56b1655780b0917fcef1e2016796d5b4efe3c8ef
+    review_submitted_at: '2026-09-03T14:38:50Z'
+    merge_completed_at: '2026-09-03T14:39:26Z'
+    ci_evidence: >-
+      4/4 exact-Head GitHub jobs succeeded: quality and persistence-postgresql
+      in workflow runs 33735706608 and 33735710134.
+    environment_evidence: >-
+      Corrected dual-environment evidence is the unedited Implementation-Agent-authored comment
+      https://github.com/qifuxiao/QuantiQmt/pull/106#issuecomment-5526914844;
+      it was subsequently accepted by the Human closeout authorization. Both retained
+      environments ran the original mypy command at reviewed Head with exit 0,
+      respectively without and with types-jsonschema.
+    waiver_evidence: >-
+      The historical Plan v3 Handoff command remains exit 1 and is
+      WAIVED_BY_HUMAN only under
+      https://github.com/qifuxiao/QuantiQmt/pull/106#issuecomment-5523426898;
+      it is not represented as passed and the waiver covers no other command.
+    human_authorization_evidence: >-
+      Human closeout authorization is the unedited comment
+      https://github.com/qifuxiao/QuantiQmt/pull/106#issuecomment-5527455377,
+      comment 5527455377 by qifuxiao at 2026-09-03T14:42:10Z, raw-body
+      SHA-256 34c3b51f8e4a99f7ea6b6e510cce12edfd713bcd366b103e19b58a66d95c53c4.
 ---
 
 # Objective
@@ -495,42 +524,43 @@ mypy兼容Repair。任何新Repair身份只能来自上述Plan v4顺序及未来
 
 ## Acceptance criteria
 
-- [ ] Plan v4严格执行amendment merge、packet-only PR、Human canonical assignment、add-only
+- [x] Plan v4严格执行amendment merge、packet-only PR、Human canonical assignment、add-only
   v4 Handoff、assigned writer首次同步、再实施修复的顺序，且PR #103永不复用。
-- [ ] v1/v2/v3 Handoff byte-for-byte不变；v4只冻结新Repair PR及双环境mypy兼容Repair。
-- [ ] 同一精确Repair Head在无types-jsonschema和有types-jsonschema环境均通过原始mypy命令，
+- [x] v1/v2/v3 Handoff byte-for-byte不变；v4只冻结新Repair PR及双环境mypy兼容Repair。
+- [x] 同一精确Repair Head在无types-jsonschema和有types-jsonschema环境均通过原始mypy命令，
   且未改依赖、lockfile、mypy严格度、原始命令或validator运行时行为。
-- [ ] 共享规则使用 Implementation Agent而非把实现角色绑定到Cline；adapter仍可保留工具名。
-- [ ] Agent分配/切换记录tool、OS、starting Head、人类evidence和单写者停止点。
-- [ ] Assignment采用有序事件模型；乱序、双writer或stop/switch/PR Head不一致时fail-closed。
-- [ ] Repair v3 Handoff冻结repository、PR、base/head branch、Human allowlist、assignment
+- [x] 共享规则使用 Implementation Agent而非把实现角色绑定到Cline；adapter仍可保留工具名。
+- [x] Agent分配/切换记录tool、OS、starting Head、人类evidence和单写者停止点。
+- [x] Assignment采用有序事件模型；乱序、双writer或stop/switch/PR Head不一致时fail-closed。
+- [x] Repair v3 Handoff冻结repository、PR、base/head branch、Human allowlist、assignment
   comment identity/digest和授权producer；CLI/evidence不得覆盖。
-- [ ] 正式gate通过固定GitHub API实时确认PR OPEN及当前Base/Head/branch；旧Head即使同时作为
+- [x] 正式gate通过固定GitHub API实时确认PR OPEN及当前Base/Head/branch；旧Head即使同时作为
   两个caller参数也不能通过，且不再暴露不可信`--pr-head/--pr/--branch`authority接口。
-- [ ] Human assignment comment必须实际存在于同repo/PR、由授权Human发布、未编辑且正文digest/
+- [x] Human assignment comment必须实际存在于同repo/PR、由授权Human发布、未编辑且正文digest/
   machine-readable事件匹配；不存在、跨repo、错误author或事件错配失败。
-- [ ] Environment evidence comment必须实际存在、未编辑且author/producer identity绑定active
+- [x] Environment evidence comment必须实际存在、未编辑且author/producer identity绑定active
   assignment；Cline/Linux assignment不能被未单独授权的Codex/Windows自报满足。
-- [ ] portable、windows、windows_miniqmt lane职责、能力和required/pending/BLOCKED语义明确。
-- [ ] Linux Cline执行全部可移植验证，但不能执行或声称Windows/Mini QMT验收。
-- [ ] Windows环境证据绑定精确Head；Head变化使旧证据和Review失效。
-- [ ] 模拟委托需要独立active task和人类明确授权；真实资金始终禁止。
-- [ ] Codex adapter要求最小沙箱外Poetry权限、原始命令和worktree环境兼容检查。
-- [ ] SymbolicLink零长度或sandbox拒绝不能被当作Poetry损坏、依赖缺失或重装理由。
-- [ ] build/contract流程保护既有dist，只清理本轮可归因产物，最终contract为0 skipped。
-- [ ] TASK-022保留历史并追加可审计勘误，当前结论明确为sandbox访问边界。
-- [ ] task template、Mini QMT Prompt、协作workflow和Implementation Report字段一致。
-- [ ] 正式schema和`validate_agent_environment.py`是唯一machine gate；测试不复制主逻辑。
-- [ ] validator只从精确task/Handoff读取identity和expected commands，拒绝caller/evidence覆盖。
-- [ ] task以结构化非空声明要求`portable`和`windows`，并禁止`windows_miniqmt`；Repair v3
+- [x] portable、windows、windows_miniqmt lane职责、能力和required/pending/BLOCKED语义明确。
+- [x] Linux Cline执行全部可移植验证，但不能执行或声称Windows/Mini QMT验收。
+- [x] Windows环境证据绑定精确Head；Head变化使旧证据和Review失效。
+- [x] 模拟委托需要独立active task和人类明确授权；真实资金始终禁止。
+- [x] Codex adapter要求最小沙箱外Poetry权限、原始命令和worktree环境兼容检查。
+- [x] SymbolicLink零长度或sandbox拒绝不能被当作Poetry损坏、依赖缺失或重装理由。
+- [x] build/contract流程保护既有dist，只清理本轮可归因产物，最终contract为0 skipped。
+- [x] TASK-022保留历史并追加可审计勘误，当前结论明确为sandbox访问边界。
+- [x] task template、Mini QMT Prompt、协作workflow和Implementation Report字段一致。
+- [x] 正式schema和`validate_agent_environment.py`是唯一machine gate；测试不复制主逻辑。
+- [x] validator只从精确task/Handoff读取identity和expected commands，拒绝caller/evidence覆盖。
+- [x] task以结构化非空声明要求`portable`和`windows`，并禁止`windows_miniqmt`；Repair v3
   Handoff必须原样冻结且validator必须deep-equal交叉校验。
-- [ ] required lane在缺失/空声明、空records、空expected commands、重复或未知lane、混入
+- [x] required lane在缺失/空声明、空records、空expected commands、重复或未知lane、混入
   identity、命令分区遗漏/重复、缺命令或结果不一致时失败，caller/evidence不得覆盖。
-- [ ] command evidence精确覆盖冻结task命令；不依赖POSIX parser解释PowerShell，也不过拟合
+- [x] command evidence精确覆盖冻结task命令；不依赖POSIX parser解释PowerShell，也不过拟合
   当前pytest/mypy参数。
-- [ ] `xtquant`使用可信source + opaque value provenance；未知或敏感值失败，不猜测semver。
-- [ ] 全部治理正反测试、task verification、mypy、Ruff、pre-commit和path audit通过。
-- [ ] 未修改spec、业务代码、migration、依赖、CI、`.clinerules`或其他任务范围。
+- [x] `xtquant`使用可信source + opaque value provenance；未知或敏感值失败，不猜测semver。
+- [x] 全部治理正反测试、task verification、mypy、Ruff、pre-commit和path audit已由精确Head
+  evidence与Human waiver共同满足；Plan v3历史命令保持exit 1 / `WAIVED_BY_HUMAN`，未称为passed。
+- [x] 未修改spec、业务代码、migration、依赖、CI、`.clinerules`或其他任务范围。
 
 ## Required evidence
 

@@ -18,13 +18,9 @@ def _yaml(relative_path: str) -> dict[str, object]:
     return value
 
 
-def test_task_057_is_active_and_tasks_054_055_056_are_completed() -> None:
+def test_tasks_054_055_056_057_are_completed_and_no_task_is_active() -> None:
     active = sorted((ROOT / "tasks" / "active").glob("TASK-*.md"))
-    task_057_path = (
-        ROOT / "tasks/active/TASK-057-tool-neutral-agents-windows-verification-poetry.md"
-    )
-    assert active == [task_057_path]
-    assert extract_front_matter(task_057_path)["status"] == "active"
+    assert active == []
 
     completed = ROOT / "tasks/completed/TASK-054-miniqmt-m1-delivery-governance.md"
     task_054 = extract_front_matter(completed)
@@ -49,6 +45,30 @@ def test_task_057_is_active_and_tasks_054_055_056_are_completed() -> None:
     assert task_056["delivery"]["review_status"] == "approved"
     assert task_056["delivery"]["release_status"] == "prohibited"
 
+    task_057_path = (
+        ROOT / "tasks/completed/TASK-057-tool-neutral-agents-windows-verification-poetry.md"
+    )
+    task_057 = extract_front_matter(task_057_path)
+    assert task_057["status"] == "completed"
+    assert task_057["delivery"]["implementation_status"] == "merged"
+    assert task_057["delivery"]["acceptance_status"] == "passed"
+    assert task_057["delivery"]["review_status"] == "approved"
+    assert task_057["delivery"]["release_status"] == "prohibited"
+    completion = task_057["delivery"]["completion_evidence"]
+    assert completion["change_pr"] == "https://github.com/qifuxiao/QuantiQmt/pull/106"
+    assert completion["reviewed_head_sha"] == ("07c3abd29fd1d7b5feffa5c8b5845c2c4d057d1c")
+    assert completion["review_verdict"] == "APPROVE"
+    assert completion["merge_commit_sha"] == ("56b1655780b0917fcef1e2016796d5b4efe3c8ef")
+    assert "4/4 exact-Head GitHub jobs" in completion["ci_evidence"]
+    assert "WAIVED_BY_HUMAN" in completion["waiver_evidence"]
+    assert "exit 1" in completion["waiver_evidence"]
+    assert "5526914844" in completion["environment_evidence"]
+    assert "5527455377" in completion["human_authorization_evidence"]
+    assert (
+        "34c3b51f8e4a99f7ea6b6e510cce12edfd713bcd366b103e19b58a66d95c53c4"
+        in completion["human_authorization_evidence"]
+    )
+
     paused = ROOT / "tasks/backlog/TASK-053-dependency-sequencing-governance.md"
     assert extract_front_matter(paused)["status"] == "blocked"
 
@@ -63,8 +83,8 @@ def test_task_057_is_active_and_tasks_054_055_056_are_completed() -> None:
     assert indexed["TASK-055"]["status"] == "completed"
     assert indexed["TASK-056"]["path"].startswith("completed/")
     assert indexed["TASK-056"]["status"] == "completed"
-    assert indexed["TASK-057"]["path"].startswith("active/")
-    assert indexed["TASK-057"]["status"] == "active"
+    assert indexed["TASK-057"]["path"].startswith("completed/")
+    assert indexed["TASK-057"]["status"] == "completed"
 
 
 def test_product_rules_make_miniqmt_simulation_account_mandatory_for_m1() -> None:
