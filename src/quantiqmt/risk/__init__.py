@@ -5,6 +5,7 @@ from quantiqmt.risk.audit import (
     build_risk_v1_payload,
     build_risk_v2_envelope,
     project_risk_v1_envelope,
+    validate_risk_audit_output,
 )
 from quantiqmt.risk.evaluator import DeterministicRiskEvaluator
 from quantiqmt.risk.model import (
@@ -46,4 +47,5 @@ __all__ = [
     "hash_without",
     "project_risk_v1_envelope",
     "semantic_decision_hash",
+    "validate_risk_audit_output",
 ]

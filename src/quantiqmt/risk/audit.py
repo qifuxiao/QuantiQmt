@@ -5,7 +5,13 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import cast
 
-from quantiqmt.contracts import MessageEnvelope, SchemaRegistry
+from quantiqmt.contracts import (
+    BundleIntegrityError,
+    ContractError,
+    MessageEnvelope,
+    SchemaRegistry,
+    validate_contract_candidate,
+)
 from quantiqmt.risk.model import (
     MutableJsonValue,
     RiskAuditOutputV1,
@@ -18,8 +24,8 @@ from quantiqmt.risk.model import (
 class RiskAuditSemanticValidator:
     """Executable PORTS-RISK semantic validator for RiskAuditOutputV1."""
 
-    def validate(self, audit: RiskAuditOutputV1) -> None:
-        payload = audit.to_primitive()
+    def validate(self, audit: RiskAuditOutputV1 | Mapping[str, object]) -> None:
+        payload = audit.to_primitive() if isinstance(audit, RiskAuditOutputV1) else audit
         decision = _mapping(payload["decision"], "decision")
         results = _sequence(decision["rule_results"], "rule_results")
         timings = _sequence(payload["rule_timings"], "rule_timings")
@@ -105,8 +111,29 @@ class RiskAuditSemanticValidator:
             )
 
 
+def validate_risk_audit_output(
+    audit: RiskAuditOutputV1, *, registry: SchemaRegistry | None = None
+) -> None:
+    try:
+        validate_contract_candidate(
+            "CONTRACT-RISK-AUDIT-OUTPUT-V1",
+            audit.to_primitive(),
+            semantic_validator=RiskAuditSemanticValidator().validate,
+            registry=registry,
+        )
+    except (BundleIntegrityError, ContractError, TypeError) as exc:
+        detail = str(exc)
+        if len(detail) > 240:
+            detail = detail[:237] + "..."
+        raise RiskContractError(
+            "QQ-RISK-4008",
+            "RISK_INPUT_INVALID",
+            f"CONTRACT-RISK-AUDIT-OUTPUT-V1 validation failed: {detail}",
+        ) from exc
+
+
 def build_risk_v1_payload(audit: RiskAuditOutputV1) -> dict[str, MutableJsonValue]:
-    RiskAuditSemanticValidator().validate(audit)
+    validate_risk_audit_output(audit)
     payload = audit.to_primitive()
     decision = _mapping(payload["decision"], "decision")
     states = _mapping(decision["snapshot_states"], "snapshot_states")
@@ -148,7 +175,7 @@ def build_risk_v2_envelope(
     registry: SchemaRegistry,
     causation_id: str | None,
 ) -> MessageEnvelope:
-    RiskAuditSemanticValidator().validate(audit)
+    validate_risk_audit_output(audit, registry=registry)
     payload = audit.to_primitive()
     decision = _mapping(payload["decision"], "decision")
     input_payload = risk_input.to_primitive()

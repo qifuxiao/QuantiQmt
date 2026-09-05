@@ -21,7 +21,7 @@ def test_installed_schema_bundle_matches_reviewed_manifest() -> None:
     installed = SchemaBundle.installed()
     generated = build_schema_bundle(ROOT / "spec")
 
-    assert installed.manifest_version == "0.14.0"
+    assert installed.manifest_version == "0.15.0"
     assert installed.to_bytes() == generated.to_bytes()
     assert {
         "CONTRACT-MARKET-TICK-RECEIVED-V1",
@@ -30,6 +30,10 @@ def test_installed_schema_bundle_matches_reviewed_manifest() -> None:
         "CONTRACT-MARKET-SESSION-CHANGED-V1",
         "CONTRACT-MARKET-DATA-V1",
         "CONTRACT-MARKET-SEMANTIC-VALIDATION-V1",
+        "CONTRACT-RISK-RULE-RESULT-V1",
+        "CONTRACT-RISK-RULE-TIMING-V1",
+        "CONTRACT-RISK-DECISION-V1",
+        "CONTRACT-RISK-AUDIT-OUTPUT-V1",
     } <= set(installed.contract_ids)
 
 

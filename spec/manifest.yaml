@@ -1,8 +1,8 @@
 specification:
   name: quantiqmt
-  version: 0.14.0
+  version: 0.15.0
   status: accepted
-  updated: 2026-08-27
+  updated: 2026-09-05
   normative_root: spec
   explanatory_root: docs
 
@@ -63,6 +63,10 @@ catalogs:
       path: contracts/events/risk.order_evaluated.v1.schema.json
     - id: CONTRACT-RISK-ORDER-EVALUATED-V2
       path: contracts/events/risk.order_evaluated.v2.schema.json
+    - id: CONTRACT-RISK-RULE-RESULT-V1
+      path: contracts/risk/rule-result.v1.schema.json
+    - id: CONTRACT-RISK-RULE-TIMING-V1
+      path: contracts/risk/rule-timing.v1.schema.json
     - id: CONTRACT-RISK-INPUT-V1
       path: contracts/risk/risk-input.v1.schema.json
     - id: CONTRACT-RISK-RULE-SET-V1
@@ -208,39 +212,37 @@ catalogs:
       path: reviews/IMPLEMENTATION-READINESS-0.7.md
 
 change:
-  id: SPEC-0.14.0-ORDER-REGISTRATION-BINDING-COMPATIBILITY
-  compatibility: additive_internal_OrderRegistration_binding_compatibility_contract; public_MessageEnvelope_Event_Command_and_Result_V1_schemas_unchanged; legacy_rows_and_Journal_Snapshot_payloads_remain_byte_and_checksum_stable; runtime_migration_and_release_prohibited_pending_TASK_048
-  previous_version: 0.13.0
+  id: SPEC-0.15.0-RISK-RUNTIME-SCHEMA-BUNDLE
+  compatibility: additive_internal_Risk_output_schema_identities_and_runtime_bundle_validation; public_MessageEnvelope_Event_DTO_error_reason_rule_order_timeout_reduce_only_metric_and_state_semantics_unchanged
+  previous_version: 0.14.0
   public_message_schema_changes: none
-  storage_schema_changes: "freezes additive nullable broker varchar(64) and broker_capability_version varchar(128) projection columns, complete-or-unbound and trimmed-bound checks, immutability, no historical backfill, and expand-only idempotent migration/rollback sequencing"
+  storage_schema_changes: none
   error_catalog_change: none
-  runtime_code_change: "package_bundle_and_fail_closed_expected_manifest_version_parity_only; no_Order_runtime_SQL_migration_or_Broker_behavior"
-  review_change: "requires independent Review of the exact TASK-050 Head before TASK-048 may be reactivated"
-  contract_change: "freezes BOUND(non-null pair) and legacy UNBOUND(null pair) OrderRegistration states, rejects partial binding, requires every new registration to be BOUND before Repository write, and prohibits TASK-048 legacy rebinding"
-  semantic_validation_change: "freezes legacy missing-field parsing after raw checksum verification, no injected-null recanonicalization, Journal-authoritative projection/rebuild binding, submit/cancel rejection before dispatch, and prohibition on ambient/current capability inference"
-  internal_contracts_added: []
+  runtime_code_change: package_resource_only_checksum_verified_Risk_schema_graph_and_shared_schema_semantic_freeze_boundary
+  review_change: requires_independent_Review_of_exact_TASK_029_Head_before_TASK_005_may_be_separately_activated
+  contract_change: adds_formal_RuleResult_and_RuleTiming_fragment_identities_and_routes_existing_Decision_Audit_and_v2_through_one_graph
+  semantic_validation_change: preserves_PORTS_RISK_first_failure_order_and_requires_schema_before_semantics_before_deep_freeze
+  internal_contracts_added: [CONTRACT-RISK-RULE-RESULT-V1, CONTRACT-RISK-RULE-TIMING-V1]
   public_contracts_added: []
-  task_queue_change: "creates and activates TASK-050 under 2026-08-27 human authorization; TASK-048 now depends on TASK-050 and remains blocked; TASK-006 and all downstream tasks remain blocked"
-  affected_tasks: [TASK-006, TASK-017, TASK-048, TASK-050]
+  task_queue_change: TASK_029_remains_active_and_TASK_005_remains_blocked_pending_exact_Head_Review_and_separate_Human_authorization
+  affected_tasks: [TASK-005, TASK-029]
   deployment_order:
-    - independently_review_merge_and_close_TASK_050
-    - separately_reactivate_TASK_048_after_trusted_TASK_050_closeout
-    - enter_SAFE_and_quiesce_registration_writers
-    - apply_TASK_048_expand_only_nullable_column_migration_without_backfill
-    - deploy_compatible_reader_before_BOUND_writer
-    - verify_new_registration_binding_and_legacy_UNBOUND_recovery
-    - verify_Journal_Snapshot_projection_and_full_replay_parity
-    - keep_Broker_dispatch_disabled_until_TASK_048_trusted_closeout
+    - build_and_verify_the_versioned_package_resource
+    - deploy_the_verified_reader_and_validator_before_enabling_any_Risk_output_consumer
+    - keep_Risk_and_trading_gates_closed_on_bundle_or_validation_failure
+    - independently_review_the_exact_TASK_029_Head
+    - keep_TASK_005_blocked_until_separate_Human_authority
   migration:
-    runtime_data: "none in TASK-050; TASK-048 readers map missing legacy fields or a null pair to UNBOUND only after validating the exact stored Journal/Snapshot checksum and never infer either value"
+    runtime_data: replace_the_installed_package_bundle_atomically_without_data_backfill_or_source_spec_lookup
     public_messages: unchanged
-    storage: "none in TASK-050; TASK-048 owns an idempotent expand-only migration adding nullable broker/broker_capability_version columns with complete-or-unbound checks, no backfill and preserved historical rows"
-    task_queue: "TASK-050 active; TASK-048 blocked on TASK-050 independent Review and trusted closeout; TASK-006 remains blocked on TASK-005 and TASK-048"
+    storage: none
+    task_queue: TASK_029_active_and_TASK_005_blocked
     destructive_backfill: forbidden
   rollback:
-    runtime_data: "before TASK-048 adoption revert only TASK-050 contract text/tests; after adoption stop writer and dispatch before reader rollback and preserve BOUND/UNBOUND identity"
+    runtime_data: stop_Risk_output_consumers_and_install_a_previous_accepted_package_bundle_without_source_fallback
     public_messages: unchanged
-    task_queue: "keep TASK-048, TASK-006 and downstream tasks blocked if TASK-050 evidence is invalidated"
-    contracts: "never reinterpret UNBOUND as BOUND and never remove the requirement for separate reviewed append-only repair semantics"
-    storage: "TASK-050 creates no database object; future rollback must preserve additive columns, bindings, Journal, Snapshot and audit evidence and must not backfill, DROP, DELETE or overwrite history"
+    task_queue: keep_TASK_005_blocked_if_TASK_029_evidence_is_invalidated
+    contracts: retain_published_Event_DTO_error_reason_and_state_semantics
+    storage: none
     release: prohibited
+  release: prohibited

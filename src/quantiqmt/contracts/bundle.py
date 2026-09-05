@@ -13,11 +13,19 @@ from types import MappingProxyType
 from typing import Any, cast
 
 BUNDLE_SCHEMA_VERSION = 1
-EXPECTED_MANIFEST_VERSION = "0.14.0"
+EXPECTED_MANIFEST_VERSION = "0.15.0"
 _MANIFEST_VERSION = re.compile(r"(?m)^  version:\s*([^\s#]+)\s*$")
 _CONTRACT_ID = re.compile(r"^    - id:\s*([^\s#]+)\s*$")
 _CONTRACT_PATH = re.compile(r"^      path:\s*([^\s#]+)\s*$")
 _CATALOG_ENTRY = re.compile(r"name:\s*([^,}]+).*?schema:\s*([^,}]+).*?status:\s*active")
+_SHA256 = re.compile(r"^[0-9a-f]{64}$")
+_REQUIRED_RISK_CONTRACTS = {
+    "CONTRACT-RISK-RULE-RESULT-V1": "contracts/risk/rule-result.v1.schema.json",
+    "CONTRACT-RISK-RULE-TIMING-V1": "contracts/risk/rule-timing.v1.schema.json",
+    "CONTRACT-RISK-DECISION-V1": "contracts/risk/risk-decision.v1.schema.json",
+    "CONTRACT-RISK-AUDIT-OUTPUT-V1": "contracts/risk/risk-audit-output.v1.schema.json",
+    "CONTRACT-RISK-ORDER-EVALUATED-V2": ("contracts/events/risk.order_evaluated.v2.schema.json"),
+}
 
 
 class BundleIntegrityError(ValueError):
@@ -80,6 +88,27 @@ class SchemaBundle:
             if route["path"] == path:
                 return route["document"]
         raise BundleIntegrityError(f"contract path is not present in installed bundle: {path}")
+
+    def schema_by_uri(self, uri: str) -> Mapping[str, Any]:
+        """Resolve one bundled JSON Schema URI and optional JSON Pointer."""
+        base, separator, fragment = uri.partition("#")
+        candidates_by_path = {
+            cast(str, entry["path"]): entry["document"]
+            for entry in (*self._document["contracts"], *self._document["routes"])
+            if isinstance(entry, Mapping)
+            and isinstance(entry.get("path"), str)
+            and isinstance(entry.get("document"), Mapping)
+            and entry["document"].get("$id") == base
+        }
+        candidates = list(candidates_by_path.values())
+        if len(candidates) != 1:
+            raise BundleIntegrityError(f"schema URI is not uniquely resolved: {base}")
+        target: Any = candidates[0]
+        if separator:
+            target = _resolve_json_pointer(target, fragment, base, uri)
+        if not isinstance(target, Mapping):
+            raise BundleIntegrityError(f"schema URI does not resolve to an object: {uri}")
+        return cast(Mapping[str, Any], target)
 
     def to_bytes(self) -> bytes:
         return _serialize_bundle(_deep_thaw(self._document))
@@ -316,9 +345,9 @@ def _walk_refs(value: Any) -> Iterator[str]:
             yield from _walk_refs(item)
 
 
-def _resolve_json_pointer(document: Any, fragment: str, path: str, reference: str) -> None:
+def _resolve_json_pointer(document: Any, fragment: str, path: str, reference: str) -> Any:
     if fragment == "":
-        return
+        return document
     if not fragment.startswith("/"):
         raise BundleIntegrityError(f"unsupported schema reference: {path} -> {reference}")
     current = document
@@ -327,6 +356,7 @@ def _resolve_json_pointer(document: Any, fragment: str, path: str, reference: st
         if not isinstance(current, Mapping) or part not in current:
             raise BundleIntegrityError(f"unresolved schema reference: {path} -> {reference}")
         current = current[part]
+    return current
 
 
 def _safe_relative(value: str) -> str:
@@ -348,6 +378,7 @@ def _verify_bundle(document: dict[str, Any]) -> None:
         raise BundleIntegrityError("schema bundle is partial")
     ids: set[str] = set()
     paths: set[str] = set()
+    documents_by_path: dict[str, Any] = {}
     for entry in contracts:
         if not isinstance(entry, dict):
             raise BundleIntegrityError("schema bundle contract entry is malformed")
@@ -362,14 +393,35 @@ def _verify_bundle(document: dict[str, Any]) -> None:
             raise BundleIntegrityError("schema bundle contract entry is partial") from exc
         if not all(isinstance(item, str) for item in (contract_id, path, content)):
             raise BundleIntegrityError("schema bundle contract identity is malformed")
+        normalized = _safe_relative(path)
+        if normalized != path:
+            raise BundleIntegrityError("schema bundle contract path is not canonical")
         if contract_id in ids or path in paths:
             raise BundleIntegrityError("schema bundle contains duplicate identity or path")
         ids.add(contract_id)
         paths.add(path)
+        if not isinstance(expected_content, str) or _SHA256.fullmatch(expected_content) is None:
+            raise BundleIntegrityError(f"contract content digest is malformed: {contract_id}")
         if hashlib.sha256(content.encode("utf-8")).hexdigest() != expected_content:
             raise BundleIntegrityError(f"contract content digest mismatch: {contract_id}")
+        if not isinstance(expected_document, str) or _SHA256.fullmatch(expected_document) is None:
+            raise BundleIntegrityError(f"contract document digest is malformed: {contract_id}")
         if _bundle_projection_digest(parsed) != expected_document:
             raise BundleIntegrityError(f"contract document digest mismatch: {contract_id}")
+        if path.endswith(".json") and _parse_contract_document(path, content) != parsed:
+            raise BundleIntegrityError(f"contract content/document mismatch: {contract_id}")
+        if path.endswith(".schema.json"):
+            documents_by_path[path] = parsed
+    identity_paths = {
+        cast(str, entry["id"]): cast(str, entry["path"])
+        for entry in contracts
+        if isinstance(entry, Mapping)
+    }
+    if any(
+        identity_paths.get(contract_id) != path
+        for contract_id, path in _REQUIRED_RISK_CONTRACTS.items()
+    ):
+        raise BundleIntegrityError("schema bundle is missing the required Risk contract graph")
     route_names: set[str] = set()
     for route in routes:
         if not isinstance(route, dict):
@@ -383,10 +435,30 @@ def _verify_bundle(document: dict[str, Any]) -> None:
         if name in route_names:
             raise BundleIntegrityError("schema bundle contains duplicate route")
         route_names.add(name)
+        normalized = _safe_relative(path)
+        if normalized != path:
+            raise BundleIntegrityError("schema bundle route path is not canonical")
         if hashlib.sha256(content.encode("utf-8")).hexdigest() != route.get("sha256"):
             raise BundleIntegrityError(f"route content digest mismatch: {name}")
         if _bundle_projection_digest(route_document) != route.get("document_sha256"):
             raise BundleIntegrityError(f"route document digest mismatch: {name}")
+        if path.endswith(".json") and _parse_contract_document(path, content) != route_document:
+            raise BundleIntegrityError(f"route content/document mismatch: {name}")
+        if path.endswith(".schema.json"):
+            documents_by_path.setdefault(path, route_document)
+    if "risk.order_evaluated.v2" not in route_names:
+        raise BundleIntegrityError("schema bundle is missing the Risk v2 Catalog route")
+    documents_by_id: dict[str, Any] = {}
+    for schema_path, schema in documents_by_path.items():
+        if not isinstance(schema, Mapping):
+            raise BundleIntegrityError(f"JSON Schema root must be an object: {schema_path}")
+        schema_id = schema.get("$id")
+        if isinstance(schema_id, str):
+            if schema_id in documents_by_id:
+                raise BundleIntegrityError(f"duplicate JSON Schema $id: {schema_id}")
+            documents_by_id[schema_id] = schema
+    for schema_path, schema in documents_by_path.items():
+        _validate_schema_references(schema, schema_path, documents_by_path, documents_by_id)
     projection = dict(document)
     projection.pop("bundle_digest", None)
     if not isinstance(digest, str) or _bundle_projection_digest(projection) != digest:

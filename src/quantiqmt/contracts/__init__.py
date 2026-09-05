@@ -9,6 +9,7 @@ from quantiqmt.contracts.errors import (
 )
 from quantiqmt.contracts.model import ImmutablePayload, MessageCodec, MessageEnvelope
 from quantiqmt.contracts.registry import SchemaRegistry
+from quantiqmt.contracts.validation import validate_contract_candidate
 
 __all__ = [
     "BundleIntegrityError",
@@ -21,4 +22,5 @@ __all__ = [
     "SchemaRegistry",
     "UnknownMessageTypeError",
     "UnsupportedSchemaVersionError",
+    "validate_contract_candidate",
 ]
