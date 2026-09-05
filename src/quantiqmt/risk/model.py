@@ -6,12 +6,14 @@ import hashlib
 import json
 import re
 import uuid
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from decimal import ROUND_CEILING, Decimal, InvalidOperation
 from types import MappingProxyType
 from typing import Literal, cast
+
+from quantiqmt.contracts import BundleIntegrityError, ContractError, validate_contract_candidate
 
 JsonValue = None | bool | int | str | tuple["JsonValue", ...] | Mapping[str, "JsonValue"]
 MutableJsonValue = (
@@ -241,11 +243,27 @@ class RuleResult:
         measured_value: Mapping[str, JsonValue] | None,
         limit_value: Mapping[str, JsonValue] | None,
         exception_applied: bool = False,
-        *,
-        _synthetic: bool = False,
     ) -> RuleResult:
-        # Synthetic candidates use -1 until the deterministic sort assigns an index.
-        if not isinstance(evaluation_index, int) or (evaluation_index < 0 and not _synthetic):
+        candidate: dict[str, object] = {
+            "evaluation_index": evaluation_index,
+            "rule_id": rule_id,
+            "phase": phase,
+            "scope": scope,
+            "scope_id": scope_id,
+            "priority": priority,
+            "metric": metric,
+            "result": result,
+            "reason_code": reason_code,
+            "measured_value": thaw_json(measured_value) if measured_value is not None else None,
+            "limit_value": thaw_json(limit_value) if limit_value is not None else None,
+            "exception_applied": exception_applied,
+        }
+        _validate_risk_output_candidate(
+            "CONTRACT-RISK-RULE-RESULT-V1",
+            candidate,
+            _validate_rule_result_semantics,
+        )
+        if not isinstance(evaluation_index, int) or evaluation_index < 0:
             raise RiskContractError(
                 "QQ-RISK-4008", "RISK_INPUT_INVALID", "invalid evaluation index"
             )
@@ -402,6 +420,14 @@ class RuleTiming:
 
     @classmethod
     def _validated(cls, evaluation_index: int, rule_id: str, latency_us: int) -> RuleTiming:
+        candidate = {
+            "evaluation_index": evaluation_index,
+            "rule_id": rule_id,
+            "latency_us": latency_us,
+        }
+        _validate_risk_output_candidate(
+            "CONTRACT-RISK-RULE-TIMING-V1", candidate, _no_output_semantics
+        )
         if not isinstance(evaluation_index, int) or evaluation_index < 0:
             raise RiskContractError("QQ-RISK-4008", "RISK_INPUT_INVALID", "invalid timing index")
         if not isinstance(rule_id, str) or not 1 <= len(rule_id) <= 128:
@@ -459,6 +485,32 @@ class RiskDecisionV1:
         snapshot_states: Mapping[str, JsonValue],
         rule_results: tuple[RuleResult, ...],
     ) -> RiskDecisionV1:
+        candidate_states = thaw_json(snapshot_states)
+        candidate_results: object = rule_results
+        if isinstance(rule_results, (list, tuple)):
+            candidate_results = [
+                item.to_primitive() if isinstance(item, RuleResult) else item
+                for item in rule_results
+            ]
+        candidate: dict[str, object] = {
+            "schema_version": 1,
+            "decision_id": decision_id,
+            "decision_origin": decision_origin,
+            "input_version": input_version,
+            "semantic_decision_hash": semantic_decision_hash,
+            "order_id": order_id,
+            "expected_order_version": expected_order_version,
+            "decision": decision,
+            "primary_reason_code": primary_reason_code,
+            "error_code": error_code,
+            "rule_set_version": rule_set_version,
+            "rule_set_hash": rule_set_hash,
+            "snapshot_states": candidate_states,
+            "rule_results": candidate_results,
+        }
+        _validate_risk_output_candidate(
+            "CONTRACT-RISK-DECISION-V1", candidate, _validate_decision_semantics
+        )
         if decision_origin not in {"EVALUATOR", "INPUT_GUARD", "TIMEOUT_GUARD"}:
             raise RiskContractError("QQ-RISK-4008", "RISK_INPUT_INVALID", "invalid decision origin")
         if decision not in {"PASS", "REJECT"} or not all(
@@ -512,7 +564,7 @@ class RiskDecisionV1:
             )
         if len({item.rule_id for item in rule_results}) != len(rule_results):
             raise RiskContractError("QQ-RISK-4008", "RISK_INPUT_INVALID", "duplicate rule result")
-        states = _as_mutable_mapping(thaw_json(freeze_json(snapshot_states)))
+        states = _as_mutable_mapping(candidate_states)
         if set(states) != {"account", "portfolio", "market"}:
             raise RiskContractError("QQ-RISK-4008", "RISK_INPUT_INVALID", "invalid snapshot states")
         for name, state_obj in states.items():
@@ -670,6 +722,30 @@ class RiskAuditOutputV1:
         completed_rule_count: int,
         rule_timings: tuple[RuleTiming, ...],
     ) -> RiskAuditOutputV1:
+        candidate_timings: object = rule_timings
+        if isinstance(rule_timings, (list, tuple)):
+            candidate_timings = [
+                item.to_primitive() if isinstance(item, RuleTiming) else item
+                for item in rule_timings
+            ]
+        candidate: dict[str, object] = {
+            "schema_version": 1,
+            "decision": (
+                decision.to_primitive() if isinstance(decision, RiskDecisionV1) else decision
+            ),
+            "evaluated_at": evaluated_at,
+            "total_latency_us": total_latency_us,
+            "evaluation_timeout_us": evaluation_timeout_us,
+            "completed_rule_count": completed_rule_count,
+            "rule_timings": candidate_timings,
+        }
+        from quantiqmt.risk.audit import RiskAuditSemanticValidator
+
+        _validate_risk_output_candidate(
+            "CONTRACT-RISK-AUDIT-OUTPUT-V1",
+            candidate,
+            RiskAuditSemanticValidator().validate,
+        )
         if not isinstance(decision, RiskDecisionV1) or not isinstance(evaluated_at, str):
             raise RiskContractError("QQ-RISK-4008", "RISK_INPUT_INVALID", "invalid audit identity")
         _date_time_z(evaluated_at, "$.evaluated_at")
@@ -697,9 +773,6 @@ class RiskAuditOutputV1:
             "rule_timings": tuple(rule_timings),
         }.items():
             object.__setattr__(instance, name, value)
-        from quantiqmt.risk.audit import RiskAuditSemanticValidator
-
-        RiskAuditSemanticValidator().validate(instance)
         return instance
 
     def __post_init__(self) -> None:
@@ -718,6 +791,104 @@ class RiskAuditOutputV1:
                 for timing in self.rule_timings
             ],
         }
+
+
+def _validate_risk_output_candidate(
+    contract_id: str,
+    candidate: Mapping[str, object],
+    semantic_validator: Callable[[Mapping[str, object]], None],
+) -> None:
+    try:
+        validate_contract_candidate(contract_id, candidate, semantic_validator=semantic_validator)
+    except (BundleIntegrityError, ContractError, TypeError) as exc:
+        detail = str(exc)
+        if len(detail) > 240:
+            detail = detail[:237] + "..."
+        raise RiskContractError(
+            "QQ-RISK-4008",
+            "RISK_INPUT_INVALID",
+            f"{contract_id} validation failed: {detail}",
+        ) from exc
+
+
+def _no_output_semantics(_candidate: Mapping[str, object]) -> None:
+    return
+
+
+def _validate_rule_result_semantics(candidate: Mapping[str, object]) -> None:
+    scope = candidate["scope"]
+    scope_id = candidate["scope_id"]
+    if (scope == "SYSTEM" and scope_id is not None) or (
+        scope != "SYSTEM" and not isinstance(scope_id, str)
+    ):
+        raise RiskContractError("QQ-RISK-4008", "RISK_INPUT_INVALID", "scope identity mismatch")
+    metric = candidate["metric"]
+    if metric is not None and metric not in {
+        "TRADING_ENABLED",
+        "INSTRUMENT_ALLOWED",
+        "ORDER_QUANTITY",
+        "ORDER_NOTIONAL",
+        "PRICE_DEVIATION_BPS",
+        "AVAILABLE_CASH",
+        "POSITION_QUANTITY",
+        "PROJECTED_GROSS_EXPOSURE",
+        "PROJECTED_NET_EXPOSURE_ABS",
+        "PROJECTED_LEVERAGE",
+        "DAILY_LOSS",
+        "ORDER_COUNT_WINDOW",
+        "CANCEL_RATIO_BPS",
+    }:
+        raise RiskContractError("QQ-RISK-4008", "RISK_INPUT_INVALID", "invalid metric")
+    result = candidate["result"]
+    reason = candidate["reason_code"]
+    if result == "PASS" and reason not in {
+        "RISK_RULE_PASSED",
+        "RISK_ALL_APPLICABLE_RULES_PASSED",
+        "RISK_REDUCE_ONLY_EXCEPTION_APPLIED",
+    }:
+        raise RiskContractError("QQ-RISK-4008", "RISK_INPUT_INVALID", "pass reason mismatch")
+    if result == "NOT_APPLICABLE" and reason != "RISK_RULE_NOT_APPLICABLE":
+        raise RiskContractError(
+            "QQ-RISK-4008", "RISK_INPUT_INVALID", "not-applicable reason mismatch"
+        )
+    if result == "REJECT" and reason in {
+        "RISK_RULE_PASSED",
+        "RISK_ALL_APPLICABLE_RULES_PASSED",
+        "RISK_RULE_NOT_APPLICABLE",
+    }:
+        raise RiskContractError("QQ-RISK-4008", "RISK_INPUT_INVALID", "reject reason mismatch")
+    if candidate["exception_applied"] is True and (
+        result != "PASS" or reason != "RISK_REDUCE_ONLY_EXCEPTION_APPLIED"
+    ):
+        raise RiskContractError(
+            "QQ-RISK-4008", "RISK_INPUT_INVALID", "exception semantics mismatch"
+        )
+    for field in ("measured_value", "limit_value"):
+        typed = candidate[field]
+        if isinstance(typed, Mapping) and typed.get("kind") == "STRING_SET":
+            values = typed.get("values")
+            if isinstance(values, list) and values != sorted(values):
+                raise RiskContractError(
+                    "QQ-RISK-4008", "RISK_INPUT_INVALID", f"{field} is not canonical"
+                )
+
+
+def _validate_decision_semantics(candidate: Mapping[str, object]) -> None:
+    raw_results = candidate["rule_results"]
+    if not isinstance(raw_results, list):
+        raise RiskContractError("QQ-RISK-4008", "RISK_INPUT_INVALID", "rule results must be array")
+    seen: set[str] = set()
+    for index, raw in enumerate(raw_results):
+        if not isinstance(raw, Mapping) or raw.get("evaluation_index") != index:
+            raise RiskContractError(
+                "QQ-RISK-4008", "RISK_INPUT_INVALID", "non-contiguous rule results"
+            )
+        rule_id = raw.get("rule_id")
+        if not isinstance(rule_id, str) or rule_id in seen:
+            raise RiskContractError("QQ-RISK-4008", "RISK_INPUT_INVALID", "duplicate rule result")
+        seen.add(rule_id)
+    if candidate["semantic_decision_hash"] != _compute_semantic_decision_hash(candidate):
+        raise RiskContractError("QQ-RISK-4008", "RISK_INPUT_INVALID", "semantic hash mismatch")
 
 
 def canonical_json_bytes(value: Mapping[str, object]) -> bytes:

@@ -142,6 +142,8 @@ INTEGER_METRICS = frozenset(
     }
 )
 
+_RuleCandidate = dict[str, object]
+
 
 class DeterministicRiskEvaluator:
     """Synchronous, deterministic, side-effect-free risk evaluator."""
@@ -157,7 +159,7 @@ class DeterministicRiskEvaluator:
         results = _synthetic_results(context)
         for index, result in enumerate(results):
             yield _with_index(result, index)
-        if any(result.result == "REJECT" for result in results):
+        if any(result["result"] == "REJECT" for result in results):
             return
         offset = len(results)
         business_results = [
@@ -242,8 +244,8 @@ class _EvaluationContext:
         )
 
 
-def _synthetic_results(context: _EvaluationContext) -> list[RuleResult]:
-    results: list[RuleResult] = []
+def _synthetic_results(context: _EvaluationContext) -> list[_RuleCandidate]:
+    results: list[_RuleCandidate] = []
     for priority, rule_id in INPUT_GUARDS:
         reason = _input_guard_reason(context, rule_id)
         results.append(
@@ -336,7 +338,7 @@ def _snapshot_guard_reason(context: _EvaluationContext, source: str) -> str | No
         return exc.reason_code
 
 
-def _hard_rule_results(context: _EvaluationContext) -> list[RuleResult]:
+def _hard_rule_results(context: _EvaluationContext) -> list[_RuleCandidate]:
     return [
         _evaluate_metric(
             context,
@@ -355,7 +357,7 @@ def _hard_rule_results(context: _EvaluationContext) -> list[RuleResult]:
     ]
 
 
-def _dynamic_rule_result(context: _EvaluationContext, rule: Mapping[str, object]) -> RuleResult:
+def _dynamic_rule_result(context: _EvaluationContext, rule: Mapping[str, object]) -> _RuleCandidate:
     scope = cast(RuleScope, _str(rule.get("scope"), "scope"))
     scope_id = rule.get("scope_id")
     expected_scope_id = context.scope_id_for(scope)
@@ -404,7 +406,7 @@ def _evaluate_metric(
     limit: Mapping[str, JsonValue],
     hard: bool,
     reduction_exception: bool,
-) -> RuleResult:
+) -> _RuleCandidate:
     if (
         rule_id == "SYSTEM.HARD.NEW_RISK_ENABLED"
         and context.effect == "REDUCE"
@@ -555,18 +557,21 @@ def timeout_decision(
 
 
 def timeout_result(index: int) -> RuleResult:
-    return _result(
+    return _with_index(
+        _result(
+            -1,
+            "RISK.SYSTEM.EVALUATION_TIMEOUT",
+            "TIMEOUT_GUARD",
+            "SYSTEM",
+            None,
+            0,
+            None,
+            "REJECT",
+            "RISK_EVALUATION_TIMEOUT",
+            None,
+            None,
+        ),
         index,
-        "RISK.SYSTEM.EVALUATION_TIMEOUT",
-        "TIMEOUT_GUARD",
-        "SYSTEM",
-        None,
-        0,
-        None,
-        "REJECT",
-        "RISK_EVALUATION_TIMEOUT",
-        None,
-        None,
     )
 
 
@@ -584,43 +589,49 @@ def _result(
     limit_value: Mapping[str, JsonValue] | None,
     *,
     exception_applied: bool = False,
-) -> RuleResult:
-    return RuleResult._validated(
-        evaluation_index,
-        rule_id,
-        phase,
-        scope,
-        scope_id,
-        priority,
-        metric,
-        result,
-        reason_code,
-        measured_value,
-        limit_value,
-        exception_applied,
-        _synthetic=evaluation_index == -1,
-    )
+) -> _RuleCandidate:
+    return {
+        "evaluation_index": evaluation_index,
+        "rule_id": rule_id,
+        "phase": phase,
+        "scope": scope,
+        "scope_id": scope_id,
+        "priority": priority,
+        "metric": metric,
+        "result": result,
+        "reason_code": reason_code,
+        "measured_value": measured_value,
+        "limit_value": limit_value,
+        "exception_applied": exception_applied,
+    }
 
 
-def _with_index(result: RuleResult, index: int) -> RuleResult:
+def _with_index(result: Mapping[str, object], index: int) -> RuleResult:
     return RuleResult._validated(
         index,
-        result.rule_id,
-        result.phase,
-        result.scope,
-        result.scope_id,
-        result.priority,
-        result.metric,
-        result.result,
-        result.reason_code,
-        result.measured_value,
-        result.limit_value,
-        exception_applied=result.exception_applied,
+        cast(str, result["rule_id"]),
+        cast(RulePhase, result["phase"]),
+        cast(RuleScope, result["scope"]),
+        cast(str | None, result["scope_id"]),
+        cast(int, result["priority"]),
+        cast(str | None, result["metric"]),
+        cast(RuleOutcome, result["result"]),
+        cast(str, result["reason_code"]),
+        cast(Mapping[str, JsonValue] | None, result["measured_value"]),
+        cast(Mapping[str, JsonValue] | None, result["limit_value"]),
+        exception_applied=cast(bool, result["exception_applied"]),
     )
 
 
-def _sort_key(result: RuleResult) -> tuple[int, int, int, str]:
-    return (PHASE_ORDER[result.phase], SCOPE_ORDER[result.scope], result.priority, result.rule_id)
+def _sort_key(result: Mapping[str, object]) -> tuple[int, int, int, str]:
+    phase = cast(RulePhase, result["phase"])
+    scope = cast(RuleScope, result["scope"])
+    return (
+        PHASE_ORDER[phase],
+        SCOPE_ORDER[scope],
+        cast(int, result["priority"]),
+        cast(str, result["rule_id"]),
+    )
 
 
 def _compare(

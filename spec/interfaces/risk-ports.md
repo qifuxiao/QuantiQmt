@@ -215,3 +215,24 @@ Validator MUST 按以下顺序检查并在首个失败处拒绝：
 两个 Event envelope 的 `correlation_id=order.intent_id`、`causation_id` 为触发 Risk 的 OrderRegistered message id、`aggregate_id=order_id`、`aggregate_version=expected_order_version`、`partition_key=order_id`。为保留 v1 已发布 identity，v1 `message_id=decision_id`；v2 `message_id=uuid5(UUID("b5a6c3cc-2be0-5e6f-a9ec-2d9a4e769979"), decision_id + ":risk.order_evaluated.v2")`。OMS 只能在 `expected_order_version` 匹配时应用 Decision；冲突返回 `QQ-COMMON-1003`，重新读取后由 Application 明确决定是否以新 input_version 重评。
 
 指标必须至少包含 `risk_evaluation_latency_us` histogram、`risk_rule_latency_us` histogram、`risk_decisions_total{decision,origin,error_code}` counter、`risk_fail_closed_total{reason}` counter。禁止使用 order/account/instrument/correlation 等高基数字段作为 metric label。
+
+## Risk output runtime Schema bundle
+
+`RuleResult`、`RuleTiming`、`RiskDecisionV1`、`RiskAuditOutputV1` 与
+`risk.order_evaluated.v2` MUST 分别通过 `CONTRACT-RISK-RULE-RESULT-V1`、
+`CONTRACT-RISK-RULE-TIMING-V1`、`CONTRACT-RISK-DECISION-V1`、
+`CONTRACT-RISK-AUDIT-OUTPUT-V1` 和 `CONTRACT-CATALOG` 的 active message route，解析到同一份
+`CONTRACT-RISK-ORDER-EVALUATED-V2` Schema graph。前四个内部身份只引用该 graph 的精确 root 或
+JSON Pointer，不复制字段定义。
+
+生产 runtime MUST 只从安装包 `quantiqmt.contracts.resources` 通过 `importlib.resources` 读取
+版本化 bundle。bundle 暴露 validator 前 MUST 校验 bundle 格式、manifest version、Catalog route、
+contract/path identity、content/document/bundle SHA-256 以及全部 `$ref`。缺失、损坏、partial、digest
+不匹配、version 不匹配或 unresolved reference 均 fail closed；禁止读取 repository `spec/**`、cwd、
+caller source root、旧版本、默认 payload 或宽松 fallback。
+
+所有 output factory MUST 严格执行 `primitive candidate → Draft 2020-12 Schema validation →
+PORTS-RISK semantic validation → deep freeze`。任一阶段失败时不得返回或冻结无效对象，也不得继续
+v1 projection、v2 envelope、持久化/发布、approved OMS transition 或 Execution；不得 coercion、
+repair、default、deduplicate、reorder、retry 或 fallback。checkout、installed wheel 与只安装主包的
+container-equivalent 环境 MUST 使用相同 bundle bytes 并产生相同接受/拒绝结果。
