@@ -29,6 +29,9 @@ allowed_paths:
   - ai/packets/TASK-029-IMPLEMENTATION-v1.md
   - ai/handoffs/TASK-029-IMPLEMENTATION-v1.yaml
   - tasks/completed/TASK-029-risk-runtime-schema-contract.md
+  - scripts/validate_agent_environment.py
+  - ai/packets/TASK-029-EVIDENCE-REPAIR-v2.md
+  - ai/handoffs/TASK-029-EVIDENCE-REPAIR-v2.yaml
 forbidden_paths:
   - migrations/**
   - src/quantiqmt/order/**
@@ -116,10 +119,23 @@ delivery:
   It does not rewrite the historical PR #46 facts above or treat that closed work as delivery,
   implementation, Review, or completion evidence.
 
-## Frozen Implementation Plan: TASK-029-PLAN-v1
+## Frozen Implementation Plan Amendment: TASK-029-PLAN-v2
 
-- Plan version: `TASK-029-PLAN-v1`.
-- Planning Base: `286c3901b3801fd752feaaf615167cef248a9494`.
+- Plan version: `TASK-029-PLAN-v2`.
+- Planning/Repair Base: `1bc232d367261302b397556b36a6b3284f8784d7`.
+- Human repair authorization:
+  <https://github.com/qifuxiao/QuantiQmt/pull/110#issuecomment-5549863721>, comment
+  `5549863721`, authored by `qifuxiao`, created and last updated at
+  `2026-09-05T06:06:08Z`, raw-body SHA-256
+  `0efa5bb59c51c46d8fc783e9664fd75ddc67463bec65c400a4d36c8720018adb`.
+- This Amendment preserves the product implementation and acceptance evidence already produced at
+  exact Head `1bc232d367261302b397556b36a6b3284f8784d7`; the Risk Schema bundle, output
+  factories, Runner/audit/envelope integration, and product tests MUST NOT be reimplemented.
+- The only current blockers are the formal environment-evidence validator's TASK-057-only identity
+  gate and the evidence producer identity. This Amendment authorizes only the future validator
+  repair and its tests after a new canonical assignment and Coordinator-authored Handoff v2.
+- No verification command is waived. A changed exact Head invalidates prior final evidence and
+  requires the unchanged six commands to be rerun before new environment evidence is accepted.
 - Product outcome: deliver an installable Risk Schema bundle and loader whose behavior is the
   same in a source checkout, an installed wheel, and a container consuming that wheel. The
   installed package must validate Risk outputs without reading source `spec/**`.
