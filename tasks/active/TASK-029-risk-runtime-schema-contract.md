@@ -32,6 +32,9 @@ allowed_paths:
   - scripts/validate_agent_environment.py
   - ai/packets/TASK-029-EVIDENCE-REPAIR-v2.md
   - ai/handoffs/TASK-029-EVIDENCE-REPAIR-v2.yaml
+  - scripts/validate_ai_handoff.py
+  - spec/contracts/catalog.yaml
+  - src/quantiqmt/risk/__init__.py
 forbidden_paths:
   - migrations/**
   - src/quantiqmt/order/**
@@ -121,7 +124,7 @@ delivery:
 
 ## Frozen Implementation Plan Amendment: TASK-029-PLAN-v2
 
-- Plan version: `TASK-029-PLAN-v2`.
+- Plan version: `TASK-029-PLAN-v2`
 - Planning/Repair Base: `1bc232d367261302b397556b36a6b3284f8784d7`.
 - Human repair authorization:
   <https://github.com/qifuxiao/QuantiQmt/pull/110#issuecomment-5549863721>, comment
@@ -131,9 +134,33 @@ delivery:
 - This Amendment preserves the product implementation and acceptance evidence already produced at
   exact Head `1bc232d367261302b397556b36a6b3284f8784d7`; the Risk Schema bundle, output
   factories, Runner/audit/envelope integration, and product tests MUST NOT be reimplemented.
-- The only current blockers are the formal environment-evidence validator's TASK-057-only identity
-  gate and the evidence producer identity. This Amendment authorizes only the future validator
-  repair and its tests after a new canonical assignment and Coordinator-authored Handoff v2.
+- The evidence-gate repair covers `scripts/validate_agent_environment.py`,
+  `scripts/validate_ai_handoff.py`, and their tests under the existing `tests/spec/**` allowlist.
+  It addresses task/producer identity, the explicitly frozen post-implementation Handoff topology,
+  and deterministic repository-relative allowed-path matching. Implementation remains gated by
+  canonical assignment and the Coordinator-authored Handoff v2.
+- Additional Human authorities (repository `qifuxiao/QuantiQmt`, PR `110`, author `qifuxiao`;
+  issue URL <https://api.github.com/repos/qifuxiao/QuantiQmt/issues/110>):
+  - Topology authorization `5552251354`:
+    <https://github.com/qifuxiao/QuantiQmt/pull/110#issuecomment-5552251354>;
+    API URL <https://api.github.com/repos/qifuxiao/QuantiQmt/issues/comments/5552251354>;
+    created/updated `2026-09-05T13:49:27Z`; raw-body SHA-256
+    `9885937238b94640126fce8d34b66aa6ec6519ddec45d4629b0d2e60a6ad0dbd`.
+  - Format correction authorization `5552436069`:
+    <https://github.com/qifuxiao/QuantiQmt/pull/110#issuecomment-5552436069>;
+    API URL <https://api.github.com/repos/qifuxiao/QuantiQmt/issues/comments/5552436069>;
+    created/updated `2026-09-05T14:21:36Z`; raw-body SHA-256
+    `d0c3f01ef30d0152cba3ec5ddb96febb0d0c74fa70175f52f12f98dbbf5bc4e6`.
+  - Consolidated path repair authorization `5552503283`:
+    <https://github.com/qifuxiao/QuantiQmt/pull/110#issuecomment-5552503283>;
+    API URL <https://api.github.com/repos/qifuxiao/QuantiQmt/issues/comments/5552503283>;
+    created/updated `2026-09-05T14:33:18Z`; raw-body SHA-256
+    `757c4fab0df3c7487e7e76d0fe487cbbe25e22a8ea99c4dbbbf01904c5743e88`.
+- The punctuation-free Plan-version line is a syntax-only correction. The added Catalog and Risk
+  package-export paths accept only their existing changes at
+  `1bc232d367261302b397556b36a6b3284f8784d7`; no further product modification is authorized.
+  Product Plan, acceptance criteria, verification commands, delivery, dependencies, spec references,
+  forbidden paths, and `TASK-029-PLAN-v2` identity remain unchanged.
 - No verification command is waived. A changed exact Head invalidates prior final evidence and
   requires the unchanged six commands to be rerun before new environment evidence is accepted.
 - Product outcome: deliver an installable Risk Schema bundle and loader whose behavior is the
