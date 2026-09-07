@@ -35,6 +35,8 @@ allowed_paths:
   - scripts/validate_ai_handoff.py
   - spec/contracts/catalog.yaml
   - src/quantiqmt/risk/__init__.py
+  - ai/packets/TASK-029-REVIEW-REPAIR-v3.md
+  - ai/handoffs/TASK-029-REVIEW-REPAIR-v3.yaml
 forbidden_paths:
   - migrations/**
   - src/quantiqmt/order/**
@@ -47,6 +49,19 @@ verification:
     - poetry run mypy src/quantiqmt/contracts
     - poetry run ruff check .
     - poetry run ruff format --check .
+  required_lanes:
+    - lane: portable
+      capability: portable
+      minimum_records: 1
+      commands:
+        - poetry run python scripts/validate_specs.py
+        - poetry run pytest tests/spec tests/contract tests/unit/contracts
+        - poetry run pytest tests/unit/risk tests/property/risk
+        - poetry run mypy src/quantiqmt/contracts
+        - poetry run ruff check .
+        - poetry run ruff format --check .
+  prohibited_lanes:
+    - windows_miniqmt
 delivery:
   schema_version: 1
   contract_status: accepted
