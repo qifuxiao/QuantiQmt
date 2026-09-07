@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import yaml
-from scripts.validate_specs import extract_front_matter
+from scripts.validate_specs import delivery_is_unlockable, extract_front_matter
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -18,24 +18,35 @@ def _yaml(relative_path: str) -> dict[str, object]:
     return value
 
 
-def test_tasks_054_055_056_057_are_completed_and_task_029_is_active() -> None:
+def test_tasks_029_054_055_056_057_are_completed_with_no_active_task() -> None:
     active = sorted((ROOT / "tasks" / "active").glob("TASK-*.md"))
-    task_029_path = ROOT / "tasks/active/TASK-029-risk-runtime-schema-contract.md"
-    assert active == [task_029_path]
+    task_029_path = ROOT / "tasks/completed/TASK-029-risk-runtime-schema-contract.md"
+    assert active == []
 
     task_029 = extract_front_matter(task_029_path)
-    assert task_029["status"] == "active"
+    assert task_029["status"] == "completed"
     assert task_029["depends_on"] == ["TASK-015", "TASK-030", "TASK-031"]
-    assert task_029["delivery"] == {
+    assert {
+        key: value for key, value in task_029["delivery"].items() if key != "completion_evidence"
+    } == {
         "schema_version": 1,
         "contract_status": "accepted",
-        "implementation_status": "not_started",
-        "acceptance_status": "not_run",
-        "review_status": "pending",
+        "implementation_status": "merged",
+        "acceptance_status": "passed",
+        "review_status": "approved",
         "release_status": "prohibited",
     }
     assert "remediation_task" not in task_029["delivery"]
-    assert "completion_evidence" not in task_029["delivery"]
+    assert delivery_is_unlockable(task_029)
+    evidence = task_029["delivery"]["completion_evidence"]
+    assert evidence["change_pr"] == "https://github.com/qifuxiao/QuantiQmt/pull/110"
+    assert evidence["reviewed_head_sha"] == "e76ed9c4faacfa3d9521dfd1185f3a62b93f86ac"
+    assert evidence["merge_commit_sha"] == "7681530fa835e28bb17db9ad19eb9cf61bfdcd18"
+    assert evidence["review_verdict"] == "APPROVE"
+    assert evidence["reviewer"] == "qfxyyy"
+    assert evidence["evidence_url"].endswith("pullrequestreview-5133890761")
+    assert "5573292852" in evidence["human_authorization_evidence"]
+    assert "5573098781" in evidence["environment_evidence"]
     for authorized_path in (
         "ai/packets/TASK-029-IMPLEMENTATION-v1.md",
         "ai/handoffs/TASK-029-IMPLEMENTATION-v1.yaml",
@@ -43,7 +54,7 @@ def test_tasks_054_055_056_057_are_completed_and_task_029_is_active() -> None:
     ):
         assert authorized_path in task_029["allowed_paths"]
 
-    task_029_text = _text("tasks/active/TASK-029-risk-runtime-schema-contract.md")
+    task_029_text = _text("tasks/completed/TASK-029-risk-runtime-schema-contract.md")
     assert "TASK-029-PLAN-v2" in task_029_text
     assert "286c3901b3801fd752feaaf615167cef248a9494" in task_029_text
     assert "无需读取源码 `spec/**`" in task_029_text
@@ -106,8 +117,8 @@ def test_tasks_054_055_056_057_are_completed_and_task_029_is_active() -> None:
     indexed = {entry["id"]: entry for entry in entries}
     assert indexed["TASK-005"]["path"].startswith("backlog/")
     assert indexed["TASK-005"]["status"] == "blocked"
-    assert indexed["TASK-029"]["path"] == ("active/TASK-029-risk-runtime-schema-contract.md")
-    assert indexed["TASK-029"]["status"] == "active"
+    assert indexed["TASK-029"]["path"] == ("completed/TASK-029-risk-runtime-schema-contract.md")
+    assert indexed["TASK-029"]["status"] == "completed"
     assert indexed["TASK-053"]["path"].startswith("backlog/")
     assert indexed["TASK-053"]["status"] == "blocked"
     assert indexed["TASK-054"]["path"].startswith("completed/")

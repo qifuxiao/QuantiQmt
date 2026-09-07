@@ -1150,9 +1150,34 @@ def test_forbidden_subtree_has_precedence_over_both_allowlists() -> None:
     ]
 
 
-def test_task029_exact_post_implementation_handoff_passes_at_frozen_head() -> None:
-    task = ROOT / "tasks/active/TASK-029-risk-runtime-schema-contract.md"
-    handoff = ROOT / "ai/handoffs/TASK-029-EVIDENCE-REPAIR-v2.yaml"
+def _task029_historical_checkout(tmp_path: Path, head: str) -> Path:
+    """Keep real frozen Git topology independent of the completed task projection."""
+    repo = tmp_path / "task029-history"
+    subprocess.run(
+        ["git", "clone", "--shared", "--no-checkout", str(ROOT), str(repo)],
+        cwd=tmp_path,
+        capture_output=True,
+        check=True,
+        timeout=30,
+    )
+    subprocess.run(
+        ["git", "checkout", "--detach", head],
+        cwd=repo,
+        capture_output=True,
+        check=True,
+        timeout=30,
+    )
+    assert _git(repo, "rev-parse", "HEAD").stdout.strip() == head
+    return repo
+
+
+def test_task029_exact_post_implementation_handoff_passes_at_frozen_head(
+    tmp_path: Path,
+) -> None:
+    repo = _task029_historical_checkout(tmp_path, "8b4c76d691849b126810be8953bfa7210ce18f43")
+
+    task = repo / "tasks/active/TASK-029-risk-runtime-schema-contract.md"
+    handoff = repo / "ai/handoffs/TASK-029-EVIDENCE-REPAIR-v2.yaml"
     frozen = yaml.safe_load(handoff.read_text(encoding="utf-8"))
 
     result = subprocess.run(
@@ -1172,7 +1197,7 @@ def test_task029_exact_post_implementation_handoff_passes_at_frozen_head() -> No
         ],
         capture_output=True,
         text=True,
-        cwd=ROOT,
+        cwd=repo,
     )
 
     assert result.returncode == 0, f"stdout={result.stdout}\nstderr={result.stderr}"
@@ -1192,7 +1217,19 @@ def test_each_historical_product_path_requires_both_allowlists(allowlist: str, p
     handoff_path = ROOT / "ai/handoffs/TASK-029-EVIDENCE-REPAIR-v2.yaml"
     handoff = yaml.safe_load(handoff_path.read_text(encoding="utf-8"))
     task = ROOT / "tasks/active/TASK-029-risk-runtime-schema-contract.md"
-    task_fm = validator.extract_task_front_matter(task)
+    task_text = subprocess.run(
+        [
+            "git",
+            "show",
+            f"8b4c76d691849b126810be8953bfa7210ce18f43:{task.relative_to(ROOT).as_posix()}",
+        ],
+        cwd=ROOT,
+        capture_output=True,
+        check=True,
+        timeout=30,
+    ).stdout.decode("utf-8")
+    task_fm = yaml.safe_load(task_text.split("---", 2)[1])
+    assert task_fm["status"] == "active"
     if allowlist == "handoff":
         handoff["allowed_paths"].remove(path)
     else:
@@ -1214,9 +1251,10 @@ def test_task029_post_implementation_tuple_drift_fails_closed() -> None:
     assert validator._post_implementation_identity_errors(handoff, handoff_path, ROOT)
 
 
-def test_task029_review_repair_v3_handoff_passes_at_current_head() -> None:
-    task = ROOT / "tasks/active/TASK-029-risk-runtime-schema-contract.md"
-    handoff = ROOT / "ai/handoffs/TASK-029-REVIEW-REPAIR-v3.yaml"
+def test_task029_review_repair_v3_handoff_passes_at_frozen_head(tmp_path: Path) -> None:
+    repo = _task029_historical_checkout(tmp_path, "e76ed9c4faacfa3d9521dfd1185f3a62b93f86ac")
+    task = repo / "tasks/active/TASK-029-risk-runtime-schema-contract.md"
+    handoff = repo / "ai/handoffs/TASK-029-REVIEW-REPAIR-v3.yaml"
     frozen = yaml.safe_load(handoff.read_text(encoding="utf-8"))
 
     result = subprocess.run(
@@ -1236,7 +1274,7 @@ def test_task029_review_repair_v3_handoff_passes_at_current_head() -> None:
         ],
         capture_output=True,
         text=True,
-        cwd=ROOT,
+        cwd=repo,
     )
 
     assert result.returncode == 0, f"stdout={result.stdout}\nstderr={result.stderr}"

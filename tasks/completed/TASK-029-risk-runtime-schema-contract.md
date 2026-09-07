@@ -1,7 +1,7 @@
 ---
 id: TASK-029
 title: Define deployable Risk output Schema and runtime validation contract
-status: active
+status: completed
 depends_on: [TASK-015, TASK-030, TASK-031]
 spec_refs: [CONTRACT-RISK-DECISION-V1, CONTRACT-RISK-AUDIT-OUTPUT-V1, CONTRACT-RISK-ORDER-EVALUATED-V2, PORTS-RISK, CONTRACT-CATALOG]
 allowed_paths:
@@ -65,10 +65,36 @@ verification:
 delivery:
   schema_version: 1
   contract_status: accepted
-  implementation_status: not_started
-  acceptance_status: not_run
-  review_status: pending
+  implementation_status: merged
+  acceptance_status: passed
+  review_status: approved
   release_status: prohibited
+  completion_evidence:
+    mode: implementation
+    change_pr: https://github.com/qifuxiao/QuantiQmt/pull/110
+    reviewed_head_sha: e76ed9c4faacfa3d9521dfd1185f3a62b93f86ac
+    review_verdict: APPROVE
+    reviewer: qfxyyy
+    evidence_url: https://github.com/qifuxiao/QuantiQmt/pull/110#pullrequestreview-5133890761
+    merge_commit_sha: 7681530fa835e28bb17db9ad19eb9cf61bfdcd18
+    human_authorization_evidence: >-
+      https://github.com/qifuxiao/QuantiQmt/pull/110#issuecomment-5573292852;
+      qifuxiao; created_at=updated_at=2026-09-07T16:15:11Z;
+      raw-body SHA-256=7a4bf1c8bf23c6126f40d1fe1d52c9bc31e14414bbad8ee01ad915432efe03b9;
+      separate Human acceptance and closeout authority, not environment-producer acceptance.
+    environment_evidence: >-
+      https://github.com/qifuxiao/QuantiQmt/pull/110#issuecomment-5573098781;
+      producer=task-029-environment-verification-codex-windows-1;
+      role=Environment Verification Agent; author=qifuxiao;
+      created_at=updated_at=2026-09-07T15:56:22Z;
+      raw-body SHA-256=a3783e9851194aecb5c3503535617e01bff5da6520eafefd5e311b1eb230436a;
+      portable Windows verification at reviewed_head_sha only; live validator exit 0.
+    ci_evidence: >-
+      4/4 exact-Head GitHub jobs completed/success at the reviewed implementation Head:
+      https://github.com/qifuxiao/QuantiQmt/actions/runs/34138743216
+      (quality 101795673929, persistence-postgresql 101795674081);
+      https://github.com/qifuxiao/QuantiQmt/actions/runs/34138739709
+      (quality 101795663753, persistence-postgresql 101795663358).
 ---
 
 # Objective
@@ -93,14 +119,14 @@ delivery:
 
 ## Acceptance criteria
 
-- [ ] 所有 Risk output Schema 均有正式 Catalog ID、版本、fixture 和 validator 路由；
-- [ ] 安装后的 wheel/容器无需读取源码 `spec/**` 即可完成 Risk output Schema validation；
-- [ ] Schema 缺失、损坏、版本不匹配均产生可观测的 fail-closed 诊断，不得静默回退；
-- [ ] 所有 Risk output factory 与 v2 envelope 使用同一正式 Schema + semantic validator 入口；
-- [ ] priority、reason/error code、UUID/hash、RFC3339 UTC-Z、typed value、嵌套字段和数组边界由正式 Schema 覆盖；
-- [ ] contract/property tests 覆盖 checkout、wheel/main-only、缺失 Schema、版本不匹配和全部 output fixture；
-- [ ] `TASK-005` 只有在 TASK-029 独立 Review APPROVE 后，才恢复为可完成状态；
-- [ ] manifest 版本、兼容性、迁移和回滚说明同步更新。
+- [x] 所有 Risk output Schema 均有正式 Catalog ID、版本、fixture 和 validator 路由；
+- [x] 安装后的 wheel/容器无需读取源码 `spec/**` 即可完成 Risk output Schema validation；
+- [x] Schema 缺失、损坏、版本不匹配均产生可观测的 fail-closed 诊断，不得静默回退；
+- [x] 所有 Risk output factory 与 v2 envelope 使用同一正式 Schema + semantic validator 入口；
+- [x] priority、reason/error code、UUID/hash、RFC3339 UTC-Z、typed value、嵌套字段和数组边界由正式 Schema 覆盖；
+- [x] contract/property tests 覆盖 checkout、wheel/main-only、缺失 Schema、版本不匹配和全部 output fixture；
+- [x] `TASK-005` 只有在 TASK-029 独立 Review APPROVE 后，才恢复为可完成状态；
+- [x] manifest 版本、兼容性、迁移和回滚说明同步更新。
 
 ## Review focus
 
@@ -261,3 +287,45 @@ delivery:
 
 No later step is authorized by this activation PR. In particular, it does not authorize self-review,
 Approval, merge, TASK-029 implementation, TASK-005 activation, Mini QMT access, or release.
+
+
+## Completion evidence and acceptance mapping
+
+Human accepted the implementation and separately authorized this mechanical closeout in
+comment 5573292852. PR #110 was merged at 2026-09-07T16:12:37Z after qfxyyy's independent
+Approval at 2026-09-07T16:11:58Z, bound to
+`e76ed9c4faacfa3d9521dfd1185f3a62b93f86ac`. The historical activation, Plan, repair
+authorities and verification records above are preserved as history; this completion projection
+does not replace the original frozen active-task blob
+`66b2830c3f10c45f74e04c4f0246e1f62fd51f9d`.
+
+| Acceptance | Evidence at the reviewed implementation Head |
+|---|---|
+| Formal Risk output identities, versions, fixtures and routes | `tests/contract/messages/test_risk_output_runtime_contracts.py::test_each_risk_output_identity_resolves_one_formal_schema_graph`, accepted manifest/Catalog and packaged bundle |
+| Installed wheel without source spec access | `tests/unit/contracts/test_risk_schema_runtime.py::test_task_029_wheel_validates_risk_graph_main_package_only_without_source`; isolated local wheel installation with --no-deps and source-free subprocess probes |
+| Missing, damaged and mismatched bundles fail closed | Version/partial/digest and unresolved-reference tests in `test_risk_schema_runtime.py`; divergent canonical-path regression added during review repair |
+| Shared Schema, semantic validation and freeze boundary | `tests/unit/risk/test_risk_schema_boundary.py` verifies factory/Runner/audit integration and rejection before semantics/freeze |
+| Field and collection boundaries | `test_formal_audit_graph_rejects_output_boundary_mutations`, Risk contract fixtures, unit and property tests |
+| Checkout and installed-package parity | Final contract/unit-contract run: 1009 passed, 0 failed, 0 skipped; Risk unit/property run: 79 passed, 0 failed, 0 skipped |
+| TASK-005 gate | TASK-029 independently approved and accepted; TASK-005 remains backlog/blocked and requires separate Human activation |
+| Versioning, compatibility, migration and rollback | Accepted `spec/manifest.yaml` version 0.15.0 and PORTS-RISK runtime bundle contract, unchanged by closeout |
+
+Implementation verification used Windows, CPython 3.12.10 and Poetry 2.4.1. All six frozen
+commands, the Handoff validator, wheel build and live environment validator exited 0.
+The independently built wheel was 239296 bytes, SHA-256
+`320918764fe832be9b54184b175ea642c83b09b0e7c45d3919f7b3b658d62a0d`.
+
+The first contract attempt imported old editable source from the saved project and returned
+1008 passed / 1 failed. The Environment Verification Agent retained that failure, set only the
+process PYTHONPATH to the exact-Head worktree src, verified the imported path, and reran all six
+commands successfully. This disclosure remains part of the accepted environment evidence.
+No dependency installation or upgrade was used to repair the shared project environment.
+
+The implementation evidence above validates only the reviewed implementation Head. Closeout
+verification is a separate run on the closeout changes, recorded in the independent Closeout PR;
+it must not be inferred from the implementation evidence. The closeout changes neither the
+runtime product nor frozen Packet/Handoff v1, v2 or v3.
+
+The installed-package tests are container-equivalent main-package probes, not native container
+deployment evidence. Mini QMT, account/market queries, trading, real money and release remain
+unverified and prohibited. M1 Mini QMT acceptance is not claimed.
