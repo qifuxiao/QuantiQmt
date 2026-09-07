@@ -22,6 +22,8 @@ FROZEN_ACTIVE_TASK_PATH = (
 )
 HANDOFF_V3_PATH = ROOT / "ai/handoffs/TASK-057-REPAIR-v3.yaml"
 HANDOFF_V4_PATH = ROOT / "ai/handoffs/TASK-057-REPAIR-v4.yaml"
+TASK029_PATH = ROOT / "tasks/active/TASK-029-risk-runtime-schema-contract.md"
+HANDOFF029_PATH = ROOT / "ai/handoffs/TASK-029-EVIDENCE-REPAIR-v2.yaml"
 ASSIGNMENT_SCHEMA_PATH = ROOT / "ai/schemas/agent-assignment.schema.yaml"
 EVIDENCE_SCHEMA_PATH = ROOT / "ai/schemas/agent-environment-evidence.schema.yaml"
 REPOSITORY = "qifuxiao/QuantiQmt"
@@ -49,6 +51,14 @@ def _handoff(path: Path = HANDOFF_V3_PATH) -> dict[str, Any]:
     value = yaml.safe_load(path.read_text(encoding="utf-8"))
     assert isinstance(value, dict)
     return copy.deepcopy(value)
+
+
+def _task029() -> dict[str, Any]:
+    return copy.deepcopy(extract_front_matter(TASK029_PATH))
+
+
+def _handoff029() -> dict[str, Any]:
+    return _handoff(HANDOFF029_PATH)
 
 
 def _canonical_body(sentinel: str, document: dict[str, Any]) -> str:
@@ -360,6 +370,102 @@ def test_task_and_handoff_lanes_deep_equal_and_partition_commands() -> None:
     assert Counter(
         command for lane in authority.required_lanes for command in lane.commands
     ) == Counter(authority.verification_commands)
+
+
+def test_task029_authority_uses_exact_handoff_lanes_to_partition_task_commands() -> None:
+    authority = validator.build_authority(
+        _task029(),
+        _handoff029(),
+        handoff_path=HANDOFF029_PATH.relative_to(ROOT),
+    )
+
+    assert authority.task_id == "TASK-029"
+    assert authority.plan_version == "TASK-029-PLAN-v2"
+    assert [lane.lane for lane in authority.required_lanes] == ["portable"]
+    assert authority.prohibited_lanes == ("windows_miniqmt",)
+    assert Counter(
+        command for lane in authority.required_lanes for command in lane.commands
+    ) == Counter(authority.verification_commands)
+
+
+def test_git_loader_discovers_unique_task029_authority_from_exact_head() -> None:
+    authority = validator.load_authority_from_git(ROOT, head="HEAD")
+
+    assert authority.task_id == "TASK-029"
+    assert authority.github.pull_request_number == 110
+    assert authority.github.head_branch == "codex/task-029-implementation"
+    assert {producer["role"] for producer in authority.github.authorized_producers} == {
+        "Implementation Agent",
+        "Environment Verification Agent",
+    }
+
+
+def test_git_loader_rejects_caller_task_override_for_task029_head() -> None:
+    with pytest.raises(ValueError, match="caller task path"):
+        validator.load_authority_from_git(
+            ROOT,
+            head="HEAD",
+            task_path=FROZEN_ACTIVE_TASK_PATH.relative_to(ROOT),
+        )
+
+
+@pytest.mark.parametrize(
+    "active_paths",
+    (
+        (),
+        (
+            "tasks/active/TASK-029-risk-runtime-schema-contract.md",
+            "tasks/active/TASK-057-tool-neutral-agents-windows-verification-poetry.md",
+        ),
+    ),
+)
+def test_git_loader_rejects_zero_or_multiple_active_tasks(
+    monkeypatch: pytest.MonkeyPatch, active_paths: tuple[str, ...]
+) -> None:
+    def fake_git(repo: Path, *args: str) -> str:
+        del repo
+        if args[:2] == ("rev-parse", "--verify"):
+            return HEAD
+        if args[:4] == ("ls-tree", "-r", "--name-only", HEAD):
+            return "\n".join(active_paths)
+        if args[0] == "show":
+            task_id = "TASK-029" if "TASK-029" in args[1] else "TASK-057"
+            return f"---\nid: {task_id}\nstatus: active\n---\n"
+        raise AssertionError(args)
+
+    monkeypatch.setattr(validator, "_git", fake_git)
+
+    with pytest.raises(ValueError, match="exactly one active task"):
+        validator.load_authority_from_git(ROOT, head=HEAD)
+
+
+@pytest.mark.parametrize("case", ("missing", "substituted", "additional"))
+def test_task029_handoff_commands_are_an_opaque_exact_partition(case: str) -> None:
+    handoff = _handoff029()
+    commands = handoff["required_lanes"][0]["commands"]
+    if case == "missing":
+        commands.pop()
+    elif case == "substituted":
+        commands[0] += " "
+    else:
+        commands.append("poetry run pytest extra")
+
+    assert validator.authority_errors(
+        _task029(), handoff, handoff_path=HANDOFF029_PATH.relative_to(ROOT)
+    )
+
+
+@pytest.mark.parametrize(
+    ("task", "handoff"),
+    (
+        (_task029(), _handoff()),
+        (_task(), _handoff029()),
+    ),
+)
+def test_mixed_task_and_handoff_authority_identities_fail_closed(
+    task: dict[str, Any], handoff: dict[str, Any]
+) -> None:
+    assert validator.authority_errors(task, handoff)
 
 
 @pytest.mark.parametrize(

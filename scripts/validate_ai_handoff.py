@@ -23,7 +23,6 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import fnmatch
 import re
 import subprocess
 import sys
@@ -54,6 +53,47 @@ REQUIRED_FIELDS = (
 )
 
 SHA_FIELDS = ("planning_base_sha", "expected_base_sha", "expected_pr_base_sha", "task_blob_sha")
+
+POST_IMPLEMENTATION_TOPOLOGY_IDENTITY = "post_implementation_repair_v1"
+TASK029_TOPOLOGY_TUPLE: dict[str, object] = {
+    "task_id": "TASK-029",
+    "plan_version": "TASK-029-PLAN-v2",
+    "packet_version": "TASK-029-EVIDENCE-REPAIR-v2",
+    "handoff_path": "ai/handoffs/TASK-029-EVIDENCE-REPAIR-v2.yaml",
+    "pull_request_number": 110,
+    "expected_base_sha": "b4b3f07c734c894032bd02f98e8cc914aa26f5d5",
+    "planning_base_sha": "1bc232d367261302b397556b36a6b3284f8784d7",
+}
+TASK029_TOPOLOGY_CONTEXT: dict[str, object] = {
+    "superseded_head_sha": "1bc232d367261302b397556b36a6b3284f8784d7",
+    "current_pr_head_sha": "1bc232d367261302b397556b36a6b3284f8784d7",
+    "initial_coordination_commit_sha": "33584e39a31b04b5a9d14a5c3b39c8c06a3889c0",
+    "initial_coordination_parent_sha": "1bc232d367261302b397556b36a6b3284f8784d7",
+    "final_coordination_commit_sha": "a4de3f396771808fb08ff10b9e29b0ad30efe328",
+    "handoff_introduction_parent_sha": "a4de3f396771808fb08ff10b9e29b0ad30efe328",
+    "coordination_allowed_paths": [
+        "tasks/active/TASK-029-risk-runtime-schema-contract.md",
+        "ai/packets/TASK-029-EVIDENCE-REPAIR-v2.md",
+    ],
+    "handoff_add_only_path": "ai/handoffs/TASK-029-EVIDENCE-REPAIR-v2.yaml",
+    "implementation_pr_number": 110,
+    "implementation_pr_base_sha": "b4b3f07c734c894032bd02f98e8cc914aa26f5d5",
+    "repair_planning_base_sha": "1bc232d367261302b397556b36a6b3284f8784d7",
+    "pr_base_historical_task_blob_sha": "131eadc3c966db0f2173539a040aaa45a02959fa",
+    "plan_v2_task_blob_sha": "f6faf45767f01fdfe9038b8b00ed648a9f38820f",
+    "protected_implementation_commits": [
+        "9516147f69b6dccbc845ab5b1c557ee5f8fc54b8",
+        "6283121945fab843af49ea096c6b006d386e0577",
+        "6647ff9225610ae4c3dbb59e4fb50f6fb5ffdbb7",
+        "1bc232d367261302b397556b36a6b3284f8784d7",
+    ],
+    "repair_targets": [
+        "scripts/validate_ai_handoff.py",
+        "scripts/validate_agent_environment.py",
+        "tests/spec/test_validate_ai_handoff.py",
+        "tests/spec/test_validate_agent_environment.py",
+    ],
+}
 
 
 def git(*args: str, cwd: Path) -> str:
@@ -240,6 +280,80 @@ def extract_task_plan_version(path: Path) -> str:
     return str(versions[0])
 
 
+def _repository_path_pattern_errors(value: object, *, label: str) -> list[str]:
+    """Accept a repository-relative exact path or one terminal ``/**`` subtree."""
+
+    if not isinstance(value, str) or not value:
+        return [f"{label} must be a non-empty repository-relative path"]
+    if "\\" in value:
+        return [f"{label} must use forward slashes"]
+    if value.startswith("/") or re.match(r"^[A-Za-z]:", value):
+        return [f"{label} must be repository-relative"]
+    subtree = value.endswith("/**")
+    exact = value[:-3] if subtree else value
+    if not exact or exact.endswith("/"):
+        return [f"{label} has an empty path segment"]
+    segments = exact.split("/")
+    if any(segment == "" for segment in segments):
+        return [f"{label} has an empty path segment"]
+    if any(segment in {".", ".."} for segment in segments):
+        return [f"{label} contains a dot or parent-traversal segment"]
+    if any(character in exact for character in "*?[]"):
+        return [f"{label} has malformed glob syntax"]
+    return []
+
+
+def _path_matches(path: str, pattern: str) -> bool:
+    if _repository_path_pattern_errors(path, label="changed path"):
+        return False
+    if _repository_path_pattern_errors(pattern, label="path pattern"):
+        return False
+    if pattern.endswith("/**"):
+        return path.startswith(f"{pattern[:-3]}/")
+    return path == pattern
+
+
+def _repair_context(handoff: dict[str, Any]) -> dict[str, Any]:
+    value = handoff.get("repair_context")
+    return value if isinstance(value, dict) else {}
+
+
+def _is_task029_post_implementation_repair(handoff: dict[str, Any]) -> bool:
+    context = _repair_context(handoff)
+    return (
+        context.get("topology_identity") == POST_IMPLEMENTATION_TOPOLOGY_IDENTITY
+        and context.get("allowlisted_topology_tuple") == TASK029_TOPOLOGY_TUPLE
+        and handoff.get("task_id") == TASK029_TOPOLOGY_TUPLE["task_id"]
+        and handoff.get("plan_version") == TASK029_TOPOLOGY_TUPLE["plan_version"]
+        and handoff.get("packet_version") == TASK029_TOPOLOGY_TUPLE["packet_version"]
+        and handoff.get("expected_base_sha") == TASK029_TOPOLOGY_TUPLE["expected_base_sha"]
+        and handoff.get("planning_base_sha") == TASK029_TOPOLOGY_TUPLE["planning_base_sha"]
+    )
+
+
+def _post_implementation_identity_errors(
+    handoff: dict[str, Any], handoff_path: Path, cwd: Path
+) -> list[str]:
+    context = _repair_context(handoff)
+    if context.get("topology_identity") != POST_IMPLEMENTATION_TOPOLOGY_IDENTITY:
+        return []
+    errors: list[str] = []
+    try:
+        relative_path = handoff_path.relative_to(cwd).as_posix()
+    except ValueError:
+        relative_path = ""
+    if not _is_task029_post_implementation_repair(handoff):
+        errors.append("post-implementation repair topology is not the frozen TASK-029 tuple")
+    for field, expected in TASK029_TOPOLOGY_CONTEXT.items():
+        if context.get(field) != expected:
+            errors.append(f"post-implementation repair context field {field} is not frozen")
+    if relative_path != TASK029_TOPOLOGY_TUPLE["handoff_path"]:
+        errors.append("post-implementation repair Handoff path is not the frozen TASK-029 path")
+    if context.get("implementation_pr_number") != TASK029_TOPOLOGY_TUPLE["pull_request_number"]:
+        errors.append("post-implementation repair PR number is not frozen")
+    return errors
+
+
 def validate_schema(handoff: dict[str, Any]) -> list[str]:
     """Validate required fields, SHA format, and structural invariants."""
     errors: list[str] = []
@@ -264,12 +378,31 @@ def validate_schema(handoff: dict[str, Any]) -> list[str]:
             errors.append("allowed_paths must be a non-empty list")
         elif not all(isinstance(path, str) and path for path in ap):
             errors.append("allowed_paths must contain only non-empty strings")
+        else:
+            for index, path in enumerate(ap):
+                errors.extend(
+                    _repository_path_pattern_errors(path, label=f"allowed_paths[{index}]")
+                )
     if "codex_only_paths" in handoff:
         cop = handoff["codex_only_paths"]
         if not isinstance(cop, list) or not cop:
             errors.append("codex_only_paths must be a non-empty list")
         elif not all(isinstance(p, str) for p in cop):
             errors.append("codex_only_paths must contain only strings")
+        else:
+            for index, path in enumerate(cop):
+                errors.extend(
+                    _repository_path_pattern_errors(path, label=f"codex_only_paths[{index}]")
+                )
+    if "forbidden_paths" in handoff:
+        forbidden = handoff["forbidden_paths"]
+        if not isinstance(forbidden, list):
+            errors.append("forbidden_paths must be a list")
+        else:
+            for index, path in enumerate(forbidden):
+                errors.extend(
+                    _repository_path_pattern_errors(path, label=f"forbidden_paths[{index}]")
+                )
     # Identity: expected_base_sha must equal expected_pr_base_sha
     if (
         "expected_base_sha" in handoff
@@ -367,6 +500,10 @@ def validate_planning_ancestor(handoff: dict[str, Any], cwd: Path) -> list[str]:
     """Check planning_base_sha is an ancestor of expected_base_sha."""
     planning = str(handoff["planning_base_sha"])
     base = str(handoff["expected_base_sha"])
+    if _is_task029_post_implementation_repair(handoff):
+        if not git_is_ancestor(base, planning, cwd):
+            return [f"expected_base_sha {base} is not an ancestor of planning_base_sha {planning}"]
+        return []
     if not git_is_ancestor(planning, base, cwd):
         return [f"planning_base_sha {planning} is not an ancestor of expected_base_sha {base}"]
     return []
@@ -383,15 +520,32 @@ def validate_task_blob(
     errors: list[str] = []
     expected_blob = str(handoff["task_blob_sha"])
     rel_task = task_path.relative_to(cwd).as_posix()
+    special = _is_task029_post_implementation_repair(handoff)
+    context = _repair_context(handoff)
 
     try:
         blob_at_base = git_blob_at(base, rel_task, cwd)
-        if blob_at_base != expected_blob:
+        expected_base_blob = (
+            context.get("pr_base_historical_task_blob_sha") if special else expected_blob
+        )
+        if blob_at_base != expected_base_blob:
             errors.append(
-                f"task blob at base {base} is {blob_at_base}, expected frozen {expected_blob}"
+                f"task blob at base {base} is {blob_at_base}, expected frozen {expected_base_blob}"
             )
     except subprocess.CalledProcessError:
         errors.append(f"task file {rel_task} not found at base {base}")
+
+    if special:
+        handoff_parent = str(context.get("handoff_introduction_parent_sha", ""))
+        try:
+            blob_at_parent = git_blob_at(handoff_parent, rel_task, cwd)
+            if blob_at_parent != expected_blob:
+                errors.append(
+                    f"task blob at Handoff parent {handoff_parent} is {blob_at_parent}, "
+                    f"expected frozen {expected_blob}"
+                )
+        except subprocess.CalledProcessError:
+            errors.append(f"task file {rel_task} not found at Handoff parent {handoff_parent}")
 
     try:
         blob_at_head = git_blob_at(head, rel_task, cwd)
@@ -412,6 +566,36 @@ def validate_handoff_freeze_topology(
 ) -> list[str]:
     """Prove the supplied Head descends from an immutable pre-repair Handoff."""
     rel_handoff = handoff_path.relative_to(cwd).as_posix()
+    special = _is_task029_post_implementation_repair(handoff)
+    context = _repair_context(handoff)
+
+    if special:
+        planning = str(handoff["planning_base_sha"])
+        initial = str(context["initial_coordination_commit_sha"])
+        final = str(context["final_coordination_commit_sha"])
+        if str(context.get("initial_coordination_parent_sha")) != planning:
+            return ["initial coordination parent does not equal planning_base_sha"]
+        try:
+            if git_commit_parents(initial, cwd) != [planning]:
+                return ["initial coordination commit is not the direct child of planning_base_sha"]
+            if git_commit_parents(final, cwd) != [initial]:
+                return ["final coordination commit is not the direct child of initial coordination"]
+            coordination_paths = set(
+                str(path) for path in context.get("coordination_allowed_paths", [])
+            )
+            changed_paths = set(git_diff_name_only(planning, final, cwd))
+            if changed_paths != coordination_paths:
+                return [
+                    "planning-to-final coordination paths differ from the frozen exact set: "
+                    f"{sorted(changed_paths)}"
+                ]
+            protected = context.get("protected_implementation_commits")
+            if not isinstance(protected, list) or not protected or protected[-1] != planning:
+                return ["protected implementation commit list does not terminate at planning Base"]
+            if any(not git_is_ancestor(str(commit), planning, cwd) for commit in protected):
+                return ["a protected implementation commit is not an ancestor of planning Base"]
+        except subprocess.CalledProcessError as exc:
+            return [f"cannot validate post-implementation coordination topology: {exc}"]
 
     # Discover all commits in base..head that touched the handoff file
     try:
@@ -442,8 +626,13 @@ def validate_handoff_freeze_topology(
             f"handoff introduction {intro_commit} must have exactly one parent; "
             f"found {len(parents)}"
         ]
-    if parents[0] != base:
-        return [f"handoff introduction parent {parents[0]} does not equal expected_base_sha {base}"]
+    expected_intro_parent = str(context["handoff_introduction_parent_sha"]) if special else base
+    if parents[0] != expected_intro_parent:
+        expected_label = "expected parent" if special else "expected_base_sha"
+        return [
+            f"handoff introduction parent {parents[0]} does not equal "
+            f"{expected_label} {expected_intro_parent}"
+        ]
 
     try:
         path_status = git_path_status(intro_commit, rel_handoff, cwd)
@@ -464,7 +653,10 @@ def validate_handoff_freeze_topology(
     if not git_is_ancestor(superseded, head, cwd):
         return [f"superseded_head_sha {superseded} is not an ancestor of supplied head {head}"]
 
-    repair_paths = [str(path) for path in handoff["allowed_paths"]]
+    repair_paths = [
+        str(path)
+        for path in (context.get("repair_targets", []) if special else handoff["allowed_paths"])
+    ]
     try:
         repair_commits = git_commits_touching_paths(superseded, head, repair_paths, cwd)
     except subprocess.CalledProcessError as exc:
@@ -528,12 +720,15 @@ def _is_path_allowed(
 ) -> list[str]:
     """Check a single path against both allowed sets and forbidden patterns."""
     errors: list[str] = []
-    if path not in handoff_allowed:
+    path_errors = _repository_path_pattern_errors(path, label=f"path {path!r}")
+    if path_errors:
+        return path_errors
+    if not any(_path_matches(path, pattern) for pattern in handoff_allowed):
         errors.append(f"path {path!r} not in Handoff allowed_paths")
-    if path not in task_allowed:
+    if not any(_path_matches(path, pattern) for pattern in task_allowed):
         errors.append(f"path {path!r} not in task allowed_paths")
     for pattern in forbidden:
-        if fnmatch.fnmatchcase(path, pattern):
+        if _path_matches(path, pattern):
             errors.append(f"path {path!r} matches forbidden pattern {pattern!r}")
     return errors
 
@@ -549,7 +744,15 @@ def validate_paths(
     errors: list[str] = []
     handoff_allowed = set(str(p) for p in handoff["allowed_paths"])
     task_allowed = set(str(p) for p in task_fm.get("allowed_paths", []))
-    forbidden: list[str] = [str(p) for p in task_fm.get("forbidden_paths", [])]
+    forbidden = list(
+        dict.fromkeys(
+            str(path)
+            for path in [
+                *task_fm.get("forbidden_paths", []),
+                *handoff.get("forbidden_paths", []),
+            ]
+        )
+    )
 
     # No-rename diff
     try:
@@ -592,6 +795,17 @@ def run_validation(
     schema_errors = validate_schema(handoff)
     if schema_errors:
         return schema_errors  # Cannot proceed without valid schema
+    for field in ("allowed_paths", "forbidden_paths"):
+        values = task_fm.get(field, [])
+        if not isinstance(values, list):
+            return [f"task {field} must be a list"]
+        task_path_errors = [
+            error
+            for index, value in enumerate(values)
+            for error in _repository_path_pattern_errors(value, label=f"task {field}[{index}]")
+        ]
+        if task_path_errors:
+            return task_path_errors
 
     # 1b. codex_only_paths must contain the handoff record itself
     if handoff_path is not None:
@@ -615,6 +829,7 @@ def run_validation(
             handoff_path,
             task_plan_version,
         )
+        identity_errors.extend(_post_implementation_identity_errors(handoff, handoff_path, cwd))
         if identity_errors:
             return identity_errors
 

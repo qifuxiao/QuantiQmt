@@ -1,4 +1,4 @@
-"""Validate TASK-057 evidence against frozen authority and live GitHub objects.
+"""Validate supported task evidence against frozen authority and live GitHub objects.
 
 Task and Repair Handoff command strings remain opaque exact values. Production network
 access is restricted to bounded, non-redirecting HTTPS GET requests to the fixed GitHub
@@ -31,7 +31,15 @@ ROOT = Path(__file__).resolve().parents[1]
 TASK_PATH = PurePosixPath(
     "tasks/active/TASK-057-tool-neutral-agents-windows-verification-poetry.md"
 )
+TASK029_PATH = PurePosixPath("tasks/active/TASK-029-risk-runtime-schema-contract.md")
+SUPPORTED_TASK_PATHS = {
+    "TASK-029": TASK029_PATH,
+    "TASK-057": TASK_PATH,
+}
 HANDOFF_IDENTITIES = {
+    ("TASK-029-PLAN-v2", "TASK-029-EVIDENCE-REPAIR-v2"): PurePosixPath(
+        "ai/handoffs/TASK-029-EVIDENCE-REPAIR-v2.yaml"
+    ),
     ("TASK-057-PLAN-v3", "TASK-057-REPAIR-v3"): PurePosixPath(
         "ai/handoffs/TASK-057-REPAIR-v3.yaml"
     ),
@@ -39,11 +47,18 @@ HANDOFF_IDENTITIES = {
         "ai/handoffs/TASK-057-REPAIR-v4.yaml"
     ),
 }
+HANDOFF_TASK_IDS = {
+    ("TASK-029-PLAN-v2", "TASK-029-EVIDENCE-REPAIR-v2"): "TASK-029",
+    ("TASK-057-PLAN-v3", "TASK-057-REPAIR-v3"): "TASK-057",
+    ("TASK-057-PLAN-v4", "TASK-057-REPAIR-v4"): "TASK-057",
+}
 ASSIGNMENT_SCHEMA = ROOT / "ai/schemas/agent-assignment.schema.yaml"
 EVIDENCE_SCHEMA = ROOT / "ai/schemas/agent-environment-evidence.schema.yaml"
 SUPPORTED_LANES = {"portable", "windows", "windows_miniqmt"}
 TASK057_REQUIRED_LANES = ("portable", "windows")
 TASK057_PROHIBITED_LANES = ("windows_miniqmt",)
+TASK029_REQUIRED_LANES = ("portable",)
+TASK029_PROHIBITED_LANES = ("windows_miniqmt",)
 GITHUB_API_ORIGIN = "https://api.github.com"
 GITHUB_TIMEOUT_SECONDS = 10.0
 MAX_GITHUB_RESPONSE_BYTES = 262_144
@@ -319,17 +334,23 @@ def authority_errors(
 
     errors: list[str] = []
     task_id = task.get("id")
-    if task_id != "TASK-057" or task.get("status") != "active":
-        errors.append("the exact active task must be TASK-057")
+    if task_id not in SUPPORTED_TASK_PATHS or task.get("status") != "active":
+        errors.append("the exact active task is not supported")
     plan_version = handoff.get("plan_version")
     packet_version = handoff.get("packet_version")
-    expected_handoff_path = (
-        HANDOFF_IDENTITIES.get((plan_version, packet_version))
+    identity = (
+        (plan_version, packet_version)
         if isinstance(plan_version, str) and isinstance(packet_version, str)
         else None
     )
-    if handoff.get("task_id") != task_id or expected_handoff_path is None:
-        errors.append("Repair Handoff identity is not a supported TASK-057 Plan/Handoff pair")
+    expected_handoff_path = HANDOFF_IDENTITIES.get(identity) if identity is not None else None
+    expected_task_id = HANDOFF_TASK_IDS.get(identity) if identity is not None else None
+    if (
+        handoff.get("task_id") != task_id
+        or expected_task_id != task_id
+        or expected_handoff_path is None
+    ):
+        errors.append("Repair Handoff identity is not a supported task/Plan/Handoff tuple")
     if handoff_path is not None and PurePosixPath(handoff_path) != expected_handoff_path:
         errors.append("Repair Handoff filename does not match packet_version")
     for field in ("expected_base_sha", "expected_pr_base_sha", "task_blob_sha"):
@@ -358,27 +379,31 @@ def authority_errors(
 
     task_lanes = verification.get("required_lanes")
     handoff_lanes = handoff.get("required_lanes")
-    errors.extend(_required_lane_errors(task_lanes, label="task required_lanes"))
+    lane_source = handoff_lanes if task_id == "TASK-029" else task_lanes
+    if task_id != "TASK-029":
+        errors.extend(_required_lane_errors(task_lanes, label="task required_lanes"))
     errors.extend(_required_lane_errors(handoff_lanes, label="Handoff required_lanes"))
-    if task_lanes != handoff_lanes:
+    if task_id != "TASK-029" and task_lanes != handoff_lanes:
         errors.append("task and Handoff required_lanes must be deep-equal")
 
     task_prohibited = verification.get("prohibited_lanes")
     handoff_prohibited = handoff.get("prohibited_lanes")
-    if not isinstance(task_prohibited, list) or not task_prohibited:
+    prohibited_source = handoff_prohibited if task_id == "TASK-029" else task_prohibited
+    if task_id != "TASK-029" and (not isinstance(task_prohibited, list) or not task_prohibited):
         errors.append("task prohibited_lanes must be a non-empty list")
         task_prohibited = []
     if not isinstance(handoff_prohibited, list) or not handoff_prohibited:
         errors.append("Handoff prohibited_lanes must be a non-empty list")
         handoff_prohibited = []
-    if task_prohibited != handoff_prohibited:
+    if task_id != "TASK-029" and task_prohibited != handoff_prohibited:
         errors.append("task and Handoff prohibited_lanes must be deep-equal")
-    if any(not isinstance(lane, str) or lane not in SUPPORTED_LANES for lane in task_prohibited):
+    valid_prohibited = prohibited_source if isinstance(prohibited_source, list) else []
+    if any(not isinstance(lane, str) or lane not in SUPPORTED_LANES for lane in valid_prohibited):
         errors.append("prohibited_lanes contains an unknown lane")
-    if len(task_prohibited) != len(set(task_prohibited)):
+    if len(valid_prohibited) != len(set(valid_prohibited)):
         errors.append("prohibited_lanes contains duplicates")
 
-    valid_task_lanes = task_lanes if isinstance(task_lanes, list) else []
+    valid_task_lanes = lane_source if isinstance(lane_source, list) else []
     lane_names = tuple(
         raw_lane.get("lane")
         for raw_lane in valid_task_lanes
@@ -386,8 +411,12 @@ def authority_errors(
     )
     if task_id == "TASK-057" and lane_names != TASK057_REQUIRED_LANES:
         errors.append("TASK-057 required lanes must be exactly portable and windows")
-    if task_id == "TASK-057" and tuple(task_prohibited) != TASK057_PROHIBITED_LANES:
+    if task_id == "TASK-057" and tuple(valid_prohibited) != TASK057_PROHIBITED_LANES:
         errors.append("TASK-057 must prohibit windows_miniqmt")
+    if task_id == "TASK-029" and lane_names != TASK029_REQUIRED_LANES:
+        errors.append("TASK-029 required lanes must be exactly portable")
+    if task_id == "TASK-029" and tuple(valid_prohibited) != TASK029_PROHIBITED_LANES:
+        errors.append("TASK-029 must prohibit windows_miniqmt")
 
     lane_commands: list[str] = []
     for raw_lane in valid_task_lanes:
@@ -414,6 +443,14 @@ def build_authority(
     if errors:
         raise ValueError("; ".join(errors))
     verification = task["verification"]
+    required_lanes = (
+        handoff["required_lanes"] if task["id"] == "TASK-029" else verification["required_lanes"]
+    )
+    prohibited_lanes = (
+        handoff["prohibited_lanes"]
+        if task["id"] == "TASK-029"
+        else verification["prohibited_lanes"]
+    )
     lanes = tuple(
         LaneRequirement(
             lane=raw_lane["lane"],
@@ -421,7 +458,7 @@ def build_authority(
             minimum_records=raw_lane["minimum_records"],
             commands=tuple(raw_lane["commands"]),
         )
-        for raw_lane in verification["required_lanes"]
+        for raw_lane in required_lanes
     )
     github_raw = handoff["github_authority"]
     comment_raw = github_raw["assignment_comment"]
@@ -447,7 +484,7 @@ def build_authority(
         superseded_head=handoff["repair_context"]["superseded_head_sha"],
         verification_commands=list(verification["commands"]),
         required_lanes=lanes,
-        prohibited_lanes=tuple(verification["prohibited_lanes"]),
+        prohibited_lanes=tuple(prohibited_lanes),
         github=github,
     )
 
@@ -456,17 +493,38 @@ def load_authority_from_git(
     repo: Path,
     *,
     head: str,
-    task_path: Path | PurePosixPath = TASK_PATH,
+    task_path: Path | PurePosixPath | None = None,
     handoff_path: Path | PurePosixPath | None = None,
 ) -> Authority:
     """Read the unique active task and supported Repair Handoff from an exact tree."""
 
     repo = repo.resolve()
     resolved_head = _git(repo, "rev-parse", "--verify", f"{head}^{{commit}}")
-    task_posix = PurePosixPath(task_path).as_posix()
-    if task_posix != TASK_PATH.as_posix():
-        raise ValueError("active task path is fixed by TASK-057")
-    supported_paths = tuple(HANDOFF_IDENTITIES.values())
+    task_files = _git(repo, "ls-tree", "-r", "--name-only", resolved_head, "--", "tasks/active")
+    active: list[str] = []
+    for path in task_files.splitlines():
+        if not path.endswith(".md") or path.endswith("/README.md"):
+            continue
+        candidate = _parse_front_matter(_git(repo, "show", f"{resolved_head}:{path}"))
+        if candidate.get("status") == "active":
+            active.append(path)
+    if len(active) != 1:
+        raise ValueError(f"exact Git Head must contain exactly one active task; got {active}")
+
+    task_posix = active[0]
+    if task_path is not None and PurePosixPath(task_path).as_posix() != task_posix:
+        raise ValueError("caller task path does not match the unique active task")
+    task = _parse_front_matter(_git(repo, "show", f"{resolved_head}:{task_posix}"))
+    task_id = task.get("id")
+    expected_task_path = SUPPORTED_TASK_PATHS.get(str(task_id))
+    if expected_task_path is None or task_posix != expected_task_path.as_posix():
+        raise ValueError("unique active task path/identity is not supported")
+
+    supported_paths = tuple(
+        path
+        for identity, path in HANDOFF_IDENTITIES.items()
+        if HANDOFF_TASK_IDS[identity] == task_id
+    )
     if handoff_path is None:
         tree_paths = set(
             _git(repo, "ls-tree", "-r", "--name-only", resolved_head, "--", "ai/handoffs")
@@ -478,26 +536,13 @@ def load_authority_from_git(
             None,
         )
         if selected_path is None:
-            raise ValueError("exact Git Head has no supported TASK-057 Repair Handoff")
+            raise ValueError("exact Git Head has no supported Repair Handoff for the active task")
         handoff_posix = selected_path.as_posix()
     else:
         selected_path = PurePosixPath(handoff_path)
         if selected_path not in supported_paths:
-            raise ValueError("Handoff path is not supported by TASK-057")
+            raise ValueError("Handoff path is not supported by the unique active task")
         handoff_posix = selected_path.as_posix()
-    task_files = _git(repo, "ls-tree", "-r", "--name-only", resolved_head, "--", "tasks/active")
-    active: list[str] = []
-    for path in task_files.splitlines():
-        if not path.endswith(".md") or path.endswith("/README.md"):
-            continue
-        candidate = _parse_front_matter(_git(repo, "show", f"{resolved_head}:{path}"))
-        if candidate.get("status") == "active":
-            active.append(path)
-    if active != [task_posix]:
-        raise ValueError(
-            f"exact Git Head must contain one active task at {task_posix}; got {active}"
-        )
-    task = _parse_front_matter(_git(repo, "show", f"{resolved_head}:{task_posix}"))
     handoff = _load_yaml_text(
         _git(repo, "show", f"{resolved_head}:{handoff_posix}"), "Repair Handoff"
     )
@@ -1098,7 +1143,7 @@ def _token_from_environment() -> str | None:
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Validate frozen TASK-057 evidence against live GitHub authority."
+        description="Validate frozen task evidence against live GitHub authority."
     )
     parser.add_argument("--evidence-comment", required=True)
     parser.add_argument("--base-ref", default="origin/main")
