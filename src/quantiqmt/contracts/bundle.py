@@ -92,14 +92,23 @@ class SchemaBundle:
     def schema_by_uri(self, uri: str) -> Mapping[str, Any]:
         """Resolve one bundled JSON Schema URI and optional JSON Pointer."""
         base, separator, fragment = uri.partition("#")
-        candidates_by_path = {
-            cast(str, entry["path"]): entry["document"]
-            for entry in (*self._document["contracts"], *self._document["routes"])
-            if isinstance(entry, Mapping)
-            and isinstance(entry.get("path"), str)
-            and isinstance(entry.get("document"), Mapping)
-            and entry["document"].get("$id") == base
-        }
+        candidates_by_path: dict[str, Mapping[str, Any]] = {}
+        for entry in (*self._document["contracts"], *self._document["routes"]):
+            if (
+                not isinstance(entry, Mapping)
+                or not isinstance(entry.get("path"), str)
+                or not isinstance(entry.get("document"), Mapping)
+                or entry["document"].get("$id") != base
+            ):
+                continue
+            path = cast(str, entry["path"])
+            candidate = cast(Mapping[str, Any], entry["document"])
+            canonical = candidates_by_path.get(path)
+            if canonical is not None:
+                if canonical != candidate:
+                    raise BundleIntegrityError(f"divergent canonical schema path: {path}")
+                continue
+            candidates_by_path[path] = candidate
         candidates = list(candidates_by_path.values())
         if len(candidates) != 1:
             raise BundleIntegrityError(f"schema URI is not uniquely resolved: {base}")
@@ -172,9 +181,19 @@ def build_schema_bundle(spec_root: Path) -> SchemaBundle:
     if catalog is None:
         raise BundleIntegrityError("CONTRACT-CATALOG is missing from manifest")
     routes = _parse_active_routes(cast(str, catalog["content"]), spec_root)
+    canonical_entries = {
+        cast(str, entry["path"]): entry
+        for entry in contracts
+        if cast(str, entry["path"]).endswith(".schema.json")
+    }
     for route in routes:
         route_path = cast(str, route["path"])
-        documents_by_path.setdefault(route_path, route["document"])
+        canonical = canonical_entries.get(route_path)
+        if canonical is not None:
+            _require_identical_schema_copy(route_path, canonical, route)
+        else:
+            canonical_entries[route_path] = route
+            documents_by_path[route_path] = route["document"]
 
     documents_by_id: dict[str, Any] = {}
     for schema_path, schema in documents_by_path.items():
@@ -310,6 +329,24 @@ def _parse_contract_document(path: str, content: str) -> Any:
     return content
 
 
+def _require_identical_schema_copy(
+    path: str,
+    canonical: Mapping[str, Any],
+    candidate: Mapping[str, Any],
+) -> None:
+    """Reject divergent copies before a canonical Schema graph is exposed."""
+
+    fields = ("sha256", "document_sha256", "content", "document")
+    if any(canonical.get(field) != candidate.get(field) for field in fields):
+        raise BundleIntegrityError(f"divergent canonical schema path: {path}")
+    canonical_document = canonical.get("document")
+    candidate_document = candidate.get("document")
+    if not isinstance(canonical_document, Mapping) or not isinstance(candidate_document, Mapping):
+        raise BundleIntegrityError(f"divergent canonical schema path: {path}")
+    if canonical_document.get("$id") != candidate_document.get("$id"):
+        raise BundleIntegrityError(f"divergent canonical schema path: {path}")
+
+
 def _validate_schema_references(
     document: Any,
     path: str,
@@ -423,6 +460,13 @@ def _verify_bundle(document: dict[str, Any]) -> None:
     ):
         raise BundleIntegrityError("schema bundle is missing the required Risk contract graph")
     route_names: set[str] = set()
+    canonical_entries = {
+        cast(str, entry["path"]): entry
+        for entry in contracts
+        if isinstance(entry, Mapping)
+        and isinstance(entry.get("path"), str)
+        and cast(str, entry["path"]).endswith(".schema.json")
+    }
     for route in routes:
         if not isinstance(route, dict):
             raise BundleIntegrityError("schema bundle route is malformed")
@@ -445,7 +489,12 @@ def _verify_bundle(document: dict[str, Any]) -> None:
         if path.endswith(".json") and _parse_contract_document(path, content) != route_document:
             raise BundleIntegrityError(f"route content/document mismatch: {name}")
         if path.endswith(".schema.json"):
-            documents_by_path.setdefault(path, route_document)
+            canonical = canonical_entries.get(path)
+            if canonical is not None:
+                _require_identical_schema_copy(path, canonical, route)
+            else:
+                canonical_entries[path] = route
+                documents_by_path[path] = route_document
     if "risk.order_evaluated.v2" not in route_names:
         raise BundleIntegrityError("schema bundle is missing the Risk v2 Catalog route")
     documents_by_id: dict[str, Any] = {}

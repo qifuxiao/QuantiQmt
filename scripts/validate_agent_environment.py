@@ -40,6 +40,9 @@ HANDOFF_IDENTITIES = {
     ("TASK-029-PLAN-v2", "TASK-029-EVIDENCE-REPAIR-v2"): PurePosixPath(
         "ai/handoffs/TASK-029-EVIDENCE-REPAIR-v2.yaml"
     ),
+    ("TASK-029-PLAN-v2", "TASK-029-REVIEW-REPAIR-v3"): PurePosixPath(
+        "ai/handoffs/TASK-029-REVIEW-REPAIR-v3.yaml"
+    ),
     ("TASK-057-PLAN-v3", "TASK-057-REPAIR-v3"): PurePosixPath(
         "ai/handoffs/TASK-057-REPAIR-v3.yaml"
     ),
@@ -49,6 +52,7 @@ HANDOFF_IDENTITIES = {
 }
 HANDOFF_TASK_IDS = {
     ("TASK-029-PLAN-v2", "TASK-029-EVIDENCE-REPAIR-v2"): "TASK-029",
+    ("TASK-029-PLAN-v2", "TASK-029-REVIEW-REPAIR-v3"): "TASK-029",
     ("TASK-057-PLAN-v3", "TASK-057-REPAIR-v3"): "TASK-057",
     ("TASK-057-PLAN-v4", "TASK-057-REPAIR-v4"): "TASK-057",
 }
@@ -216,6 +220,17 @@ def _required_lane_errors(value: object, *, label: str) -> list[str]:
     return errors
 
 
+def _prohibited_lane_errors(value: object, *, label: str) -> list[str]:
+    if not isinstance(value, list) or not value:
+        return [f"{label} must be a non-empty list"]
+    errors: list[str] = []
+    if any(not isinstance(lane, str) or lane not in SUPPORTED_LANES for lane in value):
+        errors.append(f"{label} contains an unknown lane")
+    if len(value) != len(set(str(lane) for lane in value)):
+        errors.append(f"{label} contains duplicates")
+    return errors
+
+
 def _producer_errors(value: object, *, label: str) -> list[str]:
     producer = _mapping(value)
     if producer is None:
@@ -379,31 +394,20 @@ def authority_errors(
 
     task_lanes = verification.get("required_lanes")
     handoff_lanes = handoff.get("required_lanes")
-    lane_source = handoff_lanes if task_id == "TASK-029" else task_lanes
-    if task_id != "TASK-029":
-        errors.extend(_required_lane_errors(task_lanes, label="task required_lanes"))
+    errors.extend(_required_lane_errors(task_lanes, label="task required_lanes"))
     errors.extend(_required_lane_errors(handoff_lanes, label="Handoff required_lanes"))
-    if task_id != "TASK-029" and task_lanes != handoff_lanes:
+    if task_lanes != handoff_lanes:
         errors.append("task and Handoff required_lanes must be deep-equal")
 
     task_prohibited = verification.get("prohibited_lanes")
     handoff_prohibited = handoff.get("prohibited_lanes")
-    prohibited_source = handoff_prohibited if task_id == "TASK-029" else task_prohibited
-    if task_id != "TASK-029" and (not isinstance(task_prohibited, list) or not task_prohibited):
-        errors.append("task prohibited_lanes must be a non-empty list")
-        task_prohibited = []
-    if not isinstance(handoff_prohibited, list) or not handoff_prohibited:
-        errors.append("Handoff prohibited_lanes must be a non-empty list")
-        handoff_prohibited = []
-    if task_id != "TASK-029" and task_prohibited != handoff_prohibited:
+    errors.extend(_prohibited_lane_errors(task_prohibited, label="task prohibited_lanes"))
+    errors.extend(_prohibited_lane_errors(handoff_prohibited, label="Handoff prohibited_lanes"))
+    if task_prohibited != handoff_prohibited:
         errors.append("task and Handoff prohibited_lanes must be deep-equal")
-    valid_prohibited = prohibited_source if isinstance(prohibited_source, list) else []
-    if any(not isinstance(lane, str) or lane not in SUPPORTED_LANES for lane in valid_prohibited):
-        errors.append("prohibited_lanes contains an unknown lane")
-    if len(valid_prohibited) != len(set(valid_prohibited)):
-        errors.append("prohibited_lanes contains duplicates")
+    valid_prohibited = task_prohibited if isinstance(task_prohibited, list) else []
 
-    valid_task_lanes = lane_source if isinstance(lane_source, list) else []
+    valid_task_lanes = task_lanes if isinstance(task_lanes, list) else []
     lane_names = tuple(
         raw_lane.get("lane")
         for raw_lane in valid_task_lanes
@@ -443,14 +447,8 @@ def build_authority(
     if errors:
         raise ValueError("; ".join(errors))
     verification = task["verification"]
-    required_lanes = (
-        handoff["required_lanes"] if task["id"] == "TASK-029" else verification["required_lanes"]
-    )
-    prohibited_lanes = (
-        handoff["prohibited_lanes"]
-        if task["id"] == "TASK-029"
-        else verification["prohibited_lanes"]
-    )
+    required_lanes = verification["required_lanes"]
+    prohibited_lanes = verification["prohibited_lanes"]
     lanes = tuple(
         LaneRequirement(
             lane=raw_lane["lane"],

@@ -82,6 +82,28 @@ def test_loaded_bundle_rechecks_references_after_all_digests_are_recomputed() ->
         SchemaBundle.from_bytes(json.dumps(document).encode("utf-8"))
 
 
+def test_loaded_bundle_rejects_divergent_contract_and_route_for_canonical_path() -> None:
+    document = json.loads(SchemaBundle.installed().to_bytes())
+    route = next(
+        item for item in document["routes"] if item["message_type"] == "risk.order_evaluated.v2"
+    )
+    changed = deepcopy(route["document"])
+    changed["properties"]["decision"]["properties"]["rule_results"]["items"]["properties"][
+        "priority"
+    ]["minimum"] = -1
+    content = json.dumps(changed, indent=2) + "\n"
+    route["content"] = content
+    route["document"] = changed
+    route["sha256"] = hashlib.sha256(content.encode("utf-8")).hexdigest()
+    route["document_sha256"] = _digest(changed)
+    projection = dict(document)
+    projection.pop("bundle_digest")
+    document["bundle_digest"] = _digest(projection)
+
+    with pytest.raises(BundleIntegrityError, match="divergent canonical schema path"):
+        SchemaBundle.from_bytes(json.dumps(document).encode("utf-8"))
+
+
 @pytest.mark.parametrize(
     ("mutation", "message"),
     [

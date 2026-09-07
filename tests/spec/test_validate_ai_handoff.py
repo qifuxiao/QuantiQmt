@@ -1150,7 +1150,7 @@ def test_forbidden_subtree_has_precedence_over_both_allowlists() -> None:
     ]
 
 
-def test_task029_exact_post_implementation_handoff_passes_at_current_head() -> None:
+def test_task029_exact_post_implementation_handoff_passes_at_frozen_head() -> None:
     task = ROOT / "tasks/active/TASK-029-risk-runtime-schema-contract.md"
     handoff = ROOT / "ai/handoffs/TASK-029-EVIDENCE-REPAIR-v2.yaml"
     frozen = yaml.safe_load(handoff.read_text(encoding="utf-8"))
@@ -1166,7 +1166,7 @@ def test_task029_exact_post_implementation_handoff_passes_at_current_head() -> N
             "--base-ref",
             str(frozen["expected_base_sha"]),
             "--head",
-            "HEAD",
+            "8b4c76d691849b126810be8953bfa7210ce18f43",
             "--pr-base",
             str(frozen["expected_pr_base_sha"]),
         ],
@@ -1210,5 +1210,52 @@ def test_task029_post_implementation_tuple_drift_fails_closed() -> None:
     handoff_path = ROOT / "ai/handoffs/TASK-029-EVIDENCE-REPAIR-v2.yaml"
     handoff = yaml.safe_load(handoff_path.read_text(encoding="utf-8"))
     handoff["repair_context"]["allowlisted_topology_tuple"]["pull_request_number"] = 999
+
+    assert validator._post_implementation_identity_errors(handoff, handoff_path, ROOT)
+
+
+def test_task029_review_repair_v3_handoff_passes_at_current_head() -> None:
+    task = ROOT / "tasks/active/TASK-029-risk-runtime-schema-contract.md"
+    handoff = ROOT / "ai/handoffs/TASK-029-REVIEW-REPAIR-v3.yaml"
+    frozen = yaml.safe_load(handoff.read_text(encoding="utf-8"))
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(VALIDATOR),
+            "--task",
+            str(task),
+            "--handoff",
+            str(handoff),
+            "--base-ref",
+            str(frozen["expected_base_sha"]),
+            "--head",
+            "HEAD",
+            "--pr-base",
+            str(frozen["expected_pr_base_sha"]),
+        ],
+        capture_output=True,
+        text=True,
+        cwd=ROOT,
+    )
+
+    assert result.returncode == 0, f"stdout={result.stdout}\nstderr={result.stderr}"
+    assert "Handoff validation passed." in result.stdout
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    (
+        ("repair_planning_base_sha", SHA_A),
+        ("coordinator_plan_packet_commit_sha", SHA_A),
+        ("handoff_introduction_parent_sha", SHA_A),
+        ("task_blob_sha", SHA_A),
+    ),
+)
+def test_task029_review_repair_v3_context_drift_fails_closed(field: str, value: str) -> None:
+    validator = _load_validator()
+    handoff_path = ROOT / "ai/handoffs/TASK-029-REVIEW-REPAIR-v3.yaml"
+    handoff = yaml.safe_load(handoff_path.read_text(encoding="utf-8"))
+    handoff["repair_context"][field] = value
 
     assert validator._post_implementation_identity_errors(handoff, handoff_path, ROOT)

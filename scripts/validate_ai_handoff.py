@@ -55,6 +55,7 @@ REQUIRED_FIELDS = (
 SHA_FIELDS = ("planning_base_sha", "expected_base_sha", "expected_pr_base_sha", "task_blob_sha")
 
 POST_IMPLEMENTATION_TOPOLOGY_IDENTITY = "post_implementation_repair_v1"
+REVIEW_REPAIR_TOPOLOGY_IDENTITY = "task_029_review_repair_v1"
 TASK029_TOPOLOGY_TUPLE: dict[str, object] = {
     "task_id": "TASK-029",
     "plan_version": "TASK-029-PLAN-v2",
@@ -94,6 +95,51 @@ TASK029_TOPOLOGY_CONTEXT: dict[str, object] = {
         "tests/spec/test_validate_agent_environment.py",
     ],
 }
+TASK029_REVIEW_TOPOLOGY_TUPLE: dict[str, object] = {
+    "task_id": "TASK-029",
+    "plan_version": "TASK-029-PLAN-v2",
+    "packet_version": "TASK-029-REVIEW-REPAIR-v3",
+    "handoff_path": "ai/handoffs/TASK-029-REVIEW-REPAIR-v3.yaml",
+    "pull_request_number": 110,
+    "expected_base_sha": "b4b3f07c734c894032bd02f98e8cc914aa26f5d5",
+    "planning_base_sha": "8b4c76d691849b126810be8953bfa7210ce18f43",
+}
+TASK029_REVIEW_TOPOLOGY_CONTEXT: dict[str, object] = {
+    "reviewed_head_sha": "8b4c76d691849b126810be8953bfa7210ce18f43",
+    "superseded_head_sha": "8b4c76d691849b126810be8953bfa7210ce18f43",
+    "current_pr_head_sha": "8b4c76d691849b126810be8953bfa7210ce18f43",
+    "coordinator_plan_packet_commit_sha": "55b2c1f38fcbf43796aa651c16b6d321b51b55ba",
+    "coordinator_commit_parent_sha": "8b4c76d691849b126810be8953bfa7210ce18f43",
+    "initial_coordination_commit_sha": "55b2c1f38fcbf43796aa651c16b6d321b51b55ba",
+    "initial_coordination_parent_sha": "8b4c76d691849b126810be8953bfa7210ce18f43",
+    "final_coordination_commit_sha": "55b2c1f38fcbf43796aa651c16b6d321b51b55ba",
+    "handoff_introduction_parent_sha": "55b2c1f38fcbf43796aa651c16b6d321b51b55ba",
+    "coordination_allowed_paths": [
+        "tasks/active/TASK-029-risk-runtime-schema-contract.md",
+        "ai/packets/TASK-029-REVIEW-REPAIR-v3.md",
+    ],
+    "handoff_add_only_path": "ai/handoffs/TASK-029-REVIEW-REPAIR-v3.yaml",
+    "implementation_pr_number": 110,
+    "implementation_pr_base_sha": "b4b3f07c734c894032bd02f98e8cc914aa26f5d5",
+    "repair_planning_base_sha": "8b4c76d691849b126810be8953bfa7210ce18f43",
+    "task_blob_sha": "66b2830c3f10c45f74e04c4f0246e1f62fd51f9d",
+    "plan_v2_task_blob_sha": "66b2830c3f10c45f74e04c4f0246e1f62fd51f9d",
+    "pr_base_historical_task_blob_sha": "131eadc3c966db0f2173539a040aaa45a02959fa",
+    "repair_packet": {
+        "identity": "TASK-029-REVIEW-REPAIR-v3",
+        "path": "ai/packets/TASK-029-REVIEW-REPAIR-v3.md",
+        "blob_sha": "0dc686d9521576a19d10f0e08eb25e9c344ad188",
+    },
+    "repair_targets": [
+        "src/quantiqmt/contracts/bundle.py",
+        "tests/unit/contracts/**",
+        "scripts/validate_agent_environment.py",
+        "tests/spec/test_validate_agent_environment.py",
+        "scripts/validate_ai_handoff.py",
+        "tests/spec/test_validate_ai_handoff.py",
+    ],
+}
+TASK029_REVIEW_HANDOFF_BLOB = "bcac6fb5ce2daf6b7608bcef74d3b30a94c96085"
 
 
 def git(*args: str, cwd: Path) -> str:
@@ -320,7 +366,7 @@ def _repair_context(handoff: dict[str, Any]) -> dict[str, Any]:
 
 def _is_task029_post_implementation_repair(handoff: dict[str, Any]) -> bool:
     context = _repair_context(handoff)
-    return (
+    evidence_repair = (
         context.get("topology_identity") == POST_IMPLEMENTATION_TOPOLOGY_IDENTITY
         and context.get("allowlisted_topology_tuple") == TASK029_TOPOLOGY_TUPLE
         and handoff.get("task_id") == TASK029_TOPOLOGY_TUPLE["task_id"]
@@ -329,27 +375,59 @@ def _is_task029_post_implementation_repair(handoff: dict[str, Any]) -> bool:
         and handoff.get("expected_base_sha") == TASK029_TOPOLOGY_TUPLE["expected_base_sha"]
         and handoff.get("planning_base_sha") == TASK029_TOPOLOGY_TUPLE["planning_base_sha"]
     )
+    review_repair = (
+        context.get("topology_identity") == REVIEW_REPAIR_TOPOLOGY_IDENTITY
+        and context.get("allowlisted_topology_tuple") == TASK029_REVIEW_TOPOLOGY_TUPLE
+        and handoff.get("task_id") == TASK029_REVIEW_TOPOLOGY_TUPLE["task_id"]
+        and handoff.get("plan_version") == TASK029_REVIEW_TOPOLOGY_TUPLE["plan_version"]
+        and handoff.get("packet_version") == TASK029_REVIEW_TOPOLOGY_TUPLE["packet_version"]
+        and handoff.get("expected_base_sha") == TASK029_REVIEW_TOPOLOGY_TUPLE["expected_base_sha"]
+        and handoff.get("planning_base_sha") == TASK029_REVIEW_TOPOLOGY_TUPLE["planning_base_sha"]
+    )
+    return evidence_repair or review_repair
+
+
+def _is_task029_review_repair(handoff: dict[str, Any]) -> bool:
+    context = _repair_context(handoff)
+    return (
+        context.get("topology_identity") == REVIEW_REPAIR_TOPOLOGY_IDENTITY
+        and context.get("allowlisted_topology_tuple") == TASK029_REVIEW_TOPOLOGY_TUPLE
+        and handoff.get("task_id") == TASK029_REVIEW_TOPOLOGY_TUPLE["task_id"]
+        and handoff.get("plan_version") == TASK029_REVIEW_TOPOLOGY_TUPLE["plan_version"]
+        and handoff.get("packet_version") == TASK029_REVIEW_TOPOLOGY_TUPLE["packet_version"]
+        and handoff.get("expected_base_sha") == TASK029_REVIEW_TOPOLOGY_TUPLE["expected_base_sha"]
+        and handoff.get("planning_base_sha") == TASK029_REVIEW_TOPOLOGY_TUPLE["planning_base_sha"]
+    )
 
 
 def _post_implementation_identity_errors(
     handoff: dict[str, Any], handoff_path: Path, cwd: Path
 ) -> list[str]:
     context = _repair_context(handoff)
-    if context.get("topology_identity") != POST_IMPLEMENTATION_TOPOLOGY_IDENTITY:
+    identity = context.get("topology_identity")
+    if identity not in {
+        POST_IMPLEMENTATION_TOPOLOGY_IDENTITY,
+        REVIEW_REPAIR_TOPOLOGY_IDENTITY,
+    }:
         return []
     errors: list[str] = []
     try:
         relative_path = handoff_path.relative_to(cwd).as_posix()
     except ValueError:
         relative_path = ""
+    review_repair = identity == REVIEW_REPAIR_TOPOLOGY_IDENTITY
+    expected_tuple = TASK029_REVIEW_TOPOLOGY_TUPLE if review_repair else TASK029_TOPOLOGY_TUPLE
+    expected_context = (
+        TASK029_REVIEW_TOPOLOGY_CONTEXT if review_repair else TASK029_TOPOLOGY_CONTEXT
+    )
     if not _is_task029_post_implementation_repair(handoff):
         errors.append("post-implementation repair topology is not the frozen TASK-029 tuple")
-    for field, expected in TASK029_TOPOLOGY_CONTEXT.items():
+    for field, expected in expected_context.items():
         if context.get(field) != expected:
             errors.append(f"post-implementation repair context field {field} is not frozen")
-    if relative_path != TASK029_TOPOLOGY_TUPLE["handoff_path"]:
+    if relative_path != expected_tuple["handoff_path"]:
         errors.append("post-implementation repair Handoff path is not the frozen TASK-029 path")
-    if context.get("implementation_pr_number") != TASK029_TOPOLOGY_TUPLE["pull_request_number"]:
+    if context.get("implementation_pr_number") != expected_tuple["pull_request_number"]:
         errors.append("post-implementation repair PR number is not frozen")
     return errors
 
@@ -578,7 +656,9 @@ def validate_handoff_freeze_topology(
         try:
             if git_commit_parents(initial, cwd) != [planning]:
                 return ["initial coordination commit is not the direct child of planning_base_sha"]
-            if git_commit_parents(final, cwd) != [initial]:
+            if not _is_task029_review_repair(handoff) and git_commit_parents(final, cwd) != [
+                initial
+            ]:
                 return ["final coordination commit is not the direct child of initial coordination"]
             coordination_paths = set(
                 str(path) for path in context.get("coordination_allowed_paths", [])
@@ -589,13 +669,32 @@ def validate_handoff_freeze_topology(
                     "planning-to-final coordination paths differ from the frozen exact set: "
                     f"{sorted(changed_paths)}"
                 ]
-            protected = context.get("protected_implementation_commits")
-            if not isinstance(protected, list) or not protected or protected[-1] != planning:
-                return ["protected implementation commit list does not terminate at planning Base"]
-            if any(not git_is_ancestor(str(commit), planning, cwd) for commit in protected):
-                return ["a protected implementation commit is not an ancestor of planning Base"]
+            if not _is_task029_review_repair(handoff):
+                protected = context.get("protected_implementation_commits")
+                if not isinstance(protected, list) or not protected or protected[-1] != planning:
+                    return [
+                        "protected implementation commit list does not terminate at planning Base"
+                    ]
+                if any(not git_is_ancestor(str(commit), planning, cwd) for commit in protected):
+                    return ["a protected implementation commit is not an ancestor of planning Base"]
         except subprocess.CalledProcessError as exc:
             return [f"cannot validate post-implementation coordination topology: {exc}"]
+
+        if _is_task029_review_repair(handoff):
+            packet = context["repair_packet"]
+            assert isinstance(packet, dict)
+            packet_path = str(packet["path"])
+            packet_blob = str(packet["blob_sha"])
+            task_path = "tasks/active/TASK-029-risk-runtime-schema-contract.md"
+            task_blob = str(handoff["task_blob_sha"])
+            try:
+                for ref in (final, head):
+                    if git_blob_at(ref, packet_path, cwd) != packet_blob:
+                        return [f"review-repair Packet blob is not frozen at {ref}"]
+                    if git_blob_at(ref, task_path, cwd) != task_blob:
+                        return [f"review-repair task blob is not frozen at {ref}"]
+            except subprocess.CalledProcessError as exc:
+                return [f"cannot validate review-repair frozen blobs: {exc}"]
 
     # Discover all commits in base..head that touched the handoff file
     try:
@@ -675,6 +774,8 @@ def validate_handoff_freeze_topology(
         blob_at_intro = git_blob_at(intro_commit, rel_handoff, cwd)
     except subprocess.CalledProcessError:
         return [f"handoff record {rel_handoff} not readable at introduction commit {intro_commit}"]
+    if _is_task029_review_repair(handoff) and blob_at_intro != TASK029_REVIEW_HANDOFF_BLOB:
+        return ["review-repair Handoff introduction blob does not match the frozen identity"]
 
     # Prove continuous immutability at every descendant commit state that is
     # also an ancestor of the supplied exact Head. This catches merge results

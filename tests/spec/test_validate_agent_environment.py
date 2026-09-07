@@ -24,6 +24,7 @@ HANDOFF_V3_PATH = ROOT / "ai/handoffs/TASK-057-REPAIR-v3.yaml"
 HANDOFF_V4_PATH = ROOT / "ai/handoffs/TASK-057-REPAIR-v4.yaml"
 TASK029_PATH = ROOT / "tasks/active/TASK-029-risk-runtime-schema-contract.md"
 HANDOFF029_PATH = ROOT / "ai/handoffs/TASK-029-EVIDENCE-REPAIR-v2.yaml"
+HANDOFF029_V3_PATH = ROOT / "ai/handoffs/TASK-029-REVIEW-REPAIR-v3.yaml"
 ASSIGNMENT_SCHEMA_PATH = ROOT / "ai/schemas/agent-assignment.schema.yaml"
 EVIDENCE_SCHEMA_PATH = ROOT / "ai/schemas/agent-environment-evidence.schema.yaml"
 REPOSITORY = "qifuxiao/QuantiQmt"
@@ -59,6 +60,10 @@ def _task029() -> dict[str, Any]:
 
 def _handoff029() -> dict[str, Any]:
     return _handoff(HANDOFF029_PATH)
+
+
+def _handoff029_v3() -> dict[str, Any]:
+    return _handoff(HANDOFF029_V3_PATH)
 
 
 def _canonical_body(sentinel: str, document: dict[str, Any]) -> str:
@@ -386,6 +391,75 @@ def test_task029_authority_uses_exact_handoff_lanes_to_partition_task_commands()
     assert Counter(
         command for lane in authority.required_lanes for command in lane.commands
     ) == Counter(authority.verification_commands)
+
+
+def test_task029_review_repair_v3_authority_is_supported() -> None:
+    authority = validator.build_authority(
+        _task029(),
+        _handoff029_v3(),
+        handoff_path=HANDOFF029_V3_PATH.relative_to(ROOT),
+    )
+
+    assert authority.task_id == "TASK-029"
+    assert authority.plan_version == "TASK-029-PLAN-v2"
+    assert [lane.lane for lane in authority.required_lanes] == ["portable"]
+    assert authority.prohibited_lanes == ("windows_miniqmt",)
+
+
+@pytest.mark.parametrize(
+    "case",
+    (
+        "missing_task_required",
+        "missing_handoff_required",
+        "conflicting_required",
+        "reordered_commands",
+        "duplicated_command",
+        "substituted_command",
+        "additional_command",
+        "prohibited_mismatch",
+    ),
+)
+def test_task029_task_and_handoff_lanes_are_independently_valid_and_deep_equal(
+    case: str,
+) -> None:
+    task = _task029()
+    handoff = _handoff029_v3()
+    task_lanes = task["verification"]["required_lanes"]
+    if case == "missing_task_required":
+        del task["verification"]["required_lanes"]
+    elif case == "missing_handoff_required":
+        del handoff["required_lanes"]
+    elif case == "conflicting_required":
+        task_lanes[0]["minimum_records"] = 2
+    elif case == "reordered_commands":
+        task_lanes[0]["commands"][0], task_lanes[0]["commands"][1] = (
+            task_lanes[0]["commands"][1],
+            task_lanes[0]["commands"][0],
+        )
+    elif case == "duplicated_command":
+        task_lanes[0]["commands"][1] = task_lanes[0]["commands"][0]
+    elif case == "substituted_command":
+        task_lanes[0]["commands"][0] += " "
+    elif case == "additional_command":
+        task_lanes[0]["commands"].append("poetry run pytest extra")
+    else:
+        task["verification"]["prohibited_lanes"] = ["windows"]
+
+    errors = validator.authority_errors(
+        task,
+        handoff,
+        handoff_path=HANDOFF029_V3_PATH.relative_to(ROOT),
+    )
+
+    assert errors
+    if case == "missing_task_required":
+        assert "task required_lanes must be a non-empty list" in errors
+    elif case == "missing_handoff_required":
+        assert "Handoff required_lanes must be a non-empty list" in errors
+    elif case == "prohibited_mismatch":
+        assert "task and Handoff prohibited_lanes must be deep-equal" in errors
+    else:
+        assert "task and Handoff required_lanes must be deep-equal" in errors
 
 
 def test_git_loader_discovers_unique_task029_authority_from_exact_head() -> None:
