@@ -4,11 +4,15 @@ from __future__ import annotations
 
 import re
 import uuid
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from datetime import date, datetime
-from typing import Any, cast
+from functools import lru_cache
+from typing import TYPE_CHECKING, Any, cast
 
 from quantiqmt.contracts.errors import ContractValidationError
+
+if TYPE_CHECKING:
+    from quantiqmt.contracts.registry import SchemaRegistry
 
 JsonValue = None | bool | int | float | str | list["JsonValue"] | dict[str, "JsonValue"]
 _RFC3339 = re.compile(
@@ -23,25 +27,52 @@ def validate(
     *,
     path: str = "$",
     _root: Mapping[str, Any] | None = None,
+    _resolver: Callable[[str], Mapping[str, Any]] | None = None,
 ) -> None:
     """Validate one instance against the contract-supported schema subset."""
     root = schema if _root is None else _root
     reference = schema.get("$ref")
     if reference is not None:
-        if not isinstance(reference, str) or not reference.startswith("#/"):
-            _fail(path, "contains unsupported non-local $ref")
+        if not isinstance(reference, str):
+            _fail(path, "contains malformed $ref")
+        base, separator, fragment = reference.partition("#")
+        target_root = root
         target: object = root
-        for raw_part in reference[2:].split("/"):
+        if base:
+            if _resolver is None:
+                _fail(path, "contains unsupported non-local $ref")
+            try:
+                target_root = cast(Callable[[str], Mapping[str, Any]], _resolver)(base)
+            except (KeyError, LookupError, ValueError, TypeError) as exc:
+                _fail(path, f"contains unresolved $ref {reference!r}", cause=exc)
+            target = target_root
+        if separator and fragment:
+            if not fragment.startswith("/"):
+                _fail(path, f"contains unsupported $ref {reference!r}")
+            parts = fragment[1:].split("/")
+        elif not base and reference.startswith("#/"):
+            parts = reference[2:].split("/")
+        elif separator or base:
+            parts = []
+        else:
+            _fail(path, f"contains unsupported $ref {reference!r}")
+        for raw_part in parts:
             part = raw_part.replace("~1", "/").replace("~0", "~")
             if not isinstance(target, Mapping) or part not in target:
                 _fail(path, f"contains unresolved $ref {reference!r}")
             target = cast(Mapping[str, Any], target)[part]
         if not isinstance(target, Mapping):
             _fail(path, f"$ref {reference!r} does not resolve to a schema")
-        validate(instance, cast(Mapping[str, Any], target), path=path, _root=root)
+        validate(
+            instance,
+            cast(Mapping[str, Any], target),
+            path=path,
+            _root=target_root,
+            _resolver=_resolver,
+        )
         siblings = {key: value for key, value in schema.items() if key != "$ref"}
         if siblings:
-            validate(instance, siblings, path=path, _root=root)
+            validate(instance, siblings, path=path, _root=root, _resolver=_resolver)
         return
     if "const" in schema and instance != schema["const"]:
         _fail(path, f"must equal {schema['const']!r}")
@@ -64,33 +95,33 @@ def validate(
         if maximum is not None and instance > maximum:
             _fail(path, f"must be <= {maximum}")
     elif isinstance(instance, Mapping):
-        _validate_object(instance, schema, path, root)
+        _validate_object(instance, schema, path, root, _resolver)
     elif isinstance(instance, list):
-        _validate_array(instance, schema, path, root)
+        _validate_array(instance, schema, path, root, _resolver)
 
     for subschema in schema.get("allOf", []):
-        validate(instance, subschema, path=path, _root=root)
+        validate(instance, subschema, path=path, _root=root, _resolver=_resolver)
     one_of = schema.get("oneOf")
     if one_of is not None:
-        matches = sum(_is_valid(instance, candidate, path, root) for candidate in one_of)
+        matches = sum(_is_valid(instance, candidate, path, root, _resolver) for candidate in one_of)
         if matches != 1:
             _fail(path, "must match exactly one oneOf branch")
     any_of = schema.get("anyOf")
     if any_of is not None and not any(
-        _is_valid(instance, candidate, path, root) for candidate in any_of
+        _is_valid(instance, candidate, path, root, _resolver) for candidate in any_of
     ):
         _fail(path, "must match at least one anyOf branch")
     negated = schema.get("not")
-    if negated is not None and _is_valid(instance, negated, path, root):
+    if negated is not None and _is_valid(instance, negated, path, root, _resolver):
         _fail(path, "must not match forbidden schema")
     condition = schema.get("if")
     if condition is not None:
         branch = (
             schema.get("then", {})
-            if _is_valid(instance, condition, path, root)
+            if _is_valid(instance, condition, path, root, _resolver)
             else schema.get("else", {})
         )
-        validate(instance, branch, path=path, _root=root)
+        validate(instance, branch, path=path, _root=root, _resolver=_resolver)
 
 
 def _validate_string(value: str, schema: Mapping[str, Any], path: str) -> None:
@@ -123,6 +154,7 @@ def _validate_object(
     schema: Mapping[str, Any],
     path: str,
     root: Mapping[str, Any],
+    resolver: Callable[[str], Mapping[str, Any]] | None,
 ) -> None:
     if not all(isinstance(key, str) for key in value):
         _fail(path, "object keys must be strings")
@@ -141,15 +173,19 @@ def _validate_object(
     for key, item in value.items():
         assert isinstance(key, str)
         if key in properties:
-            validate(item, properties[key], path=f"{path}.{key}", _root=root)
+            validate(item, properties[key], path=f"{path}.{key}", _root=root, _resolver=resolver)
         elif additional is False:
             _fail(path, f"additional property {key!r} is forbidden")
         elif isinstance(additional, Mapping):
-            validate(item, additional, path=f"{path}.{key}", _root=root)
+            validate(item, additional, path=f"{path}.{key}", _root=root, _resolver=resolver)
 
 
 def _validate_array(
-    value: Sequence[object], schema: Mapping[str, Any], path: str, root: Mapping[str, Any]
+    value: Sequence[object],
+    schema: Mapping[str, Any],
+    path: str,
+    root: Mapping[str, Any],
+    resolver: Callable[[str], Mapping[str, Any]] | None,
 ) -> None:
     if len(value) < schema.get("minItems", 0):
         _fail(path, "has too few items")
@@ -163,7 +199,7 @@ def _validate_array(
     item_schema = schema.get("items")
     if isinstance(item_schema, Mapping):
         for index, item in enumerate(value):
-            validate(item, item_schema, path=f"{path}[{index}]", _root=root)
+            validate(item, item_schema, path=f"{path}[{index}]", _root=root, _resolver=resolver)
 
 
 def _matches_type(value: object, declared: object) -> bool:
@@ -180,9 +216,15 @@ def _matches_type(value: object, declared: object) -> bool:
     return any(isinstance(name, str) and name in checks and checks[name](value) for name in names)
 
 
-def _is_valid(value: object, schema: Mapping[str, Any], path: str, root: Mapping[str, Any]) -> bool:
+def _is_valid(
+    value: object,
+    schema: Mapping[str, Any],
+    path: str,
+    root: Mapping[str, Any],
+    resolver: Callable[[str], Mapping[str, Any]] | None,
+) -> bool:
     try:
-        validate(value, schema, path=path, _root=root)
+        validate(value, schema, path=path, _root=root, _resolver=resolver)
     except ContractValidationError:
         return False
     return True
@@ -193,3 +235,23 @@ def _fail(path: str, message: str, *, cause: Exception | None = None) -> None:
     if cause is None:
         raise error
     raise error from cause
+
+
+@lru_cache(maxsize=1)
+def _installed_registry() -> SchemaRegistry:
+    from quantiqmt.contracts.registry import SchemaRegistry
+
+    return SchemaRegistry.project_default()
+
+
+def validate_contract_candidate(
+    contract_id: str,
+    candidate: Mapping[str, object],
+    *,
+    semantic_validator: Callable[[Mapping[str, object]], None],
+    registry: SchemaRegistry | None = None,
+) -> None:
+    """Run the common Schema-then-semantic boundary before callers deep-freeze."""
+    authoritative = registry or _installed_registry()
+    authoritative.validate_contract(contract_id, candidate)
+    semantic_validator(candidate)

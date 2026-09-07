@@ -136,52 +136,19 @@ def test_optional_checkout_smoke_distinguishes_frozen_and_completed_task_paths()
     assert TASK.parent.name == "completed"
 
 
-def test_optional_checkout_smoke_validator_passes_on_frozen_handoff() -> None:
-    """Optionally smoke-test the real checkout when its remote history is available."""
-    # This smoke test is meaningful only while the moving remote still names the
-    # frozen implementation Base and the task remains at its implementation path.
-    # The non-skipping real-Git topology tests below remain the CI gate after
-    # implementation merge and task closeout.
-    handoff = yaml.safe_load(HANDOFF.read_text(encoding="utf-8"))
-    assert isinstance(handoff, dict)
-    expected_base = handoff["expected_base_sha"]
-    assert isinstance(expected_base, str)
-    if not FROZEN_ACTIVE_TASK.exists():
-        skip_reason = _checkout_smoke_skip_reason("", expected_base, False)
-        assert skip_reason is not None
-        pytest.skip(skip_reason)
-    probe = subprocess.run(
-        ["git", "rev-parse", "origin/main"],
-        capture_output=True,
-        text=True,
-        cwd=ROOT,
-    )
-    assert probe.returncode == 0, f"origin/main is not readable: {probe.stderr}"
-    skip_reason = _checkout_smoke_skip_reason(
-        probe.stdout.strip(),
-        expected_base,
-        True,
-    )
-    if skip_reason is not None:
-        pytest.skip(skip_reason)
-    result = subprocess.run(
-        [
-            sys.executable,
-            str(VALIDATOR),
-            "--task",
-            str(FROZEN_ACTIVE_TASK),
-            "--handoff",
-            str(HANDOFF),
-            "--base-ref",
-            "origin/main",
-            "--head",
-            "HEAD",
-        ],
-        capture_output=True,
-        text=True,
-        cwd=ROOT,
-    )
+def test_historical_checkout_smoke_runs_validator_without_current_active_path(
+    tmp_path: Path,
+) -> None:
+    """Smoke-test frozen TASK-056 behavior in a deterministic historical topology."""
+    topology = _create_real_git_topology(tmp_path, "historical-frozen-handoff-smoke")
+
+    assert topology["repo"] != ROOT
+    assert (topology["repo"] / topology["task"]).is_file()
+    result = _run_real_git_cli(topology, topology["base"])
+
+    assert result.args[0] == sys.executable
     assert result.returncode == 0, f"stdout={result.stdout}\nstderr={result.stderr}"
+    assert "Handoff validation passed." in result.stdout
 
 
 # ── Non-skipping real-Git topology acceptance tests ────────────────────
@@ -1120,3 +1087,175 @@ def test_valid_state_passes() -> None:
     task_fm = _make_valid_task_fm()
     errors = _run_validator_func(handoff, task_fm, **_default_git_kwargs())
     assert errors == [], f"unexpected errors: {errors}"
+
+
+# ── TASK-029 post-implementation repair and strict path semantics ─────
+
+
+def test_terminal_double_star_matches_only_subtree_descendants() -> None:
+    validator = _load_validator()
+    allowed = {"tests/spec/**"}
+
+    assert validator._is_path_allowed("tests/spec/example.py", allowed, allowed, []) == []
+    assert validator._is_path_allowed("tests/spectrum/example.py", allowed, allowed, [])
+    assert validator._is_path_allowed("tests/spec", allowed, allowed, [])
+
+
+def test_exact_path_matches_only_the_identical_repository_path() -> None:
+    validator = _load_validator()
+    allowed = {"spec/contracts/catalog.yaml"}
+
+    assert validator._is_path_allowed("spec/contracts/catalog.yaml", allowed, allowed, []) == []
+    assert validator._is_path_allowed("spec/contracts/catalog.yaml.bak", allowed, allowed, [])
+
+
+@pytest.mark.parametrize(
+    "pattern",
+    (
+        "/absolute/path.py",
+        "C:/absolute/path.py",
+        r"tests\spec\example.py",
+        "tests//spec.py",
+        "tests/./spec.py",
+        "tests/../spec.py",
+        "tests/*/spec.py",
+        "tests/spec/**/nested.py",
+        "tests/spec/",
+    ),
+)
+def test_malformed_or_non_repository_path_patterns_fail_closed(pattern: str) -> None:
+    validator = _load_validator()
+    assert validator._repository_path_pattern_errors(pattern, label="allowed_paths[0]")
+
+
+def test_schema_rejects_malformed_allowlist_pattern() -> None:
+    validator = _load_validator()
+    handoff = _make_valid_handoff()
+    handoff["allowed_paths"].append("tests/**/nested.py")
+
+    assert any("malformed glob" in error for error in validator.validate_schema(handoff))
+
+
+def test_forbidden_subtree_has_precedence_over_both_allowlists() -> None:
+    validator = _load_validator()
+    errors = validator._is_path_allowed(
+        "src/quantiqmt/order/model.py",
+        {"src/quantiqmt/**"},
+        {"src/quantiqmt/**"},
+        ["src/quantiqmt/order/**"],
+    )
+
+    assert errors == [
+        "path 'src/quantiqmt/order/model.py' matches forbidden pattern 'src/quantiqmt/order/**'"
+    ]
+
+
+def test_task029_exact_post_implementation_handoff_passes_at_frozen_head() -> None:
+    task = ROOT / "tasks/active/TASK-029-risk-runtime-schema-contract.md"
+    handoff = ROOT / "ai/handoffs/TASK-029-EVIDENCE-REPAIR-v2.yaml"
+    frozen = yaml.safe_load(handoff.read_text(encoding="utf-8"))
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(VALIDATOR),
+            "--task",
+            str(task),
+            "--handoff",
+            str(handoff),
+            "--base-ref",
+            str(frozen["expected_base_sha"]),
+            "--head",
+            "8b4c76d691849b126810be8953bfa7210ce18f43",
+            "--pr-base",
+            str(frozen["expected_pr_base_sha"]),
+        ],
+        capture_output=True,
+        text=True,
+        cwd=ROOT,
+    )
+
+    assert result.returncode == 0, f"stdout={result.stdout}\nstderr={result.stderr}"
+
+
+@pytest.mark.parametrize(
+    ("allowlist", "path"),
+    (
+        ("handoff", "spec/contracts/catalog.yaml"),
+        ("task", "spec/contracts/catalog.yaml"),
+        ("handoff", "src/quantiqmt/risk/__init__.py"),
+        ("task", "src/quantiqmt/risk/__init__.py"),
+    ),
+)
+def test_each_historical_product_path_requires_both_allowlists(allowlist: str, path: str) -> None:
+    validator = _load_validator()
+    handoff_path = ROOT / "ai/handoffs/TASK-029-EVIDENCE-REPAIR-v2.yaml"
+    handoff = yaml.safe_load(handoff_path.read_text(encoding="utf-8"))
+    task = ROOT / "tasks/active/TASK-029-risk-runtime-schema-contract.md"
+    task_fm = validator.extract_task_front_matter(task)
+    if allowlist == "handoff":
+        handoff["allowed_paths"].remove(path)
+    else:
+        task_fm["allowed_paths"].remove(path)
+
+    errors = validator.validate_paths(
+        str(handoff["expected_base_sha"]), "HEAD", handoff, task_fm, ROOT
+    )
+
+    assert any(path in error and "allowed_paths" in error for error in errors)
+
+
+def test_task029_post_implementation_tuple_drift_fails_closed() -> None:
+    validator = _load_validator()
+    handoff_path = ROOT / "ai/handoffs/TASK-029-EVIDENCE-REPAIR-v2.yaml"
+    handoff = yaml.safe_load(handoff_path.read_text(encoding="utf-8"))
+    handoff["repair_context"]["allowlisted_topology_tuple"]["pull_request_number"] = 999
+
+    assert validator._post_implementation_identity_errors(handoff, handoff_path, ROOT)
+
+
+def test_task029_review_repair_v3_handoff_passes_at_current_head() -> None:
+    task = ROOT / "tasks/active/TASK-029-risk-runtime-schema-contract.md"
+    handoff = ROOT / "ai/handoffs/TASK-029-REVIEW-REPAIR-v3.yaml"
+    frozen = yaml.safe_load(handoff.read_text(encoding="utf-8"))
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(VALIDATOR),
+            "--task",
+            str(task),
+            "--handoff",
+            str(handoff),
+            "--base-ref",
+            str(frozen["expected_base_sha"]),
+            "--head",
+            "HEAD",
+            "--pr-base",
+            str(frozen["expected_pr_base_sha"]),
+        ],
+        capture_output=True,
+        text=True,
+        cwd=ROOT,
+    )
+
+    assert result.returncode == 0, f"stdout={result.stdout}\nstderr={result.stderr}"
+    assert "Handoff validation passed." in result.stdout
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    (
+        ("repair_planning_base_sha", SHA_A),
+        ("coordinator_plan_packet_commit_sha", SHA_A),
+        ("handoff_introduction_parent_sha", SHA_A),
+        ("task_blob_sha", SHA_A),
+    ),
+)
+def test_task029_review_repair_v3_context_drift_fails_closed(field: str, value: str) -> None:
+    validator = _load_validator()
+    handoff_path = ROOT / "ai/handoffs/TASK-029-REVIEW-REPAIR-v3.yaml"
+    handoff = yaml.safe_load(handoff_path.read_text(encoding="utf-8"))
+    handoff["repair_context"][field] = value
+
+    assert validator._post_implementation_identity_errors(handoff, handoff_path, ROOT)

@@ -7,8 +7,9 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import Any, cast
 
-from quantiqmt.contracts.bundle import SchemaBundle
+from quantiqmt.contracts.bundle import BundleIntegrityError, SchemaBundle
 from quantiqmt.contracts.errors import UnknownMessageTypeError, UnsupportedSchemaVersionError
+from quantiqmt.contracts.validation import validate
 
 
 class SchemaRegistry:
@@ -30,6 +31,10 @@ class SchemaRegistry:
         )
         self._envelope = cast(Mapping[str, Any], bundle.contract("CONTRACT-MESSAGE-ENVELOPE-V1"))
         self._bundle = bundle
+        self._contracts = MappingProxyType(
+            {contract_id: bundle.contract(contract_id) for contract_id in bundle.contract_ids}
+        )
+        self._schema_uri_cache: dict[str, Mapping[str, Any]] = {}
 
     @classmethod
     def project_default(cls) -> SchemaRegistry:
@@ -63,4 +68,32 @@ class SchemaRegistry:
 
     def contract(self, contract_id: str) -> Any:
         """Return one canonical contract document from the verified bundle."""
-        return self._bundle.contract(contract_id)
+        try:
+            return self._contracts[contract_id]
+        except KeyError as exc:
+            raise BundleIntegrityError(
+                f"contract is not present in installed bundle: {contract_id}"
+            ) from exc
+
+    def schema(self, contract_id: str) -> Mapping[str, Any]:
+        """Return one Draft 2020-12 Schema from the verified bundle."""
+        document = self.contract(contract_id)
+        if not isinstance(document, Mapping) or document.get("$schema") != (
+            "https://json-schema.org/draft/2020-12/schema"
+        ):
+            raise BundleIntegrityError(
+                f"contract is not a Draft 2020-12 JSON Schema: {contract_id}"
+            )
+        return cast(Mapping[str, Any], document)
+
+    def resolve_schema(self, uri: str) -> Mapping[str, Any]:
+        """Resolve an absolute bundled Schema URI without filesystem or network access."""
+        cached = self._schema_uri_cache.get(uri)
+        if cached is None:
+            cached = self._bundle.schema_by_uri(uri)
+            self._schema_uri_cache[uri] = cached
+        return cached
+
+    def validate_contract(self, contract_id: str, candidate: object, *, path: str = "$") -> None:
+        """Validate a candidate through the complete installed Schema graph."""
+        validate(candidate, self.schema(contract_id), path=path, _resolver=self.resolve_schema)

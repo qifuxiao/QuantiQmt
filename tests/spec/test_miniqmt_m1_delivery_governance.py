@@ -44,7 +44,7 @@ def test_tasks_054_055_056_057_are_completed_and_task_029_is_active() -> None:
         assert authorized_path in task_029["allowed_paths"]
 
     task_029_text = _text("tasks/active/TASK-029-risk-runtime-schema-contract.md")
-    assert "TASK-029-PLAN-v1" in task_029_text
+    assert "TASK-029-PLAN-v2" in task_029_text
     assert "286c3901b3801fd752feaaf615167cef248a9494" in task_029_text
     assert "无需读取源码 `spec/**`" in task_029_text
     assert "Schema validation → semantic validation → freeze" in task_029_text

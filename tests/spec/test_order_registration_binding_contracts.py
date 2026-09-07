@@ -132,16 +132,10 @@ def test_repository_and_workflows_fail_closed_for_unbound() -> None:
 def test_manifest_and_task_handoff_record_spec_change() -> None:
     manifest = _yaml("spec/manifest.yaml")
     specification = manifest["specification"]
-    assert specification["version"] == "0.14.0"
+    assert specification["version"] == "0.15.0"
     change = manifest["change"]
-    assert change["id"] == "SPEC-0.14.0-ORDER-REGISTRATION-BINDING-COMPATIBILITY"
-    assert change["previous_version"] == "0.13.0"
-    assert change["runtime_code_change"] == (
-        "package_bundle_and_fail_closed_expected_manifest_version_parity_only; "
-        "no_Order_runtime_SQL_migration_or_Broker_behavior"
-    )
-    assert "TASK-050" in change["affected_tasks"]
-    assert "TASK-048" in change["affected_tasks"]
+    assert change["id"] == "SPEC-0.15.0-RISK-RUNTIME-SCHEMA-BUNDLE"
+    assert change["previous_version"] == "0.14.0"
     assert change["migration"]["destructive_backfill"] == "forbidden"
 
     index = _text("tasks/index.yaml")

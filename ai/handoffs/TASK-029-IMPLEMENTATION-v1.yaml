@@ -1,0 +1,173 @@
+schema_version: 1
+task_id: TASK-029
+packet_version: TASK-029-IMPLEMENTATION-v1
+plan_version: TASK-029-PLAN-v1
+planning_base_sha: 286c3901b3801fd752feaaf615167cef248a9494
+expected_base_sha: b4b3f07c734c894032bd02f98e8cc914aa26f5d5
+expected_pr_base_sha: b4b3f07c734c894032bd02f98e8cc914aa26f5d5
+task_blob_sha: 131eadc3c966db0f2173539a040aaa45a02959fa
+
+allowed_paths:
+  - spec/manifest.yaml
+  - spec/contracts/risk/**
+  - spec/contracts/events/risk.order_evaluated.v2.schema.json
+  - spec/interfaces/risk-ports.md
+  - src/quantiqmt/contracts/**
+  - src/quantiqmt/risk/model.py
+  - src/quantiqmt/risk/audit.py
+  - src/quantiqmt/risk/runner.py
+  - src/quantiqmt/risk/evaluator.py
+  - pyproject.toml
+  - tests/spec/**
+  - tests/contract/messages/**
+  - tests/unit/contracts/**
+  - tests/unit/risk/**
+  - tests/property/risk/**
+  - tasks/backlog/TASK-005-risk-engine.md
+  - tasks/backlog/TASK-029-risk-runtime-schema-contract.md
+  - tasks/active/TASK-029-risk-runtime-schema-contract.md
+  - tasks/active/TASK-005-risk-engine.md
+  - tasks/active/README.md
+  - tasks/index.yaml
+  - ai/packets/TASK-029-IMPLEMENTATION-v1.md
+  - ai/handoffs/TASK-029-IMPLEMENTATION-v1.yaml
+  - tasks/completed/TASK-029-risk-runtime-schema-contract.md
+
+forbidden_paths:
+  - migrations/**
+  - src/quantiqmt/order/**
+  - src/quantiqmt/broker/**
+
+codex_only_paths:
+  - ai/handoffs/TASK-029-IMPLEMENTATION-v1.yaml
+
+required_lanes:
+  - lane: portable
+    capability: portable
+    minimum_records: 1
+    commands:
+      - poetry run python scripts/validate_specs.py
+      - poetry run pytest tests/spec tests/contract tests/unit/contracts
+      - poetry run pytest tests/unit/risk tests/property/risk
+      - poetry run mypy src/quantiqmt/contracts
+      - poetry run ruff check .
+      - poetry run ruff format --check .
+
+prohibited_lanes:
+  - windows_miniqmt
+
+github_authority:
+  api_origin: https://api.github.com
+  repository: qifuxiao/QuantiQmt
+  pull_request_number: 110
+  base_branch: main
+  head_branch: codex/task-029-implementation
+  authorized_human_logins:
+    - qifuxiao
+  assignment_comment:
+    id: 5541496382
+    url: https://github.com/qifuxiao/QuantiQmt/pull/110#issuecomment-5541496382
+    api_url: https://api.github.com/repos/qifuxiao/QuantiQmt/issues/comments/5541496382
+    issue_url: https://api.github.com/repos/qifuxiao/QuantiQmt/issues/110
+    author_login: qifuxiao
+    created_at: "2026-09-04T13:57:53Z"
+    updated_at: "2026-09-04T13:57:53Z"
+    body_sha256: fa4f9573a0dfc6bdca7e13425e97a608b1b298657293f2cea8a45b82d1fdef16
+    sentinel: QUANTIQMT_GITHUB_AUTHORITY_V1
+    schema_version: 1
+  authorized_producers:
+    - agent_id: task-029-implementation-codex-windows-1
+      github_login: qfxyyy
+      role: Implementation Agent
+      tool: Codex
+      os: Windows
+      lanes:
+        - portable
+
+repair_context:
+  superseded_head_sha: 9516147f69b6dccbc845ab5b1c557ee5f8fc54b8
+  stage: task_029_packet_only_human_assignment_frozen
+  packet_identity: TASK-029-IMPLEMENTATION-v1
+  packet_path: ai/packets/TASK-029-IMPLEMENTATION-v1.md
+  packet_blob_sha: df3f7e0237f07894e6e3445b613b6b614307fcb0
+  implementation_pr_number: 110
+  implementation_pr_url: https://github.com/qifuxiao/QuantiQmt/pull/110
+  implementation_pr_base_sha: b4b3f07c734c894032bd02f98e8cc914aa26f5d5
+  implementation_branch: codex/task-029-implementation
+  packet_only_head_sha: 9516147f69b6dccbc845ab5b1c557ee5f8fc54b8
+  assignment:
+    comment_id: 5541496382
+    url: https://github.com/qifuxiao/QuantiQmt/pull/110#issuecomment-5541496382
+    api_url: https://api.github.com/repos/qifuxiao/QuantiQmt/issues/comments/5541496382
+    issue_url: https://api.github.com/repos/qifuxiao/QuantiQmt/issues/110
+    author_login: qifuxiao
+    created_at: "2026-09-04T13:57:53Z"
+    updated_at: "2026-09-04T13:57:53Z"
+    raw_body_sha256: fa4f9573a0dfc6bdca7e13425e97a608b1b298657293f2cea8a45b82d1fdef16
+    sentinel: QUANTIQMT_GITHUB_AUTHORITY_V1
+    schema_version: 1
+    event: ASSIGN
+    sequence: 1
+    single_writer: true
+    agent_id: task-029-implementation-codex-windows-1
+    github_login: qfxyyy
+    role: Implementation Agent
+    tool: Codex
+    os: Windows
+    lanes:
+      - portable
+    starting_head_sha: 9516147f69b6dccbc845ab5b1c557ee5f8fc54b8
+    pr_head_sha: 9516147f69b6dccbc845ab5b1c557ee5f8fc54b8
+  note: >-
+    PR #110 remains the packet-only Implementation PR. The assigned
+    Implementation Agent's first writer action must synchronize this exact
+    Coordinator-authored Handoff commit into the Implementation branch without
+    rewriting the Handoff, rebasing, force-pushing, or changing Python, spec,
+    test, or business implementation paths first.
+
+required_outcome:
+  - Deliver the installable, versioned, checksum-verified Risk Schema bundle and package-resource-only loader frozen by TASK-029-PLAN-v1 and the Packet.
+  - Use one contracts-owned validator entry for RuleResult, RiskDecisionV1, RiskAuditOutputV1, Runner completion, v1 projection, and the risk.order_evaluated.v2 envelope.
+  - Preserve the exact Schema validation then semantic validation then freeze order and fail closed before projection, persistence, publication, approved OMS transition, or Execution.
+  - Prove checkout, isolated wheel, and container-equivalent main-package-only behavior without reading source spec/** and with no wheel-related skip in the final contract run.
+  - Preserve every accepted Event, DTO, error/reason code, Risk rule, ordering, timeout, reduce-only rule, metric, state transition, and the OrderIntent to OMS to Risk to OMS to Execution chain.
+  - Keep TASK-005 blocked pending exact-Head Independent Review APPROVE and separate Human authorization.
+
+execution_constraints:
+  handoff_branch: codex/task-029-implementation-handoff
+  handoff_commit_must_be_add_only_from_exact_base: true
+  assigned_writer_first_action_must_sync_handoff_without_rewrite: true
+  assigned_writer_starting_head_sha: 9516147f69b6dccbc845ab5b1c557ee5f8fc54b8
+  handoff_sync_must_precede_test_or_implementation_change: true
+  implementation_pr_must_remain_open: true
+  implementation_pr_packet_only_head_must_remain_frozen_until_handoff_sync: true
+  direct_push_to_implementation_pr_by_coordinator: forbidden
+  direct_push_to_main: forbidden
+  cherry_pick_then_rewrite_handoff: forbidden
+  rebase: forbidden
+  force_push: forbidden
+  self_review: forbidden
+  self_approve: forbidden
+  merge: forbidden
+  closeout: forbidden
+  task_005_activation_or_implementation: forbidden
+  modify_packet: forbidden
+  modify_task_outside_separate_human_authority: forbidden
+  modify_dependencies_poetry_lock_or_ci: forbidden
+  modify_paths_outside_task_allowed_paths: forbidden
+  modify_python_spec_tests_or_business_paths_before_handoff_sync: forbidden
+  windows_miniqmt_lane: forbidden
+  miniqmt_connection: forbidden
+  account_query: forbidden
+  market_data_query: forbidden
+  order_submission_or_cancellation: forbidden
+  real_money_trading: forbidden
+  poetry_build_replaces_verification_command: forbidden
+  environment_evidence_and_review_must_bind_new_exact_head_after_change: true
+  expected_commands_from_caller_or_evidence: forbidden
+  caller_pr_head_number_or_branch_authority: forbidden
+  local_assignment_document_authority: forbidden
+  github_api_methods_other_than_get: forbidden
+  github_api_redirects: forbidden
+  github_api_failure_mode: fail_closed
+  github_test_network_access: forbidden

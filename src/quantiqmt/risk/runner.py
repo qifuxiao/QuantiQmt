@@ -8,7 +8,7 @@ import threading
 from collections.abc import Mapping
 from typing import Any, Literal, Protocol
 
-from quantiqmt.risk.audit import RiskAuditSemanticValidator
+from quantiqmt.risk.audit import validate_risk_audit_output
 from quantiqmt.risk.evaluator import DeterministicRiskEvaluator, timeout_decision, timeout_result
 from quantiqmt.risk.model import (
     RiskAuditOutputV1,
@@ -200,7 +200,7 @@ class RiskEvaluationRunner:
     def _validate_and_record(
         self, audit: RiskAuditOutputV1, *, reason: str | None = None
     ) -> RiskAuditOutputV1:
-        RiskAuditSemanticValidator().validate(audit)
+        validate_risk_audit_output(audit)
         self._metrics.observe("risk_evaluation_latency_us", audit.total_latency_us, {})
         for timing in audit.rule_timings:
             self._metrics.observe("risk_rule_latency_us", timing.latency_us, {})
