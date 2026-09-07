@@ -136,52 +136,19 @@ def test_optional_checkout_smoke_distinguishes_frozen_and_completed_task_paths()
     assert TASK.parent.name == "completed"
 
 
-def test_optional_checkout_smoke_validator_passes_on_frozen_handoff() -> None:
-    """Optionally smoke-test the real checkout when its remote history is available."""
-    # This smoke test is meaningful only while the moving remote still names the
-    # frozen implementation Base and the task remains at its implementation path.
-    # The non-skipping real-Git topology tests below remain the CI gate after
-    # implementation merge and task closeout.
-    handoff = yaml.safe_load(HANDOFF.read_text(encoding="utf-8"))
-    assert isinstance(handoff, dict)
-    expected_base = handoff["expected_base_sha"]
-    assert isinstance(expected_base, str)
-    if not FROZEN_ACTIVE_TASK.exists():
-        skip_reason = _checkout_smoke_skip_reason("", expected_base, False)
-        assert skip_reason is not None
-        pytest.skip(skip_reason)
-    probe = subprocess.run(
-        ["git", "rev-parse", "origin/main"],
-        capture_output=True,
-        text=True,
-        cwd=ROOT,
-    )
-    assert probe.returncode == 0, f"origin/main is not readable: {probe.stderr}"
-    skip_reason = _checkout_smoke_skip_reason(
-        probe.stdout.strip(),
-        expected_base,
-        True,
-    )
-    if skip_reason is not None:
-        pytest.skip(skip_reason)
-    result = subprocess.run(
-        [
-            sys.executable,
-            str(VALIDATOR),
-            "--task",
-            str(FROZEN_ACTIVE_TASK),
-            "--handoff",
-            str(HANDOFF),
-            "--base-ref",
-            "origin/main",
-            "--head",
-            "HEAD",
-        ],
-        capture_output=True,
-        text=True,
-        cwd=ROOT,
-    )
+def test_historical_checkout_smoke_runs_validator_without_current_active_path(
+    tmp_path: Path,
+) -> None:
+    """Smoke-test frozen TASK-056 behavior in a deterministic historical topology."""
+    topology = _create_real_git_topology(tmp_path, "historical-frozen-handoff-smoke")
+
+    assert topology["repo"] != ROOT
+    assert (topology["repo"] / topology["task"]).is_file()
+    result = _run_real_git_cli(topology, topology["base"])
+
+    assert result.args[0] == sys.executable
     assert result.returncode == 0, f"stdout={result.stdout}\nstderr={result.stderr}"
+    assert "Handoff validation passed." in result.stdout
 
 
 # ── Non-skipping real-Git topology acceptance tests ────────────────────
