@@ -260,6 +260,28 @@ def test_restored_version_must_be_positive(version: int) -> None:
         order(version=version)
 
 
+@pytest.mark.parametrize(
+    "version",
+    [True, False, 1.0, 1.5, float("nan"), float("inf"), float("-inf"), "1", None],
+)
+def test_restored_version_rejects_non_integer_values(version: object) -> None:
+    with pytest.raises(ValueError, match="integer >= 1"):
+        order(version=version)
+
+
+@pytest.mark.parametrize("version", [1, 2, 10, 10**9])
+def test_restored_integer_version_is_preserved_and_increments_once(version: int) -> None:
+    aggregate = order(version=version)
+    assert aggregate.version == version
+    result = aggregate.transition(
+        OrderEvent.START_RISK, GuardEvidence.risk_snapshots("a", "p", "m")
+    )
+    assert result is not None
+    assert aggregate.version == version + 1
+    assert result.version == version + 1
+    assert type(aggregate.version) is int
+
+
 def test_recovery_rejects_state_quantity_and_trade_sum_mismatches() -> None:
     with pytest.raises(ValueError, match="FILLED"):
         order(state=OrderState.FILLED)

@@ -367,8 +367,8 @@ class Order:
 
     def __post_init__(self) -> None:
         self.quantity.require_positive()
-        if self.version < 1:
-            raise ValueError("aggregate version must be >= 1")
+        if type(self.version) is not int or self.version < 1:
+            raise ValueError("aggregate version must be an integer >= 1")
         if not 0 <= self.cumulative_quantity.value <= self.quantity.value:
             raise ValueError("restored cumulative quantity must be within order quantity")
         facts = dict(self.processed_facts)
