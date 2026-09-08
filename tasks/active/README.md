@@ -1,13 +1,11 @@
 # Active Tasks
 
-当前 active task：TASK-029（唯一）。
+当前没有 active task。
 
-- 路径：`tasks/active/TASK-029-risk-runtime-schema-contract.md`
-- 状态：`active / accepted / not_started / not_run / pending / prohibited`
-- 冻结计划：`TASK-029-PLAN-v1`
-- Planning Base：`286c3901b3801fd752feaaf615167cef248a9494`
-- 可演示结果：安装后的包无需读取源码 `spec/**` 即可验证 Risk outputs，并对 Schema
-  缺失、损坏或版本不匹配 fail-closed。
+TASK-029 已依据 Human 授权完成独立 closeout，记录位于
+`tasks/completed/TASK-029-risk-runtime-schema-contract.md`。
+实现 PR #110 的精确 Head 已独立 Review、合并并获 Human 接受；
+closeout PR 仍须独立 Review 和 Human Approval/merge。
 
-本 activation-only PR 不创建 Packet/Handoff，不开始 TASK-029 实现。TASK-005 保持
-`backlog/blocked`；TASK-053 及其他任务也不得并行激活。
+TASK-005 保持 `backlog/blocked`，需要单独 Human 授权才能激活。
+TASK-053 及其他任务未获激活；release、Mini QMT 和交易权限不变。

@@ -5,6 +5,7 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import subprocess
 from collections import Counter
 from pathlib import Path
 from typing import Any
@@ -23,6 +24,7 @@ FROZEN_ACTIVE_TASK_PATH = (
 HANDOFF_V3_PATH = ROOT / "ai/handoffs/TASK-057-REPAIR-v3.yaml"
 HANDOFF_V4_PATH = ROOT / "ai/handoffs/TASK-057-REPAIR-v4.yaml"
 TASK029_PATH = ROOT / "tasks/active/TASK-029-risk-runtime-schema-contract.md"
+TASK029_HEAD = "e76ed9c4faacfa3d9521dfd1185f3a62b93f86ac"
 HANDOFF029_PATH = ROOT / "ai/handoffs/TASK-029-EVIDENCE-REPAIR-v2.yaml"
 HANDOFF029_V3_PATH = ROOT / "ai/handoffs/TASK-029-REVIEW-REPAIR-v3.yaml"
 ASSIGNMENT_SCHEMA_PATH = ROOT / "ai/schemas/agent-assignment.schema.yaml"
@@ -55,7 +57,30 @@ def _handoff(path: Path = HANDOFF_V3_PATH) -> dict[str, Any]:
 
 
 def _task029() -> dict[str, Any]:
-    return copy.deepcopy(extract_front_matter(TASK029_PATH))
+    # Read the immutable active task, never relabel the completed document.
+    result = subprocess.run(
+        ["git", "show", f"{TASK029_HEAD}:{TASK029_PATH.relative_to(ROOT).as_posix()}"],
+        cwd=ROOT,
+        capture_output=True,
+        check=True,
+        timeout=30,
+    )
+    blob = (
+        subprocess.run(
+            ["git", "hash-object", "--stdin"],
+            input=result.stdout,
+            cwd=ROOT,
+            capture_output=True,
+            check=True,
+            timeout=30,
+        )
+        .stdout.decode()
+        .strip()
+    )
+    assert blob == "66b2830c3f10c45f74e04c4f0246e1f62fd51f9d"
+    task = yaml.safe_load(result.stdout.decode("utf-8").split("---", 2)[1])
+    assert task["status"] == "active"
+    return task
 
 
 def _handoff029() -> dict[str, Any]:
@@ -463,7 +488,7 @@ def test_task029_task_and_handoff_lanes_are_independently_valid_and_deep_equal(
 
 
 def test_git_loader_discovers_unique_task029_authority_from_exact_head() -> None:
-    authority = validator.load_authority_from_git(ROOT, head="HEAD")
+    authority = validator.load_authority_from_git(ROOT, head=TASK029_HEAD)
 
     assert authority.task_id == "TASK-029"
     assert authority.github.pull_request_number == 110
@@ -478,7 +503,7 @@ def test_git_loader_rejects_caller_task_override_for_task029_head() -> None:
     with pytest.raises(ValueError, match="caller task path"):
         validator.load_authority_from_git(
             ROOT,
-            head="HEAD",
+            head=TASK029_HEAD,
             task_path=FROZEN_ACTIVE_TASK_PATH.relative_to(ROOT),
         )
 
