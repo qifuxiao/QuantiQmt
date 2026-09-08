@@ -659,10 +659,16 @@ class Order:
                 and 0 < self.cumulative_quantity.value < self.quantity.value
             )
         if guard == "cancel_rejected_and_trade_derived_cum_zero":
-            return unique and reconciliation.cancel_rejected and self.cumulative_quantity.value == 0
+            return (
+                unique
+                and active
+                and reconciliation.cancel_rejected
+                and self.cumulative_quantity.value == 0
+            )
         if guard == "cancel_rejected_and_trade_derived_cum_between_zero_and_quantity":
             return (
                 unique
+                and reconciliation.status in {BrokerStatus.ACTIVE, BrokerStatus.PARTIALLY_FILLED}
                 and reconciliation.cancel_rejected
                 and 0 < self.cumulative_quantity.value < self.quantity.value
             )
