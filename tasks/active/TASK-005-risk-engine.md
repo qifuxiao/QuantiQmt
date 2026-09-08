@@ -4,10 +4,27 @@ title: Implement deterministic risk evaluator
 status: active
 depends_on: [TASK-003, TASK-015, TASK-029]
 spec_refs: [INV-RISK, INV-CONSISTENCY, WF-SUBMIT-ORDER, CONTRACT-RISK-INPUT-V1, CONTRACT-RISK-RULE-SET-V1, CONTRACT-RISK-DECISION-V1, CONTRACT-RISK-AUDIT-OUTPUT-V1, CONTRACT-RISK-ORDER-EVALUATED-V1, CONTRACT-RISK-ORDER-EVALUATED-V2, CONTRACT-ERROR-CATALOG, PORTS-RISK, NFR-PERFORMANCE, NFR-OBSERVABILITY]
-allowed_paths: [src/quantiqmt/risk/**, tests/unit/risk/**, tests/property/risk/**]
+allowed_paths:
+  - src/quantiqmt/risk/**
+  - tests/unit/risk/**
+  - tests/property/risk/**
+  - ai/packets/TASK-005-IMPLEMENTATION-v1.md
+  - ai/handoffs/TASK-005-IMPLEMENTATION-v1.yaml
+  - tasks/active/TASK-005-risk-engine.md
+  - scripts/validate_agent_environment.py
+  - tests/spec/test_validate_agent_environment.py
 forbidden_paths: [src/quantiqmt/broker/**, src/quantiqmt/storage/**]
 verification:
   commands: ["poetry run pytest tests/unit/risk tests/property/risk", "poetry run mypy src/quantiqmt/risk"]
+  required_lanes:
+    - lane: portable
+      capability: portable
+      minimum_records: 1
+      commands:
+        - poetry run pytest tests/unit/risk tests/property/risk
+        - poetry run mypy src/quantiqmt/risk
+  prohibited_lanes:
+    - windows_miniqmt
 delivery:
   schema_version: 1
   contract_status: accepted
@@ -41,6 +58,17 @@ Schema → semantic validation → freeze 边界，不重复发明 DTO 或规则
 本阶段不访问 Mini QMT、账户、行情或交易接口，不授权 release 或其他任务激活。
 
 ## Non-goals
+
+本轮实施准备修订仅允许补齐上述精确路径、lanes 及 TASK-005 environment
+validator 支持；不授权业务实现、发布 evidence 或创建真实 Packet/Handoff。
+后续 Handoff 使用标准拓扑：从准备修订合并后的同一 exact main Base 创建
+packet-only PR 和独立 add-only Handoff commit，Human assignment 绑定 packet-only
+Starting Head；Implementation Agent 首次以无改写 merge 同步 Handoff。
+沿用现有 schema 的 `repair_context.superseded_head_sha` 字段绑定该 Starting Head，
+这只是既有字段名，不表示存在虚构的历史 Repair PR。task blob 在 Base/Head 保持
+一致，Packet identity 与 Handoff filename stem 均为 `TASK-005-IMPLEMENTATION-v1`。
+业务 Implementation Handoff 不应授予 task、validator 或 spec-test 写权限；
+这三条准备路径仅限本次 Human 授权，不得被后续实现自动继承。
 
 - 不访问数据库、Redis、Broker、网络或系统时钟。
 - 不推进 Order 状态，不直接调用 OMS Repository。
