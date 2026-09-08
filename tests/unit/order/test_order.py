@@ -221,6 +221,72 @@ def test_cancel_pending_and_unknown_continue_recording_trades() -> None:
     assert aggregate.cumulative_quantity == Quantity(50)
 
 
+@pytest.mark.parametrize("partial", [False, True])
+@pytest.mark.parametrize(
+    "status",
+    [None, BrokerStatus.REJECTED, BrokerStatus.CANCELED, BrokerStatus.EXPIRED, BrokerStatus.FILLED],
+)
+def test_cancel_rejection_requires_active_original_order(
+    partial: bool, status: BrokerStatus | None
+) -> None:
+    aggregate = submitted()
+    if partial:
+        aggregate.transition(OrderEvent.PARTIAL_TRADE, evidence(), fact=fact("trade", trade=20))
+    aggregate.transition(OrderEvent.REQUEST_CANCEL, evidence())
+    aggregate.transition(OrderEvent.OUTCOME_UNKNOWN, evidence())
+    before = snapshot(aggregate)
+    conflicts = dict(aggregate.fact_conflicts)
+    event = (
+        OrderEvent.RECONCILE_CANCEL_REJECTED_PARTIAL
+        if partial
+        else OrderEvent.RECONCILE_CANCEL_REJECTED_ACTIVE
+    )
+    with pytest.raises(InvalidOrderTransition, match="QQ-OMS-5002"):
+        aggregate.transition(
+            event,
+            GuardEvidence(reconciliation=ReconciliationEvidence(1, status, cancel_rejected=True)),
+            fact=fact("cancel-rejected"),
+        )
+    assert snapshot(aggregate) == before
+    assert dict(aggregate.fact_conflicts) == conflicts
+
+
+@pytest.mark.parametrize(
+    ("partial", "status"),
+    [
+        (False, BrokerStatus.ACTIVE),
+        (False, BrokerStatus.ACCEPTED),
+        (True, BrokerStatus.ACTIVE),
+        (True, BrokerStatus.PARTIALLY_FILLED),
+    ],
+)
+def test_cancel_rejection_with_active_proof_is_idempotent(
+    partial: bool, status: BrokerStatus
+) -> None:
+    aggregate = submitted()
+    if partial:
+        aggregate.transition(OrderEvent.PARTIAL_TRADE, evidence(), fact=fact("trade", trade=20))
+    aggregate.transition(OrderEvent.REQUEST_CANCEL, evidence())
+    aggregate.transition(OrderEvent.OUTCOME_UNKNOWN, evidence())
+    version = aggregate.version
+    event = (
+        OrderEvent.RECONCILE_CANCEL_REJECTED_PARTIAL
+        if partial
+        else OrderEvent.RECONCILE_CANCEL_REJECTED_ACTIVE
+    )
+    proof = GuardEvidence(reconciliation=ReconciliationEvidence(1, status, cancel_rejected=True))
+    rejection = fact("cancel-rejected")
+    result = aggregate.transition(event, proof, fact=rejection)
+    assert result is not None
+    assert aggregate.state is (OrderState.PARTIALLY_FILLED if partial else OrderState.SUBMITTED)
+    assert aggregate.cumulative_quantity == Quantity(20 if partial else 0)
+    assert result.action is OrderAction.IMPORT_BROKER_FACTS
+    assert aggregate.version == result.version == version + 1
+    after = snapshot(aggregate)
+    assert aggregate.transition(event, proof, fact=rejection) is None
+    assert snapshot(aggregate) == after
+
+
 def test_fill_wins_cancel_race_and_late_cancel_confirmation_is_no_op() -> None:
     aggregate = submitted()
     aggregate.transition(OrderEvent.REQUEST_CANCEL, evidence())
