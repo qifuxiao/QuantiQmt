@@ -91,6 +91,108 @@ def _handoff029_v3() -> dict[str, Any]:
     return _handoff(HANDOFF029_V3_PATH)
 
 
+def _task005_authority() -> tuple[dict[str, Any], dict[str, Any]]:
+    task = extract_front_matter(ROOT / "tasks/active/TASK-005-risk-engine.md")
+    handoff = _handoff(ROOT / "ai/handoffs/TASK-029-IMPLEMENTATION-v1.yaml")
+    handoff["task_id"] = "TASK-005"
+    handoff["plan_version"] = "TASK-005-PLAN-v1"
+    handoff["packet_version"] = "TASK-005-IMPLEMENTATION-v1"
+    handoff["required_lanes"] = copy.deepcopy(task["verification"]["required_lanes"])
+    handoff["prohibited_lanes"] = copy.deepcopy(task["verification"]["prohibited_lanes"])
+    return task, handoff
+
+
+def test_task005_exact_initial_identity_and_lanes_are_supported() -> None:
+    task, handoff = _task005_authority()
+    authority = validator.build_authority(
+        task, handoff, handoff_path=Path("ai/handoffs/TASK-005-IMPLEMENTATION-v1.yaml")
+    )
+    assert authority.task_id == "TASK-005"
+    assert authority.verification_commands == task["verification"]["commands"]
+    assert tuple(lane.lane for lane in authority.required_lanes) == ("portable",)
+    assert authority.prohibited_lanes == ("windows_miniqmt",)
+
+
+def test_task005_git_loader_binds_exact_task_blob(tmp_path: Path) -> None:
+    # Synthetic authority only: no real assignment or GitHub evidence is created.
+    task, handoff = _task005_authority()
+    subprocess.run(["git", "init", str(tmp_path)], check=True, capture_output=True)
+    task_path = tmp_path / "tasks/active/TASK-005-risk-engine.md"
+    task_path.parent.mkdir(parents=True)
+    task_path.write_text("---\n" + yaml.safe_dump(task) + "---\n", encoding="utf-8")
+    blob = subprocess.check_output(
+        ["git", "hash-object", str(task_path)], cwd=tmp_path, text=True
+    ).strip()
+    handoff["task_blob_sha"] = blob
+    handoff_path = tmp_path / "ai/handoffs/TASK-005-IMPLEMENTATION-v1.yaml"
+    handoff_path.parent.mkdir(parents=True)
+    handoff_path.write_text(yaml.safe_dump(handoff), encoding="utf-8")
+    subprocess.run(["git", "add", "."], cwd=tmp_path, check=True, capture_output=True)
+    subprocess.run(
+        [
+            "git",
+            "-c",
+            "user.name=Fixture",
+            "-c",
+            "user.email=fixture@example.invalid",
+            "commit",
+            "-m",
+            "synthetic authority",
+        ],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+    )
+    authority = validator.load_authority_from_git(tmp_path, head="HEAD")
+    assert authority.task_id == "TASK-005"
+    assert authority.task_blob == blob
+    # Uncommitted caller-side changes cannot replace authority from Git.
+    task_path.write_text("not an authority document", encoding="utf-8")
+    assert validator.load_authority_from_git(tmp_path, head="HEAD").task_blob == blob
+    subprocess.run(["git", "add", "."], cwd=tmp_path, check=True, capture_output=True)
+    subprocess.run(
+        [
+            "git",
+            "-c",
+            "user.name=Fixture",
+            "-c",
+            "user.email=fixture@example.invalid",
+            "commit",
+            "-m",
+            "invalid task",
+        ],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+    )
+    with pytest.raises(ValueError):
+        validator.load_authority_from_git(tmp_path, head="HEAD")
+
+
+@pytest.mark.parametrize(
+    "case", ["task", "plan", "packet", "filename", "missing_lanes", "command", "prohibited"]
+)
+def test_task005_authority_mismatches_fail_closed(case: str) -> None:
+    task, handoff = _task005_authority()
+    path = Path("ai/handoffs/TASK-005-IMPLEMENTATION-v1.yaml")
+    if case == "task":
+        handoff["task_id"] = "TASK-029"
+    elif case == "plan":
+        handoff["plan_version"] = "TASK-005-PLAN-v2"
+    elif case == "packet":
+        handoff["packet_version"] = "TASK-029-IMPLEMENTATION-v1"
+    elif case == "filename":
+        path = Path("ai/handoffs/TASK-005-REPAIR-v1.yaml")
+    elif case == "missing_lanes":
+        del task["verification"]["required_lanes"]
+    elif case == "command":
+        handoff["required_lanes"][0]["commands"][0] += " "
+    else:
+        task["verification"]["prohibited_lanes"] = []
+        handoff["prohibited_lanes"] = []
+    assert validator.authority_errors(task, handoff, handoff_path=path)
+
+
 def _canonical_body(sentinel: str, document: dict[str, Any]) -> str:
     return f"{sentinel}\n```json\n{json.dumps(document, indent=2)}\n```"
 
