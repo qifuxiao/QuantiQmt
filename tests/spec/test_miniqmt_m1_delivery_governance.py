@@ -18,10 +18,10 @@ def _yaml(relative_path: str) -> dict[str, object]:
     return value
 
 
-def test_tasks_029_054_055_056_057_are_completed_with_no_active_task() -> None:
+def test_tasks_029_054_055_056_057_are_completed_with_only_task_005_active() -> None:
     active = sorted((ROOT / "tasks" / "active").glob("TASK-*.md"))
     task_029_path = ROOT / "tasks/completed/TASK-029-risk-runtime-schema-contract.md"
-    assert active == []
+    assert active == [ROOT / "tasks/active/TASK-005-risk-engine.md"]
 
     task_029 = extract_front_matter(task_029_path)
     assert task_029["status"] == "completed"
@@ -109,14 +109,23 @@ def test_tasks_029_054_055_056_057_are_completed_with_no_active_task() -> None:
 
     paused = ROOT / "tasks/backlog/TASK-053-dependency-sequencing-governance.md"
     assert extract_front_matter(paused)["status"] == "blocked"
-    task_005_path = ROOT / "tasks/backlog/TASK-005-risk-engine.md"
-    assert extract_front_matter(task_005_path)["status"] == "blocked"
+    task_005_path = ROOT / "tasks/active/TASK-005-risk-engine.md"
+    task_005 = extract_front_matter(task_005_path)
+    assert task_005["status"] == "active"
+    assert task_005["depends_on"] == ["TASK-003", "TASK-015", "TASK-029"]
+    assert task_005["delivery"]["implementation_status"] == "not_started"
+    assert task_005["delivery"]["acceptance_status"] == "not_run"
+    assert task_005["delivery"]["review_status"] == "pending"
+    assert task_005["delivery"]["release_status"] == "prohibited"
+    for dependency in task_005["depends_on"]:
+        path = next((ROOT / "tasks/completed").glob(f"{dependency}-*.md"))
+        assert delivery_is_unlockable(extract_front_matter(path))
 
     entries = _yaml("tasks/index.yaml")["tasks"]
     assert isinstance(entries, list)
     indexed = {entry["id"]: entry for entry in entries}
-    assert indexed["TASK-005"]["path"].startswith("backlog/")
-    assert indexed["TASK-005"]["status"] == "blocked"
+    assert indexed["TASK-005"]["path"] == "active/TASK-005-risk-engine.md"
+    assert indexed["TASK-005"]["status"] == "active"
     assert indexed["TASK-029"]["path"] == ("completed/TASK-029-risk-runtime-schema-contract.md")
     assert indexed["TASK-029"]["status"] == "completed"
     assert indexed["TASK-053"]["path"].startswith("backlog/")

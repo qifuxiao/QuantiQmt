@@ -1,7 +1,7 @@
 ---
 id: TASK-005
 title: Implement deterministic risk evaluator
-status: blocked
+status: active
 depends_on: [TASK-003, TASK-015, TASK-029]
 spec_refs: [INV-RISK, INV-CONSISTENCY, WF-SUBMIT-ORDER, CONTRACT-RISK-INPUT-V1, CONTRACT-RISK-RULE-SET-V1, CONTRACT-RISK-DECISION-V1, CONTRACT-RISK-AUDIT-OUTPUT-V1, CONTRACT-RISK-ORDER-EVALUATED-V1, CONTRACT-RISK-ORDER-EVALUATED-V2, CONTRACT-ERROR-CATALOG, PORTS-RISK, NFR-PERFORMANCE, NFR-OBSERVABILITY]
 allowed_paths: [src/quantiqmt/risk/**, tests/unit/risk/**, tests/property/risk/**]
@@ -12,19 +12,9 @@ delivery:
   schema_version: 1
   contract_status: accepted
   implementation_status: not_started
-  acceptance_status: unverified
-  review_status: reported_unverified
+  acceptance_status: not_run
+  review_status: pending
   release_status: prohibited
-  remediation_task: TASK-031
-  completion_evidence:
-    mode: historical_evidence_unverifiable
-    change_pr: unverifiable
-    reviewed_head_sha: unverifiable
-    review_verdict: reported_unverified
-    reviewer: unverifiable
-    evidence_url: unverifiable
-    merge_commit_sha: unverifiable
-    human_authorization_evidence: governance recovery authorization recorded in TASK-031
 ---
 
 # Objective
@@ -33,7 +23,22 @@ delivery:
 
 ## Activation gate
 
-TASK-015 已在 Spec 0.6 冻结 RiskInput、Snapshot DTO、RuleSet、规则排序、硬限额、fail-closed taxonomy、减仓例外、RiskDecision 和审计输出契约，并已通过独立 Review、合并 PR #24、由人类授权标记 completed。TASK-005 已由人类明确分配并激活，可以严格依照既有契约实施；不得重新发明 Risk DTO、规则 DSL、错误码或计时语义。
+本次 Human 授权仅激活 TASK-005。TASK-003、TASK-015、TASK-029 均为可信
+completed，正式 delivery_is_unlockable 检查通过；历史“已分配”文字不构成本轮
+Implementation assignment。本 activation-only PR 不开始实现或创建 Packet/Handoff。
+实现前仍须满足现有 assignment、single-writer 和 Handoff 门禁。
+
+- Plan version: `TASK-005-PLAN-v1`
+- Planning Base: `f09811a17972d1d446a95806821fd80586858e11`
+- TASK-003 evidence: https://github.com/qifuxiao/QuantiQmt/pull/113#pullrequestreview-5139314381
+- TASK-003 evidence record merge: https://github.com/qifuxiao/QuantiQmt/pull/114
+- TASK-015 evidence: https://github.com/qifuxiao/QuantiQmt/pull/27#pullrequestreview-4709936693
+- TASK-029 evidence: https://github.com/qifuxiao/QuantiQmt/pull/110#pullrequestreview-5133890761
+
+目标演示：使用固定不可变 RiskInput/RuleSet 得到可重复的 Decision、decision_id
+与 hash，并对非法快照、硬限额和 timeout 确定性拒绝。复用 TASK-029 已接受的
+Schema → semantic validation → freeze 边界，不重复发明 DTO 或规则 DSL。
+本阶段不访问 Mini QMT、账户、行情或交易接口，不授权 release 或其他任务激活。
 
 ## Non-goals
 
