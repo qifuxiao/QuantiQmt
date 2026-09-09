@@ -158,6 +158,28 @@ def test_business_rules_are_evaluated_only_when_requested(monkeypatch: pytest.Mo
     assert len(calls) == 2
 
 
+def test_synthetic_guards_are_evaluated_only_when_requested(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import quantiqmt.risk.evaluator as module
+
+    original = module._input_guard_reason
+    calls: list[str] = []
+
+    def observe(context: Any, rule_id: str) -> Any:
+        calls.append(rule_id)
+        return original(context, rule_id)
+
+    monkeypatch.setattr(module, "_input_guard_reason", observe)
+    iterator = DeterministicRiskEvaluator().iter_rule_results(
+        RiskInputV1.create(valid_input()), rule_set_dto(valid_rule_set())
+    )
+    first = next(iterator)
+    assert calls == [first.rule_id]
+    next(iterator)
+    assert len(calls) == 2
+
+
 def test_decimal_context_cannot_change_semantic_decision() -> None:
     risk_input = RiskInputV1.create(valid_input())
     rules = rule_set_dto(valid_rule_set())

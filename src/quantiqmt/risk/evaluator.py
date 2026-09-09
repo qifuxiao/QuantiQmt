@@ -157,12 +157,13 @@ class DeterministicRiskEvaluator:
             rule_set.to_primitive(),
             rule_set.accepted_hard_policy.to_policy_payload(),
         )
-        results = _synthetic_results(context)
-        for index, result in enumerate(results):
+        rejected = False
+        for index, result in enumerate(_synthetic_results(context)):
+            rejected = rejected or result["result"] == "REJECT"
             yield _with_index(result, index)
-        if any(result["result"] == "REJECT" for result in results):
+        if rejected:
             return
-        offset = len(results)
+        offset = len(INPUT_GUARDS) + len(SNAPSHOT_GUARDS)
         for index, result in enumerate(_hard_rule_results(context), start=offset):
             yield _with_index(result, index)
         offset += len(HARD_RULES)
@@ -243,48 +244,42 @@ class _EvaluationContext:
         )
 
 
-def _synthetic_results(context: _EvaluationContext) -> list[_RuleCandidate]:
-    results: list[_RuleCandidate] = []
+def _synthetic_results(context: _EvaluationContext) -> Iterator[_RuleCandidate]:
     for priority, rule_id in INPUT_GUARDS:
         reason = _input_guard_reason(context, rule_id)
         not_applicable = rule_id == "RISK.INPUT.REDUCTION_EVIDENCE" and context.effect != "REDUCE"
-        results.append(
-            _result(
-                -1,
-                rule_id,
-                "INPUT_VALIDITY",
-                "SYSTEM",
-                None,
-                priority,
-                None,
-                "NOT_APPLICABLE" if not_applicable else "PASS" if reason is None else "REJECT",
-                "RISK_RULE_NOT_APPLICABLE"
-                if not_applicable
-                else "RISK_RULE_PASSED"
-                if reason is None
-                else reason,
-                None,
-                None,
-            )
+        yield _result(
+            -1,
+            rule_id,
+            "INPUT_VALIDITY",
+            "SYSTEM",
+            None,
+            priority,
+            None,
+            "NOT_APPLICABLE" if not_applicable else "PASS" if reason is None else "REJECT",
+            "RISK_RULE_NOT_APPLICABLE"
+            if not_applicable
+            else "RISK_RULE_PASSED"
+            if reason is None
+            else reason,
+            None,
+            None,
         )
     for priority, rule_id, source in SNAPSHOT_GUARDS:
         reason = _snapshot_guard_reason(context, source)
-        results.append(
-            _result(
-                -1,
-                rule_id,
-                "SNAPSHOT_VALIDITY",
-                "SYSTEM",
-                None,
-                priority,
-                None,
-                "PASS" if reason is None else "REJECT",
-                "RISK_RULE_PASSED" if reason is None else reason,
-                None,
-                None,
-            )
+        yield _result(
+            -1,
+            rule_id,
+            "SNAPSHOT_VALIDITY",
+            "SYSTEM",
+            None,
+            priority,
+            None,
+            "PASS" if reason is None else "REJECT",
+            "RISK_RULE_PASSED" if reason is None else reason,
+            None,
+            None,
         )
-    return results
 
 
 def _input_guard_reason(context: _EvaluationContext, rule_id: str) -> str | None:
