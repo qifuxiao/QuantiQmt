@@ -893,10 +893,9 @@ def _validate_decision_semantics(candidate: Mapping[str, object]) -> None:
 
 def canonical_json_bytes(value: Mapping[str, object]) -> bytes:
     return json.dumps(
-        _normalize_json(value),
+        _normalize_json(value, canonical=True),
         ensure_ascii=False,
         separators=(",", ":"),
-        sort_keys=True,
     ).encode("utf-8")
 
 
@@ -1106,7 +1105,7 @@ def thaw_json(value: object) -> MutableJsonValue:
     raise TypeError(f"unsupported JSON value {type(value).__name__}")
 
 
-def _normalize_json(value: object) -> MutableJsonValue:
+def _normalize_json(value: object, *, canonical: bool = False) -> MutableJsonValue:
     if value is None or isinstance(value, bool):
         return value
     if isinstance(value, int):
@@ -1120,9 +1119,10 @@ def _normalize_json(value: object) -> MutableJsonValue:
             raise RiskContractError(
                 "QQ-RISK-4008", "RISK_INPUT_INVALID", "object keys must be strings"
             )
-        return {str(key): _normalize_json(item) for key, item in value.items()}
+        keys = sorted(value, key=lambda key: key.encode("utf-16-be")) if canonical else value
+        return {str(key): _normalize_json(value[key], canonical=canonical) for key in keys}
     if isinstance(value, tuple | list):
-        return [_normalize_json(item) for item in value]
+        return [_normalize_json(item, canonical=canonical) for item in value]
     raise RiskContractError(
         "QQ-RISK-4008", "RISK_INPUT_INVALID", f"unsupported JSON value {type(value).__name__}"
     )

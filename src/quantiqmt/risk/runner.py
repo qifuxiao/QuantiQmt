@@ -119,13 +119,26 @@ class RiskEvaluationRunner:
                         reason="RISK_EVALUATION_TIMEOUT",
                     )
                 if result is None:
+                    if after_ns >= deadline_ns:
+                        return self._validate_and_record(
+                            self._timeout_audit(
+                                risk_input,
+                                rule_set,
+                                results,
+                                timings,
+                                start_ns,
+                                timeout_us,
+                                attempt,
+                            ),
+                            reason="RISK_EVALUATION_TIMEOUT",
+                        )
                     break
                 results.append(result)
                 timings.append(
                     RuleTiming._validated(
                         result.evaluation_index,
                         result.rule_id,
-                        max(1, ceil_div_us(after_ns - before_ns)),
+                        ceil_div_us(after_ns - before_ns),
                     )
                 )
                 if after_ns >= deadline_ns:
@@ -136,6 +149,13 @@ class RiskEvaluationRunner:
                         reason="RISK_EVALUATION_TIMEOUT",
                     )
             end_ns = self._clock.monotonic_ns()
+            if end_ns >= deadline_ns:
+                return self._validate_and_record(
+                    self._timeout_audit(
+                        risk_input, rule_set, results, timings, start_ns, timeout_us, attempt
+                    ),
+                    reason="RISK_EVALUATION_TIMEOUT",
+                )
             decision = self._evaluator.decide(risk_input, rule_set, tuple(results))
             return self._validate_and_record(
                 RiskAuditOutputV1._validated(

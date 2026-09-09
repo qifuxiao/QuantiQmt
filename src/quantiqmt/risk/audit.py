@@ -97,6 +97,8 @@ class RiskAuditSemanticValidator:
             or decision["error_code"] != "QQ-RISK-4005"
             or timeout["result"] != "REJECT"
             or timeout["reason_code"] != "RISK_EVALUATION_TIMEOUT"
+            or timeout["phase"] != "TIMEOUT_GUARD"
+            or timeout["rule_id"] != "RISK.SYSTEM.EVALUATION_TIMEOUT"
         ):
             raise RiskContractError("QQ-RISK-4008", "RISK_INPUT_INVALID", "bad timeout semantics")
         if _int(payload["completed_rule_count"], "completed_rule_count") != len(results) - 1:

@@ -112,7 +112,10 @@ def test_snapshot_and_input_fail_closed_taxonomy(mutation: Any, error: str) -> N
     payload = valid_input()
     mutation(payload)
     if payload["portfolio"]["metadata"]["quality"] == "PARTIAL":
-        payload["portfolio"]["metadata"]["missing_fields"] = ["scope_metrics"]
+        payload["portfolio"]["scope_metrics"][0]["projected_gross_exposure"] = None
+        payload["portfolio"]["metadata"]["missing_fields"] = [
+            "portfolio.scope_metrics.system.projected_gross_exposure"
+        ]
     payload = with_input_hash(payload, rule_set)
 
     decision = DeterministicRiskEvaluator().evaluate(
@@ -545,7 +548,8 @@ def test_fail_closed_taxonomy_4001_through_4011_has_stable_examples() -> None:
         payload = valid_input()
         payload["account"]["metadata"]["quality"] = quality
         if quality == "PARTIAL":
-            payload["account"]["metadata"]["missing_fields"] = ["equity"]
+            payload["account"]["daily_loss"] = None
+            payload["account"]["metadata"]["missing_fields"] = ["account.daily_loss"]
         payload = with_input_hash(payload, valid_rule_set())
         seen.add(
             DeterministicRiskEvaluator()

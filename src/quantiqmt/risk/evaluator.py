@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterator, Mapping
-from decimal import ROUND_CEILING, Decimal
+from decimal import ROUND_CEILING, Context, Decimal, localcontext
 from types import MappingProxyType
 from typing import Literal, cast
 
@@ -21,6 +21,7 @@ from quantiqmt.risk.model import (
     RuleScope,
     decimal_value,
     decision_id,
+    freeze_json,
     hard_limit_policy_hash,
     hash_snapshot_without_metadata_checksum,
     hash_without,
@@ -162,13 +163,11 @@ class DeterministicRiskEvaluator:
         if any(result["result"] == "REJECT" for result in results):
             return
         offset = len(results)
-        business_results = [
-            *_hard_rule_results(context),
-            *[_dynamic_rule_result(context, rule) for rule in context.sorted_rules()],
-        ]
-        business_results.sort(key=_sort_key)
-        for index, result in enumerate(business_results, start=offset):
+        for index, result in enumerate(_hard_rule_results(context), start=offset):
             yield _with_index(result, index)
+        offset += len(HARD_RULES)
+        for index, rule in enumerate(context.sorted_rules(), start=offset):
+            yield _with_index(_dynamic_rule_result(context, rule), index)
 
     def decide(
         self,
@@ -248,6 +247,7 @@ def _synthetic_results(context: _EvaluationContext) -> list[_RuleCandidate]:
     results: list[_RuleCandidate] = []
     for priority, rule_id in INPUT_GUARDS:
         reason = _input_guard_reason(context, rule_id)
+        not_applicable = rule_id == "RISK.INPUT.REDUCTION_EVIDENCE" and context.effect != "REDUCE"
         results.append(
             _result(
                 -1,
@@ -257,8 +257,12 @@ def _synthetic_results(context: _EvaluationContext) -> list[_RuleCandidate]:
                 None,
                 priority,
                 None,
-                "PASS" if reason is None else "REJECT",
-                "RISK_RULE_PASSED" if reason is None else reason,
+                "NOT_APPLICABLE" if not_applicable else "PASS" if reason is None else "REJECT",
+                "RISK_RULE_NOT_APPLICABLE"
+                if not_applicable
+                else "RISK_RULE_PASSED"
+                if reason is None
+                else reason,
                 None,
                 None,
             )
@@ -317,13 +321,7 @@ def _snapshot_guard_reason(context: _EvaluationContext, source: str) -> str | No
         if source == "cross_source":
             _validate_cross_source(context)
             return None
-        snapshot = {
-            "account": context.account,
-            "portfolio": context.portfolio,
-            "market": context.market,
-        }[source]
-        metadata = _mapping(snapshot.get("metadata"), f"{source}.metadata")
-        quality = _str(metadata.get("quality"), "quality")
+        quality = _snapshot_quality(context.input, context.rule_set, source)
         if quality == "FRESH":
             _age_ms(context, source)
             return None
@@ -338,9 +336,9 @@ def _snapshot_guard_reason(context: _EvaluationContext, source: str) -> str | No
         return exc.reason_code
 
 
-def _hard_rule_results(context: _EvaluationContext) -> list[_RuleCandidate]:
-    return [
-        _evaluate_metric(
+def _hard_rule_results(context: _EvaluationContext) -> Iterator[_RuleCandidate]:
+    for priority, rule_id, metric, operator, field in HARD_RULES:
+        yield _evaluate_metric(
             context,
             phase="SYSTEM_HARD_LIMIT",
             scope="SYSTEM",
@@ -353,8 +351,6 @@ def _hard_rule_results(context: _EvaluationContext) -> list[_RuleCandidate]:
             hard=True,
             reduction_exception=False,
         )
-        for priority, rule_id, metric, operator, field in HARD_RULES
-    ]
 
 
 def _dynamic_rule_result(context: _EvaluationContext, rule: Mapping[str, object]) -> _RuleCandidate:
@@ -362,7 +358,7 @@ def _dynamic_rule_result(context: _EvaluationContext, rule: Mapping[str, object]
     scope_id = rule.get("scope_id")
     expected_scope_id = context.scope_id_for(scope)
     metric = _str(rule.get("metric"), "metric")
-    limit = cast(Mapping[str, JsonValue], _mapping(rule.get("limit"), "limit"))
+    limit = cast(Mapping[str, JsonValue], freeze_json(_mapping(rule.get("limit"), "limit")))
     if scope_id != expected_scope_id:
         return _result(
             -1,
@@ -425,7 +421,8 @@ def _evaluate_metric(
             typed_boolean(True),
             limit,
         )
-    measured = _measured_value(context, scope, metric)
+    with localcontext(Context(prec=80)):
+        measured = _measured_value(context, scope, metric)
     passed = _compare(metric, operator, measured, limit)
     if passed:
         return _result(
@@ -744,6 +741,33 @@ def _snapshot_quality(
 ) -> str:
     snapshot = _mapping(risk_input[name], name)
     metadata = _mapping(snapshot["metadata"], "metadata")
+    order = _mapping(risk_input["order"], "order")
+    account = _mapping(risk_input["account"], "account")
+    portfolio = _mapping(risk_input["portfolio"], "portfolio")
+    market = _mapping(risk_input["market"], "market")
+    days = {
+        _mapping(item["metadata"], "metadata")["trading_day"]
+        for item in (account, portfolio, market)
+    }
+    identity_mismatch = (
+        (name == "account" and account["account_id"] != order["account_id"])
+        or (
+            name == "portfolio"
+            and (
+                portfolio["account_id"] != order["account_id"]
+                or portfolio["portfolio_id"] != order["portfolio_id"]
+            )
+        )
+        or (
+            name == "market"
+            and (
+                market["instrument_id"] != order["instrument_id"]
+                or metadata["snapshot_version"] != order["market_data_version"]
+            )
+        )
+    )
+    if len(days) != 1 or identity_mismatch:
+        return "VERSION_MISMATCH"
     quality = _str(metadata["quality"], "quality")
     if quality == "FRESH":
         age = _safe_age_ms(risk_input, name)
@@ -760,7 +784,8 @@ def _safe_age_ms(risk_input: Mapping[str, object], name: str) -> int | None:
         snapshot = _mapping(risk_input[name], name)
         metadata = _mapping(snapshot["metadata"], "metadata")
         delta = parse_utc(risk_input["evaluation_time"]) - parse_utc(metadata["as_of"])
-        return delta.days * 86_400_000 + delta.seconds * 1_000 + delta.microseconds // 1_000
+        age = delta.days * 86_400_000 + delta.seconds * 1_000 + delta.microseconds // 1_000
+        return age if age >= 0 else None
     except (RiskContractError, KeyError):
         return None
 
@@ -815,9 +840,10 @@ def _validate_order_price(context: _EvaluationContext) -> None:
     reference_price = decimal_value(context.market.get("reference_price"), field="reference_price")
     if reference_price <= Decimal("0"):
         raise RiskContractError("QQ-RISK-4008", "RISK_INPUT_INVALID", "bad reference price")
-    recomputed = (
-        (abs(risk_price - reference_price) / reference_price) * Decimal(10000)
-    ).to_integral_value(rounding=ROUND_CEILING)
+    with localcontext(Context(prec=80)):
+        recomputed = (
+            (abs(risk_price - reference_price) / reference_price) * Decimal(10000)
+        ).to_integral_value(rounding=ROUND_CEILING)
     if context.market.get("price_deviation_bps") != int(recomputed):
         raise RiskContractError(
             "QQ-RISK-4008", "RISK_INPUT_INVALID", "price deviation bps mismatch"
@@ -889,6 +915,14 @@ def _validate_rule_set(context: _EvaluationContext) -> None:
     rule_ids = [_str(rule.get("rule_id"), "rule_id") for rule in rules]
     if len(rule_ids) != len(set(rule_ids)):
         raise RiskContractError("QQ-RISK-4007", "RISK_RULE_SET_INVALID", "duplicate rule_id")
+    reserved = (
+        {rule_id for _, rule_id in INPUT_GUARDS}
+        | {rule_id for _, rule_id, _ in SNAPSHOT_GUARDS}
+        | {rule_id for _, rule_id, _, _, _ in HARD_RULES}
+        | {"RISK.SYSTEM.EVALUATION_TIMEOUT"}
+    )
+    if reserved.intersection(rule_ids):
+        raise RiskContractError("QQ-RISK-4007", "RISK_RULE_SET_INVALID", "reserved rule_id")
     policy = _mapping(context.rule_set["reduce_only_policy"], "reduce_only_policy")
     if not isinstance(policy.get("enabled"), bool):
         raise RiskContractError("QQ-RISK-4007", "RISK_RULE_SET_INVALID", "bad reduce policy")
@@ -906,6 +940,24 @@ def _validate_rule_set(context: _EvaluationContext) -> None:
             )
     for rule in rules:
         metric = _str(rule.get("metric"), "metric")
+        limit = _mapping(rule.get("limit"), "limit")
+        if metric in {"DAILY_LOSS", "AVAILABLE_CASH"} and rule["scope"] not in {
+            "SYSTEM",
+            "ACCOUNT",
+        }:
+            raise RiskContractError("QQ-RISK-4007", "RISK_RULE_SET_INVALID", "invalid metric scope")
+        if metric == "TRADING_ENABLED" and (
+            limit.get("value") is not True or context.hard["allow_new_risk"] is False
+        ):
+            raise RiskContractError(
+                "QQ-RISK-4007", "RISK_RULE_SET_INVALID", "invalid trading limit"
+            )
+        if metric == "INSTRUMENT_ALLOWED":
+            values = _sequence(limit.get("values"), "values")
+            if values != tuple(sorted(cast(tuple[str, ...], values))):
+                raise RiskContractError(
+                    "QQ-RISK-4007", "RISK_RULE_SET_INVALID", "unsorted string set"
+                )
         expected_operator = METRIC_OPERATOR.get(metric)
         if expected_operator is None or rule.get("operator") != expected_operator:
             raise RiskContractError("QQ-RISK-4007", "RISK_RULE_SET_INVALID", "bad metric operator")
@@ -926,6 +978,8 @@ def _validate_snapshot_checksums(context: _EvaluationContext) -> None:
         ("market", context.market),
     ):
         metadata = _mapping(snapshot.get("metadata"), f"{name}.metadata")
+        if _safe_age_ms(context.input, name) is None:
+            raise RiskContractError("QQ-RISK-4008", "RISK_INPUT_INVALID", "invalid snapshot age")
         if metadata.get("checksum") != hash_snapshot_without_metadata_checksum(snapshot):
             raise RiskContractError(
                 "QQ-RISK-4008", "RISK_INPUT_INVALID", f"{name} checksum mismatch"
@@ -971,8 +1025,6 @@ def _validate_snapshot_versions(context: _EvaluationContext) -> None:
 def _validate_required_fields(context: _EvaluationContext) -> None:
     required = _required_field_paths(context)
     null_fields = {path for path, value in required.items() if value is None}
-    if not null_fields:
-        return
     for name, snapshot in (
         ("account", context.account),
         ("portfolio", context.portfolio),
@@ -1080,7 +1132,10 @@ def _validate_limit_kind(metric: str, limit: Mapping[str, object]) -> None:
 def _validate_limit_currency(
     context: _EvaluationContext, metric: str, limit: Mapping[str, object]
 ) -> None:
-    if metric in MONETARY_METRICS and limit.get("currency") != context.currency:
+    if (
+        metric in MONETARY_METRICS
+        and limit.get("currency") != context.rule_set["valuation_currency"]
+    ):
         raise RiskContractError("QQ-RISK-4007", "RISK_RULE_SET_INVALID", "limit currency mismatch")
     if metric == "PROJECTED_LEVERAGE" and limit.get("currency") is not None:
         raise RiskContractError(

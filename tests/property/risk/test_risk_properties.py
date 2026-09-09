@@ -91,7 +91,8 @@ def test_each_snapshot_fail_closed_quality_rejects(quality: str) -> None:
     payload = valid_input(rule_set)
     payload["account"]["metadata"]["quality"] = quality
     if quality == "PARTIAL":
-        payload["account"]["metadata"]["missing_fields"] = ["equity"]
+        payload["account"]["daily_loss"] = None
+        payload["account"]["metadata"]["missing_fields"] = ["account.daily_loss"]
     payload = with_input_hash(payload, rule_set)
     decision = DeterministicRiskEvaluator().evaluate(
         RiskInputV1.create(payload), rule_set_dto(rule_set)
@@ -245,11 +246,12 @@ def test_generated_reduce_policy_matrix(case: tuple[str, bool, list[str], str, s
 @given(st.integers(min_value=0, max_value=20))
 def test_generated_input_version_filter_remains_bounded(index: int) -> None:
     rule_set = valid_rule_set()
+    rules = rule_set_dto(rule_set)
     runner = RiskEvaluationRunner(DeterministicRiskEvaluator(), FakeClock([0] * 500))
     for offset in range(index + 1):
         payload = valid_input(rule_set)
         payload["order"]["order_id"] = f"550e8400-e29b-41d4-a716-44665545{offset:04d}"
-        runner.run(RiskInputV1.create(with_input_hash(payload, rule_set)), rule_set_dto(rule_set))
+        runner.run(RiskInputV1.create(with_input_hash(payload, rule_set)), rules)
     assert runner._seen_filter.storage_bit_length <= runner._seen_filter.bounded_bit_count
 
 
