@@ -1,0 +1,126 @@
+schema_version: 1
+task_id: TASK-005
+packet_version: TASK-005-IMPLEMENTATION-v1
+plan_version: TASK-005-PLAN-v1
+planning_base_sha: f09811a17972d1d446a95806821fd80586858e11
+expected_base_sha: b9b313d2af1071281bc62c0919ee4caceae85825
+expected_pr_base_sha: b9b313d2af1071281bc62c0919ee4caceae85825
+task_blob_sha: b5d10367c43294cc61543bdeb779717ff99e94b7
+allowed_paths:
+  - src/quantiqmt/risk/**
+  - tests/unit/risk/**
+  - tests/property/risk/**
+  - ai/packets/TASK-005-IMPLEMENTATION-v1.md
+  - ai/handoffs/TASK-005-IMPLEMENTATION-v1.yaml
+forbidden_paths:
+  - src/quantiqmt/broker/**
+  - src/quantiqmt/storage/**
+  - tasks/**
+  - scripts/**
+  - tests/spec/**
+  - spec/**
+  - .github/**
+  - pyproject.toml
+  - poetry.lock
+  - poetry.toml
+codex_only_paths:
+  - ai/packets/TASK-005-IMPLEMENTATION-v1.md
+  - ai/handoffs/TASK-005-IMPLEMENTATION-v1.yaml
+required_lanes:
+  - lane: portable
+    capability: portable
+    minimum_records: 1
+    commands:
+      - poetry run pytest tests/unit/risk tests/property/risk
+      - poetry run mypy src/quantiqmt/risk
+prohibited_lanes:
+  - windows_miniqmt
+github_authority:
+  api_origin: https://api.github.com
+  repository: qifuxiao/QuantiQmt
+  pull_request_number: 117
+  base_branch: main
+  head_branch: codex/task-005-implementation
+  authorized_human_logins:
+    - qifuxiao
+  assignment_comment:
+    id: 5594453419
+    url: https://github.com/qifuxiao/QuantiQmt/pull/117#issuecomment-5594453419
+    api_url: https://api.github.com/repos/qifuxiao/QuantiQmt/issues/comments/5594453419
+    issue_url: https://api.github.com/repos/qifuxiao/QuantiQmt/issues/117
+    author_login: qifuxiao
+    created_at: "2026-09-09T01:39:00Z"
+    updated_at: "2026-09-09T01:39:00Z"
+    body_sha256: c9675a332d65ee619f567c8a5bac528e79afa476b76fa9c93505eea24f075073
+    sentinel: QUANTIQMT_GITHUB_AUTHORITY_V1
+    schema_version: 1
+  authorized_producers:
+    - agent_id: task-005-implementation-codex-windows-1
+      github_login: qfxyyy
+      role: Implementation Agent
+      tool: Codex
+      os: Windows
+      lanes: [portable]
+    - agent_id: task-005-environment-verification-codex-windows-1
+      github_login: qifuxiao
+      role: Environment Verification Agent
+      tool: Codex
+      os: Windows
+      lanes: [portable]
+repair_context:
+  coordination_authorization:
+    url: https://github.com/qifuxiao/QuantiQmt/pull/117#issuecomment-5594256032
+    author_login: qifuxiao
+    created_at: "2026-09-09T01:14:34Z"
+    updated_at: "2026-09-09T01:14:34Z"
+    body_sha256: a32e585b40eeae224d01e0621bd24578420ff9f86703f19762483925fcaefd60
+    purpose: Human coordination scope only; not canonical assignment evidence.
+  superseded_head_sha: d27bc2a56969d6e65361d9692e350241ad628df2
+  stage: task_005_packet_only_human_assignment_frozen
+  packet_identity: TASK-005-IMPLEMENTATION-v1
+  packet_path: ai/packets/TASK-005-IMPLEMENTATION-v1.md
+  packet_blob_sha: 74d2bbf8728e0390560645cd46f5c43888f45f18
+  implementation_pr_number: 117
+  implementation_pr_url: https://github.com/qifuxiao/QuantiQmt/pull/117
+  implementation_pr_base_sha: b9b313d2af1071281bc62c0919ee4caceae85825
+  implementation_branch: codex/task-005-implementation
+  packet_only_head_sha: d27bc2a56969d6e65361d9692e350241ad628df2
+  note: >-
+    superseded_head_sha binds the actual packet-only Starting Head under the
+    existing standard schema; no historical Repair PR is asserted. The assigned
+    writer must first merge this Coordinator commit without rewrite, then
+    validate the full topology before tests or implementation changes.
+required_outcome:
+  - Prove all ten active TASK-005 acceptance criteria using an exact-Head test matrix and minimal test-first changes to existing Risk implementation.
+  - Preserve deterministic evaluator semantics, immutable inputs, canonical hashes and UUID5, all hard limits and explicit reduction proof.
+  - Preserve bounded injected-clock Runner timeout fencing, complete audit, semantic rejection and validated v1 projection.
+  - Reuse the accepted TASK-029 runtime Schema bundle without contract changes or permissive fallback.
+  - Run both original commands and live validators; obtain authorized exact-Head portable evidence and CI before independent Review.
+execution_constraints:
+  handoff_branch: codex/task-005-implementation-handoff
+  handoff_commit_must_be_add_only_from_exact_base: true
+  assigned_writer_first_action_must_sync_handoff_without_rewrite: true
+  assigned_writer_starting_head_sha: d27bc2a56969d6e65361d9692e350241ad628df2
+  handoff_sync_must_precede_test_or_implementation_change: true
+  implementation_pr_must_remain_open: true
+  direct_push_to_implementation_pr_by_coordinator: forbidden
+  direct_push_to_main: forbidden
+  cherry_pick: forbidden
+  squash: forbidden
+  rebase: forbidden
+  force_push: forbidden
+  modify_packet_or_handoff: forbidden
+  inherit_preparation_task_validator_spec_test_permissions: forbidden
+  self_review: forbidden
+  self_approve: forbidden
+  merge_pr: forbidden
+  closeout: forbidden
+  release: prohibited
+  other_task_activation: forbidden
+  miniqmt_connection: forbidden
+  account_query: forbidden
+  market_data_query: forbidden
+  order_submission_or_cancellation: forbidden
+  real_money_trading: forbidden
+  expected_commands_from_caller_or_evidence: forbidden
+  environment_evidence_and_review_must_bind_new_exact_head_after_change: true
