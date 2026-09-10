@@ -156,21 +156,76 @@ class RiskEvaluationRunner:
                     ),
                     reason="RISK_EVALUATION_TIMEOUT",
                 )
-            decision = self._evaluator.decide(risk_input, rule_set, tuple(results))
-            return self._validate_and_record(
-                RiskAuditOutputV1._validated(
-                    decision=decision,
-                    evaluated_at=rfc3339_z(self._clock.utc_now()),  # type: ignore[arg-type]
-                    total_latency_us=max(
-                        sum(t.latency_us for t in timings), ceil_div_us(end_ns - start_ns)
-                    ),
-                    evaluation_timeout_us=timeout_us,
-                    completed_rule_count=len(results),
-                    rule_timings=tuple(timings),
-                )
+            # Finalization has the same admission and deadline as next(iterator).
+            # Give the worker immutable copies: timeout appends only to caller-owned lists.
+            finalization = self._executor.submit(
+                self._finalize_audit,
+                risk_input,
+                rule_set,
+                tuple(results),
+                tuple(timings),
+                start_ns,
+                timeout_us,
             )
+            try:
+                audit = finalization.result(timeout=(deadline_ns - end_ns) / 1_000_000_000)
+            except concurrent.futures.TimeoutError:
+                ownership.transfer_to_future(finalization)
+                return self._validate_and_record(
+                    self._timeout_audit(
+                        risk_input, rule_set, results, timings, start_ns, timeout_us, attempt
+                    ),
+                    reason="RISK_EVALUATION_TIMEOUT",
+                )
+            # Include all construction/validation work in the final deadline check,
+            # and respect the integer-microsecond ceiling used by the audit contract.
+            if (
+                max(
+                    audit.total_latency_us,
+                    ceil_div_us(self._clock.monotonic_ns() - start_ns),
+                )
+                >= timeout_us
+            ):
+                return self._validate_and_record(
+                    self._timeout_audit(
+                        risk_input, rule_set, results, timings, start_ns, timeout_us, attempt
+                    ),
+                    reason="RISK_EVALUATION_TIMEOUT",
+                )
+            return self._record(audit)
         finally:
             ownership.release_from_caller()
+
+    def _finalize_audit(
+        self,
+        risk_input: RiskInputV1,
+        rule_set: RiskRuleSetV1,
+        results: tuple[RuleResult, ...],
+        timings: tuple[RuleTiming, ...],
+        start_ns: int,
+        timeout_us: int,
+    ) -> RiskAuditOutputV1:
+        """Build and validate privately; only the caller may publish a result/metrics."""
+        decision = self._evaluator.decide(risk_input, rule_set, results)
+
+        def build() -> RiskAuditOutputV1:
+            return RiskAuditOutputV1._validated(
+                decision=decision,
+                evaluated_at=rfc3339_z(self._clock.utc_now()),  # type: ignore[arg-type]
+                total_latency_us=max(
+                    sum(t.latency_us for t in timings),
+                    ceil_div_us(self._clock.monotonic_ns() - start_ns),
+                ),
+                evaluation_timeout_us=timeout_us,
+                completed_rule_count=len(results),
+                rule_timings=timings,
+            )
+
+        audit = build()
+        validate_risk_audit_output(audit)
+        # Stamp elapsed after output construction and semantic validation. The final
+        # encoding still uses the validated factory, inside the guarded worker.
+        return build()
 
     def _timeout_audit(
         self,
@@ -221,6 +276,9 @@ class RiskEvaluationRunner:
         self, audit: RiskAuditOutputV1, *, reason: str | None = None
     ) -> RiskAuditOutputV1:
         validate_risk_audit_output(audit)
+        return self._record(audit, reason=reason)
+
+    def _record(self, audit: RiskAuditOutputV1, *, reason: str | None = None) -> RiskAuditOutputV1:
         self._metrics.observe("risk_evaluation_latency_us", audit.total_latency_us, {})
         for timing in audit.rule_timings:
             self._metrics.observe("risk_rule_latency_us", timing.latency_us, {})

@@ -319,6 +319,8 @@ def _snapshot_guard_reason(context: _EvaluationContext, source: str) -> str | No
         quality = _snapshot_quality(context.input, context.rule_set, source)
         if quality == "FRESH":
             _age_ms(context, source)
+            if source == "market" and context.market["trading_status"] != "TRADING":
+                return "RISK_TRADING_DISABLED"
             return None
         return {
             "STALE": "RISK_SNAPSHOT_STALE",
@@ -857,7 +859,9 @@ def _validate_identity(context: _EvaluationContext) -> None:
     if context.order.get("market_data_version") != _mapping(
         context.market["metadata"], "metadata"
     ).get("snapshot_version"):
-        raise RiskContractError("QQ-RISK-4008", "RISK_INPUT_INVALID", "market version mismatch")
+        raise RiskContractError(
+            "QQ-RISK-4004", "RISK_SNAPSHOT_VERSION_MISMATCH", "market version mismatch"
+        )
 
 
 def _validate_cross_source(context: _EvaluationContext) -> None:
