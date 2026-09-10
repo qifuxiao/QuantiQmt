@@ -778,6 +778,38 @@ class RiskAuditOutputV1:
     def __post_init__(self) -> None:
         object.__setattr__(self, "rule_timings", tuple(self.rule_timings))
 
+    def _with_completed_latency(self, total_latency_us: int) -> RiskAuditOutputV1:
+        """Seal completion timing on a validated audit without recursive validation.
+
+        The v1 Schema permits any nonnegative integer total. Its only semantic
+        dependencies are lower bounds (timing sum and, for timeout, budget).
+        Increasing this scalar therefore preserves validation of the frozen graph.
+        A non-timeout audit must additionally remain strictly below its budget.
+        No identity, result, timing, or nested mutable value can enter this copy.
+        """
+        if (
+            type(total_latency_us) is not int
+            or total_latency_us < self.total_latency_us
+            or (
+                self.decision.decision_origin != "TIMEOUT_GUARD"
+                and total_latency_us >= self.evaluation_timeout_us
+            )
+        ):
+            raise RiskContractError(
+                "QQ-RISK-4008", "RISK_INPUT_INVALID", "invalid completion timing"
+            )
+        instance = object.__new__(RiskAuditOutputV1)
+        for name in (
+            "decision",
+            "evaluated_at",
+            "evaluation_timeout_us",
+            "completed_rule_count",
+            "rule_timings",
+        ):
+            object.__setattr__(instance, name, getattr(self, name))
+        object.__setattr__(instance, "total_latency_us", total_latency_us)
+        return instance
+
     def to_primitive(self) -> dict[str, MutableJsonValue]:
         return {
             "schema_version": 1,

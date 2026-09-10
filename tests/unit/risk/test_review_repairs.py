@@ -76,6 +76,44 @@ class MutableClock:
         return datetime(2026, 7, 2, 2, tzinfo=UTC)
 
 
+@pytest.mark.parametrize("cost_ns", [100_000, 1_999_500, 2_000_000, 2_500_000])
+def test_cumulative_final_factory_cost_is_measured_and_budgeted(
+    monkeypatch: pytest.MonkeyPatch, cost_ns: int
+) -> None:
+    """Reviewer reproduction: charge every real validation, including rejection."""
+    import quantiqmt.risk.model as model
+    from quantiqmt.risk.audit import validate_risk_audit_output
+
+    clock = MutableClock()
+    original = model._validate_risk_output_candidate
+    calls: list[str] = []
+
+    def charged(contract_id: str, candidate: Any, semantic_validator: Any) -> None:
+        original(contract_id, candidate, semantic_validator)
+        if contract_id == "CONTRACT-RISK-AUDIT-OUTPUT-V1":
+            clock.ns += cost_ns
+            calls.append(candidate["decision"]["decision_origin"])
+
+    monkeypatch.setattr(model, "_validate_risk_output_candidate", charged)
+    runner = RiskEvaluationRunner(DeterministicRiskEvaluator(), clock)
+    runner._executor.shutdown()
+    monkeypatch.setattr(runner, "_executor", ImmediateExecutor())
+    metrics: list[tuple[Any, ...]] = []
+    monkeypatch.setattr(runner._metrics, "observe", lambda *args: metrics.append(args))
+    audit = runner.run(RiskInputV1.create(valid_input()), rule_set_dto(valid_rule_set()))
+    assert audit.total_latency_us == (clock.ns + 999) // 1000
+    assert 1 <= len(calls) <= 3  # No validation/restamping loop.
+    assert (audit.decision.error_code == "QQ-RISK-4005") == (2 * cost_ns >= 4_000_000)
+    assert [value for name, value, _ in metrics if name == "risk_evaluation_latency_us"] == [
+        audit.total_latency_us
+    ]
+    validate_risk_audit_output(audit)  # Real Schema and semantic validation of final bytes.
+    with pytest.raises(AttributeError):
+        audit.total_latency_us = 0  # type: ignore[misc]
+    with pytest.raises(TypeError):
+        audit.decision.snapshot_states["market"]["quality"] = "STALE"  # type: ignore[index]
+
+
 def install_finalization_hook(monkeypatch: Any, stage: str, hook: Any) -> None:
     import quantiqmt.risk.runner as module
 
@@ -107,6 +145,53 @@ def install_finalization_hook(monkeypatch: Any, stage: str, hook: Any) -> None:
                 hook()
 
         monkeypatch.setattr(module, "validate_risk_audit_output", validate)
+
+
+@pytest.mark.parametrize("factory_ns", [500_000, 999_500, 1_000_000, 1_500_000])
+def test_all_final_stages_accumulate_against_original_budget(
+    monkeypatch: pytest.MonkeyPatch, factory_ns: int
+) -> None:
+    from quantiqmt.risk.audit import validate_risk_audit_output
+
+    clock = MutableClock()
+    calls: list[str] = []
+
+    def charge(stage: str, ns: int) -> None:
+        calls.append(stage)
+        clock.ns += ns
+
+    for stage, ns in (
+        ("decide", 1_000_000),
+        ("audit_factory", factory_ns),
+        ("audit_validation", 1_000_000),
+    ):
+        install_finalization_hook(monkeypatch, stage, lambda s=stage, n=ns: charge(s, n))
+    runner = RiskEvaluationRunner(DeterministicRiskEvaluator(), clock)
+    runner._executor.shutdown()
+    monkeypatch.setattr(runner, "_executor", ImmediateExecutor())
+    audit = runner.run(RiskInputV1.create(valid_input()), rule_set_dto(valid_rule_set()))
+    assert calls == ["decide", "audit_factory", "audit_validation", "audit_factory"]
+    assert audit.total_latency_us == (clock.ns + 999) // 1000
+    assert (audit.decision.error_code == "QQ-RISK-4005") == (clock.ns >= 4_000_000)
+    validate_risk_audit_output(audit)
+
+
+@pytest.mark.parametrize("invalid_total", [True, 1.5, -1, 0, 4000, 5000])
+def test_completion_seal_rejects_invalid_decreasing_or_expired_total(
+    monkeypatch: pytest.MonkeyPatch, invalid_total: Any
+) -> None:
+    from quantiqmt.risk.model import RiskContractError
+
+    clock = MutableClock()
+    install_finalization_hook(monkeypatch, "audit_factory", lambda: setattr(clock, "ns", 100_000))
+    runner = RiskEvaluationRunner(DeterministicRiskEvaluator(), clock)
+    runner._executor.shutdown()
+    monkeypatch.setattr(runner, "_executor", ImmediateExecutor())
+    audit = runner.run(RiskInputV1.create(valid_input()), rule_set_dto(valid_rule_set()))
+    before = audit.to_primitive()
+    with pytest.raises(RiskContractError):
+        audit._with_completed_latency(invalid_total)
+    assert audit.to_primitive() == before
 
 
 @pytest.mark.parametrize("stage", ["decide", "audit_factory", "audit_validation"])

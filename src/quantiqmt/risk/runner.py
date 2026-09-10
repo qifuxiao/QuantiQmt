@@ -98,6 +98,7 @@ class RiskEvaluationRunner:
                             risk_input, rule_set, results, timings, start_ns, timeout_us, attempt
                         ),
                         reason="RISK_EVALUATION_TIMEOUT",
+                        start_ns=start_ns,
                     )
                 future = self._executor.submit(next, iterator, None)
                 try:
@@ -109,6 +110,7 @@ class RiskEvaluationRunner:
                             risk_input, rule_set, results, timings, start_ns, timeout_us, attempt
                         ),
                         reason="RISK_EVALUATION_TIMEOUT",
+                        start_ns=start_ns,
                     )
                 after_ns = self._clock.monotonic_ns()
                 if attempt != self._attempt:
@@ -117,6 +119,7 @@ class RiskEvaluationRunner:
                             risk_input, rule_set, results, timings, start_ns, timeout_us, attempt
                         ),
                         reason="RISK_EVALUATION_TIMEOUT",
+                        start_ns=start_ns,
                     )
                 if result is None:
                     if after_ns >= deadline_ns:
@@ -131,6 +134,7 @@ class RiskEvaluationRunner:
                                 attempt,
                             ),
                             reason="RISK_EVALUATION_TIMEOUT",
+                            start_ns=start_ns,
                         )
                     break
                 results.append(result)
@@ -147,6 +151,7 @@ class RiskEvaluationRunner:
                             risk_input, rule_set, results, timings, start_ns, timeout_us, attempt
                         ),
                         reason="RISK_EVALUATION_TIMEOUT",
+                        start_ns=start_ns,
                     )
             # Finalization has the same admission and deadline as next(iterator).
             # Give the worker immutable copies: timeout appends only to caller-owned lists.
@@ -166,6 +171,7 @@ class RiskEvaluationRunner:
                             risk_input, rule_set, results, timings, start_ns, timeout_us, attempt
                         ),
                         reason="RISK_EVALUATION_TIMEOUT",
+                        start_ns=start_ns,
                     )
                 finalization = self._executor.submit(next, finalizer)
                 try:
@@ -177,8 +183,13 @@ class RiskEvaluationRunner:
                             risk_input, rule_set, results, timings, start_ns, timeout_us, attempt
                         ),
                         reason="RISK_EVALUATION_TIMEOUT",
+                        start_ns=start_ns,
                     )
-                # Every stage shares the original absolute deadline; no budget reset.
+                # PORTS-RISK completion boundary: from start_ns before rule iteration
+                # through final factory Schema/semantic validation and worker handback.
+                # This same sample controls admission of the result AND its audit total.
+                # Scalar sealing, metric delivery and permit release follow the sample;
+                # none reruns validation or starts another evaluation budget.
                 elapsed_us = ceil_div_us(self._clock.monotonic_ns() - start_ns)
                 if max(elapsed_us, audit.total_latency_us if audit else 0) >= timeout_us:
                     return self._validate_and_record(
@@ -186,9 +197,12 @@ class RiskEvaluationRunner:
                             risk_input, rule_set, results, timings, start_ns, timeout_us, attempt
                         ),
                         reason="RISK_EVALUATION_TIMEOUT",
+                        start_ns=start_ns,
                     )
                 if audit is not None:
-                    return self._record(audit)
+                    return self._record(
+                        audit._with_completed_latency(max(elapsed_us, audit.total_latency_us))
+                    )
         finally:
             ownership.release_from_caller()
 
@@ -222,8 +236,8 @@ class RiskEvaluationRunner:
         yield None
         validate_risk_audit_output(audit)
         yield None
-        # Stamp elapsed after output construction and semantic validation. The final
-        # encoding still uses the validated factory, inside the guarded worker.
+        # The final factory remains inside the guarded worker. Its cost is included
+        # by the caller's completion sample, then sealed without another factory call.
         yield build()
 
     def _timeout_audit(
@@ -272,9 +286,13 @@ class RiskEvaluationRunner:
         )
 
     def _validate_and_record(
-        self, audit: RiskAuditOutputV1, *, reason: str | None = None
+        self, audit: RiskAuditOutputV1, *, reason: str | None = None, start_ns: int | None = None
     ) -> RiskAuditOutputV1:
         validate_risk_audit_output(audit)
+        if start_ns is not None:
+            audit = audit._with_completed_latency(
+                max(audit.total_latency_us, ceil_div_us(self._clock.monotonic_ns() - start_ns))
+            )
         return self._record(audit, reason=reason)
 
     def _record(self, audit: RiskAuditOutputV1, *, reason: str | None = None) -> RiskAuditOutputV1:
