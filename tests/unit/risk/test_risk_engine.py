@@ -9,6 +9,7 @@ from threading import BoundedSemaphore, Event, Lock, Thread
 from typing import Any
 
 import pytest
+from tests.unit.risk.execution_helpers import use_immediate_executor
 
 from quantiqmt.contracts import SchemaRegistry
 from quantiqmt.risk import (
@@ -363,6 +364,7 @@ def test_saturation_does_not_invalidate_admitted_attempt() -> None:
     second_input = RiskInputV1.create(with_input_hash(second_payload, rule_set))
     evaluator = GateEvaluator(second_input, rule_set_dto(rule_set))
     runner = RiskEvaluationRunner(evaluator, FakeClock([0] * 100))
+    use_immediate_executor(runner)
     admission = TrackingAdmission()
     runner._admission = admission
     evaluator.bind(runner)
@@ -384,6 +386,7 @@ def test_evaluator_exception_releases_admission_exactly_once() -> None:
     rule_set = valid_rule_set()
     evaluator = RaiseOnceEvaluator()
     runner = RiskEvaluationRunner(evaluator, FakeClock([0] * 200))
+    use_immediate_executor(runner)
     admission = TrackingAdmission()
     runner._admission = admission
     first = RiskInputV1.create(with_input_hash(valid_input(rule_set), rule_set))
@@ -432,6 +435,7 @@ def test_timeout_late_completion_owns_admission_until_worker_exits() -> None:
 def test_timeout_callback_registration_failure_releases_real_admission_once() -> None:
     rule_set = valid_rule_set()
     runner = RiskEvaluationRunner(DeterministicRiskEvaluator(), FakeClock([0] * 100))
+    use_immediate_executor(runner)
     original_executor = runner._executor
     runner._executor = ControlledExecutor(RegistrationFailureFuture())
     first = RiskInputV1.create(with_input_hash(valid_input(rule_set), rule_set))

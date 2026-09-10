@@ -1,11 +1,12 @@
 """Regression evidence for the three PR #117 independent Review findings."""
 
-from concurrent.futures import Future, ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from threading import Event
 from typing import Any
 
 import pytest
+from tests.unit.risk.execution_helpers import ImmediateExecutor
 from tests.unit.risk.test_risk_engine import (
     reduce_input,
     rule_set_dto,
@@ -73,18 +74,6 @@ class MutableClock:
 
     def utc_now(self) -> datetime:
         return datetime(2026, 7, 2, 2, tzinfo=UTC)
-
-
-class ImmediateExecutor:
-    """Deterministic boundary tests; blocked-work tests use the real bounded worker."""
-
-    def submit(self, fn: Any, *args: Any) -> Future[Any]:
-        future: Future[Any] = Future()
-        try:
-            future.set_result(fn(*args))
-        except BaseException as exc:
-            future.set_exception(exc)
-        return future
 
 
 def install_finalization_hook(monkeypatch: Any, stage: str, hook: Any) -> None:
@@ -190,6 +179,35 @@ def test_blocked_finalization_is_bounded_and_late_pass_is_discarded(
     rules = rule_set_dto(valid_rule_set())
     evaluator = DeterministicRiskEvaluator()
     results = tuple(evaluator.iter_rule_results(risk_input, rules))
+    decision = evaluator.decide(risk_input, rules, results)
+    preparation = RiskEvaluationRunner(evaluator, MutableClock())
+    preparation._executor.shutdown()
+    monkeypatch.setattr(preparation, "_executor", ImmediateExecutor())
+    prepared_audit = preparation.run(risk_input, rules)
+    original_factory = RiskAuditOutputV1._validated
+    import quantiqmt.risk.runner as module
+
+    original_validate = module.validate_risk_audit_output
+
+    # Isolate host scheduling of the blocking stage from contract validation cost.
+    # Semantic/elapsed tests above still run the real factories and validators.
+    monkeypatch.setattr(DeterministicRiskEvaluator, "decide", lambda *_: decision)
+    monkeypatch.setattr(
+        RiskAuditOutputV1,
+        "_validated",
+        lambda **kw: (
+            original_factory(**kw)
+            if kw["decision"].decision_origin == "TIMEOUT_GUARD"
+            else prepared_audit
+        ),
+    )
+    monkeypatch.setattr(
+        module,
+        "validate_risk_audit_output",
+        lambda audit: (
+            original_validate(audit) if audit.decision.decision_origin == "TIMEOUT_GUARD" else None
+        ),
+    )
     monkeypatch.setattr(evaluator, "iter_rule_results", lambda *_: iter(results))
     install_finalization_hook(monkeypatch, stage, block)
     runner = RiskEvaluationRunner(evaluator, MutableClock())

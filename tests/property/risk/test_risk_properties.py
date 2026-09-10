@@ -5,6 +5,7 @@ from copy import deepcopy
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
+from tests.unit.risk.execution_helpers import use_immediate_executor
 from tests.unit.risk.test_risk_engine import (
     FakeClock,
     GateEvaluator,
@@ -279,6 +280,7 @@ def test_generated_timeout_saturation_does_not_invalidate_admitted_result() -> N
     second = RiskInputV1.create(with_input_hash(second_payload, rule_set))
     evaluator = GateEvaluator(second, rule_set_dto(rule_set))
     runner = RiskEvaluationRunner(evaluator, FakeClock([0] * 100))
+    use_immediate_executor(runner)
     admission = TrackingAdmission()
     runner._admission = admission
     evaluator.bind(runner)

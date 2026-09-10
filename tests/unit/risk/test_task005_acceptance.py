@@ -4,6 +4,7 @@ from decimal import localcontext
 from typing import Any
 
 import pytest
+from tests.unit.risk.execution_helpers import use_immediate_executor
 from tests.unit.risk.test_risk_engine import (
     FakeClock,
     accepted_policy,
@@ -244,6 +245,7 @@ def test_runner_times_out_when_exhaustion_crosses_deadline() -> None:
 
 def test_runner_records_zero_elapsed_as_zero_latency() -> None:
     runner = RiskEvaluationRunner(DeterministicRiskEvaluator(), FakeClock([0] * 100))
+    use_immediate_executor(runner)
     try:
         audit = runner.run(RiskInputV1.create(valid_input()), rule_set_dto(valid_rule_set()))
         assert audit.total_latency_us == 0

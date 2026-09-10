@@ -3,8 +3,8 @@
 from hypothesis import given
 from hypothesis import strategies as st
 from pytest import MonkeyPatch
+from tests.unit.risk.execution_helpers import ImmediateExecutor
 from tests.unit.risk.test_review_repairs import (
-    ImmediateExecutor,
     MutableClock,
     install_finalization_hook,
 )
