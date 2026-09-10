@@ -5,7 +5,7 @@ from __future__ import annotations
 import concurrent.futures
 import hashlib
 import threading
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
 from typing import Any, Literal, Protocol
 
 from quantiqmt.risk.audit import validate_risk_audit_output
@@ -148,18 +148,9 @@ class RiskEvaluationRunner:
                         ),
                         reason="RISK_EVALUATION_TIMEOUT",
                     )
-            end_ns = self._clock.monotonic_ns()
-            if end_ns >= deadline_ns:
-                return self._validate_and_record(
-                    self._timeout_audit(
-                        risk_input, rule_set, results, timings, start_ns, timeout_us, attempt
-                    ),
-                    reason="RISK_EVALUATION_TIMEOUT",
-                )
             # Finalization has the same admission and deadline as next(iterator).
             # Give the worker immutable copies: timeout appends only to caller-owned lists.
-            finalization = self._executor.submit(
-                self._finalize_audit,
+            finalizer = self._finalize_audit(
                 risk_input,
                 rule_set,
                 tuple(results),
@@ -167,32 +158,37 @@ class RiskEvaluationRunner:
                 start_ns,
                 timeout_us,
             )
-            try:
-                audit = finalization.result(timeout=(deadline_ns - end_ns) / 1_000_000_000)
-            except concurrent.futures.TimeoutError:
-                ownership.transfer_to_future(finalization)
-                return self._validate_and_record(
-                    self._timeout_audit(
-                        risk_input, rule_set, results, timings, start_ns, timeout_us, attempt
-                    ),
-                    reason="RISK_EVALUATION_TIMEOUT",
-                )
-            # Include all construction/validation work in the final deadline check,
-            # and respect the integer-microsecond ceiling used by the audit contract.
-            if (
-                max(
-                    audit.total_latency_us,
-                    ceil_div_us(self._clock.monotonic_ns() - start_ns),
-                )
-                >= timeout_us
-            ):
-                return self._validate_and_record(
-                    self._timeout_audit(
-                        risk_input, rule_set, results, timings, start_ns, timeout_us, attempt
-                    ),
-                    reason="RISK_EVALUATION_TIMEOUT",
-                )
-            return self._record(audit)
+            while True:
+                remaining_ns = deadline_ns - self._clock.monotonic_ns()
+                if remaining_ns <= 0:
+                    return self._validate_and_record(
+                        self._timeout_audit(
+                            risk_input, rule_set, results, timings, start_ns, timeout_us, attempt
+                        ),
+                        reason="RISK_EVALUATION_TIMEOUT",
+                    )
+                finalization = self._executor.submit(next, finalizer)
+                try:
+                    audit = finalization.result(timeout=remaining_ns / 1_000_000_000)
+                except concurrent.futures.TimeoutError:
+                    ownership.transfer_to_future(finalization)
+                    return self._validate_and_record(
+                        self._timeout_audit(
+                            risk_input, rule_set, results, timings, start_ns, timeout_us, attempt
+                        ),
+                        reason="RISK_EVALUATION_TIMEOUT",
+                    )
+                # Every stage shares the original absolute deadline; no budget reset.
+                elapsed_us = ceil_div_us(self._clock.monotonic_ns() - start_ns)
+                if max(elapsed_us, audit.total_latency_us if audit else 0) >= timeout_us:
+                    return self._validate_and_record(
+                        self._timeout_audit(
+                            risk_input, rule_set, results, timings, start_ns, timeout_us, attempt
+                        ),
+                        reason="RISK_EVALUATION_TIMEOUT",
+                    )
+                if audit is not None:
+                    return self._record(audit)
         finally:
             ownership.release_from_caller()
 
@@ -204,9 +200,10 @@ class RiskEvaluationRunner:
         timings: tuple[RuleTiming, ...],
         start_ns: int,
         timeout_us: int,
-    ) -> RiskAuditOutputV1:
-        """Build and validate privately; only the caller may publish a result/metrics."""
+    ) -> Iterator[RiskAuditOutputV1 | None]:
+        """Yield private stage boundaries, then the audit; never publish from the worker."""
         decision = self._evaluator.decide(risk_input, rule_set, results)
+        yield None
 
         def build() -> RiskAuditOutputV1:
             return RiskAuditOutputV1._validated(
@@ -222,10 +219,12 @@ class RiskEvaluationRunner:
             )
 
         audit = build()
+        yield None
         validate_risk_audit_output(audit)
+        yield None
         # Stamp elapsed after output construction and semantic validation. The final
         # encoding still uses the validated factory, inside the guarded worker.
-        return build()
+        yield build()
 
     def _timeout_audit(
         self,

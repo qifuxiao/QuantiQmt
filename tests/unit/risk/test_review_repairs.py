@@ -143,6 +143,35 @@ def test_finalization_budget_and_recorded_elapsed(
         assert audit.completed_rule_count == len(audit.decision.rule_results)
 
 
+@pytest.mark.parametrize("final_ns", [3_000_000, 4_000_000, 5_000_000])
+def test_finalization_stages_share_one_absolute_deadline(
+    monkeypatch: pytest.MonkeyPatch, final_ns: int
+) -> None:
+    clock = MutableClock()
+    called: set[str] = set()
+
+    def advance_once(stage: str, ns: int) -> None:
+        if stage not in called:
+            called.add(stage)
+            clock.ns = ns
+
+    for stage, ns in (
+        ("decide", 1_000_000),
+        ("audit_factory", 2_000_000),
+        ("audit_validation", final_ns),
+    ):
+        install_finalization_hook(
+            monkeypatch, stage, lambda stage=stage, ns=ns: advance_once(stage, ns)
+        )
+    runner = RiskEvaluationRunner(DeterministicRiskEvaluator(), clock)
+    runner._executor.shutdown()
+    monkeypatch.setattr(runner, "_executor", ImmediateExecutor())
+    audit = runner.run(RiskInputV1.create(valid_input()), rule_set_dto(valid_rule_set()))
+    assert called == {"decide", "audit_factory", "audit_validation"}
+    assert audit.total_latency_us == final_ns // 1000
+    assert (audit.decision.error_code == "QQ-RISK-4005") == (final_ns >= 4_000_000)
+
+
 @pytest.mark.parametrize("stage", ["decide", "audit_factory", "audit_validation"])
 def test_blocked_finalization_is_bounded_and_late_pass_is_discarded(
     monkeypatch: pytest.MonkeyPatch, stage: str
