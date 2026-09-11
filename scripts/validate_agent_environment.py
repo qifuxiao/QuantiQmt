@@ -33,11 +33,15 @@ TASK_PATH = PurePosixPath(
 )
 TASK029_PATH = PurePosixPath("tasks/active/TASK-029-risk-runtime-schema-contract.md")
 SUPPORTED_TASK_PATHS = {
+    "TASK-058": PurePosixPath("tasks/active/TASK-058-risk-finalization-boundary.md"),
     "TASK-005": PurePosixPath("tasks/active/TASK-005-risk-engine.md"),
     "TASK-029": TASK029_PATH,
     "TASK-057": TASK_PATH,
 }
 HANDOFF_IDENTITIES = {
+    ("TASK-058-PLAN-v1", "TASK-058-IMPLEMENTATION-v1"): PurePosixPath(
+        "ai/handoffs/TASK-058-IMPLEMENTATION-v1.yaml"
+    ),
     ("TASK-005-PLAN-v1", "TASK-005-IMPLEMENTATION-v1"): PurePosixPath(
         "ai/handoffs/TASK-005-IMPLEMENTATION-v1.yaml"
     ),
@@ -55,6 +59,7 @@ HANDOFF_IDENTITIES = {
     ),
 }
 HANDOFF_TASK_IDS = {
+    ("TASK-058-PLAN-v1", "TASK-058-IMPLEMENTATION-v1"): "TASK-058",
     ("TASK-005-PLAN-v1", "TASK-005-IMPLEMENTATION-v1"): "TASK-005",
     ("TASK-029-PLAN-v2", "TASK-029-EVIDENCE-REPAIR-v2"): "TASK-029",
     ("TASK-029-PLAN-v2", "TASK-029-REVIEW-REPAIR-v3"): "TASK-029",
@@ -430,6 +435,10 @@ def authority_errors(
         errors.append("TASK-005 required lanes must be exactly portable")
     if task_id == "TASK-005" and tuple(valid_prohibited) != ("windows_miniqmt",):
         errors.append("TASK-005 must prohibit windows_miniqmt")
+    if task_id == "TASK-058" and lane_names != ("portable",):
+        errors.append("TASK-058 required lanes must be exactly portable")
+    if task_id == "TASK-058" and tuple(valid_prohibited) != ("windows_miniqmt",):
+        errors.append("TASK-058 must prohibit windows_miniqmt")
 
     lane_commands: list[str] = []
     for raw_lane in valid_task_lanes:

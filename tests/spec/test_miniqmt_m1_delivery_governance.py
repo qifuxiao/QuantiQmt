@@ -18,10 +18,10 @@ def _yaml(relative_path: str) -> dict[str, object]:
     return value
 
 
-def test_tasks_029_054_055_056_057_are_completed_with_only_task_005_active() -> None:
+def test_tasks_029_054_055_056_057_completed_task005_paused_only_task058_active() -> None:
     active = sorted((ROOT / "tasks" / "active").glob("TASK-*.md"))
     task_029_path = ROOT / "tasks/completed/TASK-029-risk-runtime-schema-contract.md"
-    assert active == [ROOT / "tasks/active/TASK-005-risk-engine.md"]
+    assert active == [ROOT / "tasks/active/TASK-058-risk-finalization-boundary.md"]
 
     task_029 = extract_front_matter(task_029_path)
     assert task_029["status"] == "completed"
@@ -109,9 +109,9 @@ def test_tasks_029_054_055_056_057_are_completed_with_only_task_005_active() -> 
 
     paused = ROOT / "tasks/backlog/TASK-053-dependency-sequencing-governance.md"
     assert extract_front_matter(paused)["status"] == "blocked"
-    task_005_path = ROOT / "tasks/active/TASK-005-risk-engine.md"
+    task_005_path = ROOT / "tasks/backlog/TASK-005-risk-engine.md"
     task_005 = extract_front_matter(task_005_path)
-    assert task_005["status"] == "active"
+    assert task_005["status"] == "blocked"
     assert task_005["depends_on"] == ["TASK-003", "TASK-015", "TASK-029"]
     assert task_005["delivery"]["implementation_status"] == "not_started"
     assert task_005["delivery"]["acceptance_status"] == "not_run"
@@ -121,11 +121,53 @@ def test_tasks_029_054_055_056_057_are_completed_with_only_task_005_active() -> 
         path = next((ROOT / "tasks/completed").glob(f"{dependency}-*.md"))
         assert delivery_is_unlockable(extract_front_matter(path))
 
+    task_058 = extract_front_matter(active[0])
+    assert task_058["status"] == "active"
+    assert task_058["depends_on"] == task_005["depends_on"]
+    assert task_058["delivery"] == {
+        "schema_version": 1,
+        "contract_status": "draft",
+        "implementation_status": "not_started",
+        "acceptance_status": "not_run",
+        "review_status": "pending",
+        "release_status": "prohibited",
+    }
+    assert task_058["allowed_paths"] == [
+        "spec/interfaces/risk-ports.md",
+        "spec/nfr/performance.yaml",
+        "spec/nfr/observability.yaml",
+        "spec/workflows/submit-order.yaml",
+        "spec/manifest.yaml",
+        "ai/packets/TASK-058-IMPLEMENTATION-v1.md",
+        "ai/handoffs/TASK-058-IMPLEMENTATION-v1.yaml",
+    ]
+    verification = task_058["verification"]
+    assert verification["commands"] == [
+        "poetry run python scripts/validate_specs.py",
+        "poetry run pytest tests/spec tests/contract",
+    ]
+    assert verification["required_lanes"] == [
+        {
+            "lane": "portable",
+            "capability": "portable",
+            "minimum_records": 1,
+            "commands": verification["commands"],
+        }
+    ]
+    assert verification["prohibited_lanes"] == ["windows_miniqmt"]
+    paused_text = task_005_path.read_text(encoding="utf-8")
+    for frozen in ("5628617915", "5629435266", "88d217661f6d6c127758fc245336a9f806788ab9"):
+        assert frozen in paused_text
+    assert "TASK-058" in paused_text
+    assert "- Plan version: `TASK-058-PLAN-v1`" in active[0].read_text(encoding="utf-8")
+
     entries = _yaml("tasks/index.yaml")["tasks"]
     assert isinstance(entries, list)
     indexed = {entry["id"]: entry for entry in entries}
-    assert indexed["TASK-005"]["path"] == "active/TASK-005-risk-engine.md"
-    assert indexed["TASK-005"]["status"] == "active"
+    assert indexed["TASK-005"]["path"] == "backlog/TASK-005-risk-engine.md"
+    assert indexed["TASK-005"]["status"] == "blocked"
+    assert indexed["TASK-058"]["path"] == "active/TASK-058-risk-finalization-boundary.md"
+    assert indexed["TASK-058"]["status"] == "active"
     assert indexed["TASK-029"]["path"] == ("completed/TASK-029-risk-runtime-schema-contract.md")
     assert indexed["TASK-029"]["status"] == "completed"
     assert indexed["TASK-053"]["path"].startswith("backlog/")

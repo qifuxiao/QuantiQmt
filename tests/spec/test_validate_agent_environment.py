@@ -92,7 +92,22 @@ def _handoff029_v3() -> dict[str, Any]:
 
 
 def _task005_authority() -> tuple[dict[str, Any], dict[str, Any]]:
-    task = extract_front_matter(ROOT / "tasks/active/TASK-005-risk-engine.md")
+    # Frozen pre-suspension authority; never relabel the paused task as active.
+    raw = subprocess.check_output(
+        [
+            "git",
+            "show",
+            "b9b313d2af1071281bc62c0919ee4caceae85825:tasks/active/TASK-005-risk-engine.md",
+        ],
+        cwd=ROOT,
+    )
+    assert (
+        subprocess.check_output(["git", "hash-object", "--stdin"], input=raw, cwd=ROOT)
+        .decode()
+        .strip()
+        == "b5d10367c43294cc61543bdeb779717ff99e94b7"
+    )
+    task = yaml.safe_load(raw.decode("utf-8").split("---", 2)[1])
     handoff = _handoff(ROOT / "ai/handoffs/TASK-029-IMPLEMENTATION-v1.yaml")
     handoff["task_id"] = "TASK-005"
     handoff["plan_version"] = "TASK-005-PLAN-v1"
@@ -102,29 +117,55 @@ def _task005_authority() -> tuple[dict[str, Any], dict[str, Any]]:
     return task, handoff
 
 
-def test_task005_exact_initial_identity_and_lanes_are_supported() -> None:
+def _initial_authority(task_id: str) -> tuple[dict[str, Any], dict[str, Any]]:
     task, handoff = _task005_authority()
+    if task_id == "TASK-058":
+        # Synthetic future authority, not a real assignment or environment evidence.
+        task = copy.deepcopy(task)
+        task["id"] = task_id
+        commands = [
+            "poetry run python scripts/validate_specs.py",
+            "poetry run pytest tests/spec tests/contract",
+        ]
+        task["verification"]["commands"] = commands
+        task["verification"]["required_lanes"][0]["commands"] = commands.copy()
+        handoff["task_id"] = task_id
+        handoff["plan_version"] = f"{task_id}-PLAN-v1"
+        handoff["packet_version"] = f"{task_id}-IMPLEMENTATION-v1"
+        handoff["required_lanes"] = copy.deepcopy(task["verification"]["required_lanes"])
+    return task, handoff
+
+
+@pytest.mark.parametrize("task_id", ["TASK-005", "TASK-058"])
+def test_initial_identity_and_lanes_are_supported(task_id: str) -> None:
+    task, handoff = _initial_authority(task_id)
     authority = validator.build_authority(
-        task, handoff, handoff_path=Path("ai/handoffs/TASK-005-IMPLEMENTATION-v1.yaml")
+        task, handoff, handoff_path=Path(f"ai/handoffs/{task_id}-IMPLEMENTATION-v1.yaml")
     )
-    assert authority.task_id == "TASK-005"
+    assert authority.task_id == task_id
     assert authority.verification_commands == task["verification"]["commands"]
     assert tuple(lane.lane for lane in authority.required_lanes) == ("portable",)
     assert authority.prohibited_lanes == ("windows_miniqmt",)
 
 
-def test_task005_git_loader_binds_exact_task_blob(tmp_path: Path) -> None:
+@pytest.mark.parametrize("task_id", ["TASK-005", "TASK-058"])
+def test_initial_git_loader_binds_exact_task_blob(tmp_path: Path, task_id: str) -> None:
     # Synthetic authority only: no real assignment or GitHub evidence is created.
-    task, handoff = _task005_authority()
+    task, handoff = _initial_authority(task_id)
     subprocess.run(["git", "init", str(tmp_path)], check=True, capture_output=True)
-    task_path = tmp_path / "tasks/active/TASK-005-risk-engine.md"
+    filename = (
+        "TASK-005-risk-engine.md"
+        if task_id == "TASK-005"
+        else "TASK-058-risk-finalization-boundary.md"
+    )
+    task_path = tmp_path / "tasks/active" / filename
     task_path.parent.mkdir(parents=True)
     task_path.write_text("---\n" + yaml.safe_dump(task) + "---\n", encoding="utf-8")
     blob = subprocess.check_output(
         ["git", "hash-object", str(task_path)], cwd=tmp_path, text=True
     ).strip()
     handoff["task_blob_sha"] = blob
-    handoff_path = tmp_path / "ai/handoffs/TASK-005-IMPLEMENTATION-v1.yaml"
+    handoff_path = tmp_path / f"ai/handoffs/{task_id}-IMPLEMENTATION-v1.yaml"
     handoff_path.parent.mkdir(parents=True)
     handoff_path.write_text(yaml.safe_dump(handoff), encoding="utf-8")
     subprocess.run(["git", "add", "."], cwd=tmp_path, check=True, capture_output=True)
@@ -144,7 +185,7 @@ def test_task005_git_loader_binds_exact_task_blob(tmp_path: Path) -> None:
         capture_output=True,
     )
     authority = validator.load_authority_from_git(tmp_path, head="HEAD")
-    assert authority.task_id == "TASK-005"
+    assert authority.task_id == task_id
     assert authority.task_blob == blob
     # Uncommitted caller-side changes cannot replace authority from Git.
     task_path.write_text("not an authority document", encoding="utf-8")
@@ -170,26 +211,48 @@ def test_task005_git_loader_binds_exact_task_blob(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize(
-    "case", ["task", "plan", "packet", "filename", "missing_lanes", "command", "prohibited"]
+    "case",
+    [
+        "task",
+        "plan",
+        "packet",
+        "filename",
+        "missing_lanes",
+        "command",
+        "prohibited",
+        "lane",
+        "inactive",
+        "unknown",
+    ],
 )
-def test_task005_authority_mismatches_fail_closed(case: str) -> None:
-    task, handoff = _task005_authority()
-    path = Path("ai/handoffs/TASK-005-IMPLEMENTATION-v1.yaml")
+@pytest.mark.parametrize("task_id", ["TASK-005", "TASK-058"])
+def test_initial_authority_mismatches_fail_closed(case: str, task_id: str) -> None:
+    task, handoff = _initial_authority(task_id)
+    path = Path(f"ai/handoffs/{task_id}-IMPLEMENTATION-v1.yaml")
     if case == "task":
         handoff["task_id"] = "TASK-029"
     elif case == "plan":
-        handoff["plan_version"] = "TASK-005-PLAN-v2"
+        handoff["plan_version"] = f"{task_id}-PLAN-v2"
     elif case == "packet":
         handoff["packet_version"] = "TASK-029-IMPLEMENTATION-v1"
     elif case == "filename":
-        path = Path("ai/handoffs/TASK-005-REPAIR-v1.yaml")
+        path = Path(f"ai/handoffs/{task_id}-REPAIR-v1.yaml")
     elif case == "missing_lanes":
         del task["verification"]["required_lanes"]
     elif case == "command":
         handoff["required_lanes"][0]["commands"][0] += " "
-    else:
+    elif case == "prohibited":
         task["verification"]["prohibited_lanes"] = []
         handoff["prohibited_lanes"] = []
+    elif case == "lane":
+        task["verification"]["required_lanes"][0]["lane"] = "windows"
+        handoff["required_lanes"] = copy.deepcopy(task["verification"]["required_lanes"])
+    elif case == "inactive":
+        task["status"] = "blocked"
+    else:
+        task["id"] = handoff["task_id"] = "TASK-059"
+        handoff["plan_version"] = "TASK-059-PLAN-v1"
+        handoff["packet_version"] = "TASK-059-IMPLEMENTATION-v1"
     assert validator.authority_errors(task, handoff, handoff_path=path)
 
 
