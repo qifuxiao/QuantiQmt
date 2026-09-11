@@ -1,7 +1,7 @@
 ---
 id: TASK-005
 title: Implement deterministic risk evaluator
-status: active
+status: blocked
 depends_on: [TASK-003, TASK-015, TASK-029]
 spec_refs: [INV-RISK, INV-CONSISTENCY, WF-SUBMIT-ORDER, CONTRACT-RISK-INPUT-V1, CONTRACT-RISK-RULE-SET-V1, CONTRACT-RISK-DECISION-V1, CONTRACT-RISK-AUDIT-OUTPUT-V1, CONTRACT-RISK-ORDER-EVALUATED-V1, CONTRACT-RISK-ORDER-EVALUATED-V2, CONTRACT-ERROR-CATALOG, PORTS-RISK, NFR-PERFORMANCE, NFR-OBSERVABILITY]
 allowed_paths:
@@ -37,6 +37,26 @@ delivery:
 # Objective
 
 实现基于不可变快照和版本化规则集的纯 RiskEvaluator。
+
+## Suspension gate — 2026-09-11
+
+本次 Human 授权暂停 TASK-005，并单独激活 TASK-058 规范变更任务。
+PR #117 已关闭、未合并；它不是 accepted completion。
+停止 Head：`88d217661f6d6c127758fc245336a9f806788ab9`。
+
+- Supersession authority: https://github.com/qifuxiao/QuantiQmt/pull/117#issuecomment-5628617915
+- Canonical STOP: https://github.com/qifuxiao/QuantiQmt/pull/117#issuecomment-5629435266
+- Preserved implementation: https://github.com/qifuxiao/QuantiQmt/pull/117
+
+旧分支、commit、Packet/Handoff、Review 和环境 evidence 保留，不改写、不重用为
+新 Head 的权威。下列 activation/Plan-v1/实施准备段落仅保留历史上下文，
+不能覆盖本暂停门禁。delivery 字段描述 main 中未合并本轮实现的状态，
+不表示 PR #117 从未开展工作，也不把关闭当作完成。
+
+恢复必须等待 TASK-058 规范变更独立评审、人类合并及可信完成后，由 Human 另行
+授权 TASK-005 重规划和激活；现有依赖列表保留，恢复时再冻结新规范依赖。
+新 Implementation PR 必须从届时核验的 exact main 建立新 Base、Packet、
+assignment 和 Handoff，不沿用 PR #117 的冻结 Base。不得在本次准备中修复 Risk。
 
 ## Activation gate
 
