@@ -1,0 +1,127 @@
+schema_version: 1
+task_id: TASK-058
+packet_version: TASK-058-IMPLEMENTATION-v1
+plan_version: TASK-058-PLAN-v1
+planning_base_sha: b9b313d2af1071281bc62c0919ee4caceae85825
+expected_base_sha: 3bee8766ab3bc5a14ea9e1367f7f973c3f9cc6eb
+expected_pr_base_sha: 3bee8766ab3bc5a14ea9e1367f7f973c3f9cc6eb
+task_blob_sha: 0c1feb2cec0f5357fdbb4e137ecfd45d80277b2a
+allowed_paths:
+  - spec/interfaces/risk-ports.md
+  - spec/nfr/performance.yaml
+  - spec/nfr/observability.yaml
+  - spec/workflows/submit-order.yaml
+  - spec/manifest.yaml
+  - ai/packets/TASK-058-IMPLEMENTATION-v1.md
+  - ai/handoffs/TASK-058-IMPLEMENTATION-v1.yaml
+forbidden_paths:
+  - src/**
+  - tests/**
+  - scripts/**
+  - tasks/**
+  - .github/**
+  - migrations/**
+  - spec/contracts/**
+  - spec/invariants/**
+  - spec/state-machines/**
+  - pyproject.toml
+  - poetry.lock
+  - poetry.toml
+codex_only_paths:
+  - ai/packets/TASK-058-IMPLEMENTATION-v1.md
+  - ai/handoffs/TASK-058-IMPLEMENTATION-v1.yaml
+required_lanes:
+  - lane: portable
+    capability: portable
+    minimum_records: 1
+    commands:
+      - poetry run python scripts/validate_specs.py
+      - poetry run pytest tests/spec tests/contract
+prohibited_lanes:
+  - windows_miniqmt
+github_authority:
+  api_origin: https://api.github.com
+  repository: qifuxiao/QuantiQmt
+  pull_request_number: 119
+  base_branch: main
+  head_branch: codex/task-058-implementation
+  authorized_human_logins:
+    - qifuxiao
+  assignment_comment:
+    id: 5634925713
+    url: https://github.com/qifuxiao/QuantiQmt/pull/119#issuecomment-5634925713
+    api_url: https://api.github.com/repos/qifuxiao/QuantiQmt/issues/comments/5634925713
+    issue_url: https://api.github.com/repos/qifuxiao/QuantiQmt/issues/119
+    author_login: qifuxiao
+    created_at: "2026-09-11T13:11:36Z"
+    updated_at: "2026-09-11T13:11:36Z"
+    body_sha256: 69b257ddf30787b3dd9bc19aceebb8ce239fd588550a88990766893d0a265dd4
+    sentinel: QUANTIQMT_GITHUB_AUTHORITY_V1
+    schema_version: 1
+  authorized_producers:
+    - agent_id: task-058-specification-codex-windows-1
+      github_login: qfxyyy
+      role: Implementation Agent
+      tool: Codex
+      os: Windows
+      lanes: [portable]
+    - agent_id: task-058-environment-verification-codex-windows-1
+      github_login: qifuxiao
+      role: Environment Verification Agent
+      tool: Codex
+      os: Windows
+      lanes: [portable]
+repair_context:
+  superseded_head_sha: f74ceb26d821cc9d53d3164225fe71c1dcbc1124
+  stage: task_058_packet_only_human_assignment_frozen
+  packet_identity: TASK-058-IMPLEMENTATION-v1
+  packet_path: ai/packets/TASK-058-IMPLEMENTATION-v1.md
+  packet_blob_sha: 6c738559a3dda4edda66600f06e99c7efbe01d70
+  implementation_pr_number: 119
+  implementation_pr_url: https://github.com/qifuxiao/QuantiQmt/pull/119
+  implementation_pr_base_sha: 3bee8766ab3bc5a14ea9e1367f7f973c3f9cc6eb
+  implementation_branch: codex/task-058-implementation
+  packet_only_head_sha: f74ceb26d821cc9d53d3164225fe71c1dcbc1124
+  note: >-
+    superseded_head_sha is the existing standard-schema field binding the
+    packet-only Starting Head, not a historical TASK-058 repair. The Coordinator
+    is authorized only to add this Handoff on the exact Base and push its own
+    branch. The assigned writer must preserve this commit in a no-ff merge
+    before normative changes and then pass the complete formal topology gate.
+required_outcome:
+  - Deliver only the five-specification-file change and compatibility matrix required by TASK-058 and its frozen Packet.
+  - Preserve the complete primitive candidate, Schema validation, semantic validation and deep-freeze chain without post-validation mutation.
+  - Preserve the original deadline, fail-closed behavior and 4ms NFR; distinguish audit sampling from full completion measurement.
+  - Specify bounded cleanup, telemetry resources, lower-bound loss diagnostics and no-valid-audit failure exits for independent normative Review.
+  - Run the two opaque task commands and task-required wheel build, with zero skipped required tests and exact-Head portable evidence and CI.
+  - Keep TASK-005 blocked; candidate design directions are not accepted normative contracts or runtime acceptance.
+execution_constraints:
+  handoff_branch: codex/task-058-implementation-handoff
+  handoff_commit_must_be_add_only_from_exact_base: true
+  assigned_writer_starting_head_sha: f74ceb26d821cc9d53d3164225fe71c1dcbc1124
+  assigned_writer_first_history_change_must_sync_handoff_without_rewrite: true
+  independent_worktree_initialization_is_not_implementation: true
+  handoff_sync_and_formal_validation_must_precede_normative_changes: true
+  implementation_pr_must_remain_open: true
+  direct_push_to_implementation_pr_by_coordinator: forbidden
+  direct_push_to_main: forbidden
+  cherry_pick: forbidden
+  squash: forbidden
+  rebase: forbidden
+  force_push: forbidden
+  modify_packet_or_handoff: forbidden
+  inherit_preparation_task_validator_test_permissions: forbidden
+  business_implementation: forbidden
+  self_review: forbidden
+  self_approve: forbidden
+  merge_pr: forbidden
+  closeout: forbidden
+  release: prohibited
+  task_005_restoration_or_other_task_activation: forbidden
+  miniqmt_connection: forbidden
+  account_query: forbidden
+  market_data_query: forbidden
+  order_submission_or_cancellation: forbidden
+  real_money_trading: forbidden
+  expected_commands_from_caller_or_evidence: forbidden
+  environment_evidence_and_review_must_bind_new_exact_head_after_change: true
