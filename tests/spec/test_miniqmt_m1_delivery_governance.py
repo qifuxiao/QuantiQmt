@@ -138,13 +138,17 @@ def test_tasks_029_054_055_056_057_completed_task005_paused_only_task058_active(
         "spec/nfr/observability.yaml",
         "spec/workflows/submit-order.yaml",
         "spec/manifest.yaml",
-        "ai/packets/TASK-058-IMPLEMENTATION-v1.md",
-        "ai/handoffs/TASK-058-IMPLEMENTATION-v1.yaml",
+        "tests/spec/test_order_registration_binding_contracts.py",
+        "tests/spec/test_risk_runtime_schema_contract.py",
+        "tests/unit/contracts/test_schema_bundle.py",
+        "ai/packets/TASK-058-IMPLEMENTATION-v2.md",
+        "ai/handoffs/TASK-058-IMPLEMENTATION-v2.yaml",
     ]
     verification = task_058["verification"]
     assert verification["commands"] == [
         "poetry run python scripts/validate_specs.py",
         "poetry run pytest tests/spec tests/contract",
+        "poetry run pytest tests/unit/contracts",
     ]
     assert verification["required_lanes"] == [
         {
@@ -159,7 +163,29 @@ def test_tasks_029_054_055_056_057_completed_task005_paused_only_task058_active(
     for frozen in ("5628617915", "5629435266", "88d217661f6d6c127758fc245336a9f806788ab9"):
         assert frozen in paused_text
     assert "TASK-058" in paused_text
-    assert "- Plan version: `TASK-058-PLAN-v1`" in active[0].read_text(encoding="utf-8")
+    task_text = active[0].read_text(encoding="utf-8")
+    assert "- Plan version: `TASK-058-PLAN-v2`" in task_text
+    assert "5646729029" in task_text
+    assert "02fc1857a2fa885ba59477de37a7e20ca965fc3f" in task_text
+    assert "poetry build" in task_text
+    assert task_058["forbidden_paths"] == [
+        "src/**",
+        "tests/contract/**",
+        "tests/property/**",
+        "tests/integration/**",
+        "scripts/**",
+        "tasks/**",
+        ".github/**",
+        "migrations/**",
+        "spec/contracts/**",
+        "spec/invariants/**",
+        "spec/state-machines/**",
+        "ai/packets/TASK-058-IMPLEMENTATION-v1.md",
+        "ai/handoffs/TASK-058-IMPLEMENTATION-v1.yaml",
+        "pyproject.toml",
+        "poetry.lock",
+        "poetry.toml",
+    ]
 
     entries = _yaml("tasks/index.yaml")["tasks"]
     assert isinstance(entries, list)
