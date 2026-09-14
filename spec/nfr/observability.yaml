@@ -126,10 +126,46 @@ nfr:
     - evaluated_at
   risk_metrics:
     - "risk_evaluation_latency_us histogram"
+    - "risk_completion_latency_us histogram"
     - "risk_rule_latency_us histogram"
     - "risk_decisions_total{decision,origin,error_code} counter"
     - "risk_fail_closed_total{reason} counter"
   risk_metric_forbidden_labels: [order_id, account_id, portfolio_id, strategy_id, instrument_id, correlation_id, decision_id, rule_id]
+  risk_metric_measurements:
+    risk_evaluation_latency_us: exact_valid_audit_total_latency_us_sample_with_lower_bounds
+    risk_rule_latency_us: exact_valid_audit_rule_timings_latency_us
+    risk_completion_latency_us: full_caller_terminal_latency_including_finalization_and_failure_cleanup
+    no_valid_audit: completion_and_local_fail_closed_only_no_decision_or_rule_samples
+    consistency: never_modify_authoritative_audit_to_fit_telemetry
+  risk_telemetry:
+    interface: PORTS-RISK.RiskTelemetry
+    admission: try_only_before_batch_construction
+    consumer_workers: 1
+    pending_slots: 1
+    buffer_count: 2
+    buffer_bytes: 524288
+    max_rule_samples: 8192
+    max_summary_samples: 4
+    numeric_encoding: uint64_unsigned_fixed_8_bytes
+    label_encoding: fixed_enum_ids_no_dynamic_strings
+    storage: reserved_buffer_only_no_dynamic_batch_or_unbounded_integer_encoding
+    oversize_or_unrepresentable: FULL_drop_whole_batch_without_clamping_audit
+    drop_reasons: [FULL, CONTENDED, OBSERVER_EXCEPTION, CLOSED]
+    counter_unit: batch_loss_observations_not_exact_lost_samples
+    counter_semantics: uint64_saturating_possibly_missed_LOWER_BOUND
+    counter_update: one_try_lock_non_nested_no_retry_no_recursive_metrics
+    diagnostic_states: [AVAILABLE, BUSY]
+    diagnostic_fields: [state, semantics, lower_bounds, saturated, closed]
+    diagnostic_busy: no_counter_or_closed_snapshot_no_zero_substitution
+    diagnostic_available: coherent_local_snapshot_not_complete_loss_accounting
+    zero_counter_proves_no_loss: false
+    observer_exception: prefix_side_effects_possible_drop_remaining_batch_without_retry
+    observer_replacement: forbidden
+    blocked_observer: retains_buffer_and_worker_until_actual_exit
+    close: try_only_close_admission_drop_pending_leave_inflight_owned_no_trading_path_join
+    retries: 0
+    authoritative_audit_or_outbox_loss: forbidden
+    same_process_arbitrary_observer_isolation: not_guaranteed
   strategy_runtime_audit:
     event: strategy.state_changed.v1
     required_fields: [strategy_id, strategy_version, generation, from_state, to_state, reason_code, correlation_id, occurred_at]

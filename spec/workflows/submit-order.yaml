@@ -29,7 +29,7 @@ workflow:
       input_contracts: [CONTRACT-RISK-INPUT-V1, CONTRACT-RISK-RULE-SET-V1]
       output_contract: CONTRACT-RISK-DECISION-V1
       timeout: QQ-RISK-4005
-      timeout_semantics: "RiskEvaluationRunner uses monotonic time, emits TIMEOUT_GUARD REJECT, and never allows a late PASS to replace it"
+      timeout_semantics: "original monotonic deadline covers final validation/freeze/handback; one bounded cleanup yields a validated TIMEOUT_GUARD REJECT or local no-valid-audit failure; late PASS is forbidden"
       pure_evaluator: "no I/O, database, broker, mutable global state, business clock, or monotonic clock"
       ordering: PORTS-RISK
     - id: apply_risk_decision
@@ -83,6 +83,16 @@ workflow:
     semantic_validator: PORTS-RISK.RiskAuditSemanticValidator
     validate_before: [v1_projection, approved_transition_and_audit_outbox_commit]
     validation_failure: "fail closed; do not repair/reorder, do not project or publish v1/v2, and do not enter execution"
+    finalization: primitive_candidate_then_Draft_2020_12_then_PORTS_RISK_semantics_then_deep_freeze
+    no_valid_audit:
+      outcome: local_failure_without_decision
+      interface: PORTS-RISK.RiskRunFailure
+      forbidden: [fabricated_decision, automatic_oms_rejected, v1_projection, v1_v2_publication, approved_transition, execution, retry_by_exception_name_or_text]
+      order_state: preserve_registered_state_and_identity_for_explicit_application_failure_handling
+      audit: retain_failure_diagnostics_without_fabricating_risk_order_evaluated_event
+      retry: no_automatic_retry_requires_explicit_application_policy_and_new_verified_input
+      cleanup_failure: preserve_original_selected_failure_and_separate_cleanup_classification
+      error_mapping: never_reuse_QQ_RISK_4008_for_output_validation_or_cleanup_failure
     authoritative_event: risk.order_evaluated.v2
     compatibility_event: risk.order_evaluated.v1
     event_projection_mapping: PORTS-RISK

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 
 import yaml
@@ -130,13 +131,25 @@ def test_repository_and_workflows_fail_closed_for_unbound() -> None:
 
 
 def test_manifest_and_task_handoff_record_spec_change() -> None:
-    manifest = _yaml("spec/manifest.yaml")
+    source = "3bee8766ab3bc5a14ea9e1367f7f973c3f9cc6eb:spec/manifest.yaml"
+    assert (
+        subprocess.check_output(
+            ["git", "rev-parse", source], cwd=ROOT, timeout=10, text=True
+        ).strip()
+        == "1a72adc78638dc223fb263df8beb69a7e2586bb3"
+    )
+    manifest = yaml.safe_load(
+        subprocess.check_output(["git", "show", source], cwd=ROOT, timeout=10)
+    )
     specification = manifest["specification"]
     assert specification["version"] == "0.15.0"
     change = manifest["change"]
     assert change["id"] == "SPEC-0.15.0-RISK-RUNTIME-SCHEMA-BUNDLE"
     assert change["previous_version"] == "0.14.0"
     assert change["migration"]["destructive_backfill"] == "forbidden"
+    assert _yaml("spec/manifest.yaml")["change"]["migration"]["destructive_backfill"] == (
+        "forbidden"
+    )
 
     index = _text("tasks/index.yaml")
     assert "id: TASK-050" in index
