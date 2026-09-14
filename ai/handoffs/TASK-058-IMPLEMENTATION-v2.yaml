@@ -1,0 +1,141 @@
+schema_version: 1
+task_id: TASK-058
+packet_version: TASK-058-IMPLEMENTATION-v2
+plan_version: TASK-058-PLAN-v2
+planning_base_sha: 3bee8766ab3bc5a14ea9e1367f7f973c3f9cc6eb
+expected_base_sha: 4fb7ad1ecb5d726fff7f54d107de69fbabe69688
+expected_pr_base_sha: 4fb7ad1ecb5d726fff7f54d107de69fbabe69688
+task_blob_sha: 3457ffe90f48aedc5cf2f5fddcbdb107f4d1cd83
+allowed_paths:
+- spec/interfaces/risk-ports.md
+- spec/nfr/performance.yaml
+- spec/nfr/observability.yaml
+- spec/workflows/submit-order.yaml
+- spec/manifest.yaml
+- tests/spec/test_order_registration_binding_contracts.py
+- tests/spec/test_risk_runtime_schema_contract.py
+- tests/unit/contracts/test_schema_bundle.py
+- ai/packets/TASK-058-IMPLEMENTATION-v2.md
+- ai/handoffs/TASK-058-IMPLEMENTATION-v2.yaml
+forbidden_paths:
+- src/**
+- tests/contract/**
+- tests/property/**
+- tests/integration/**
+- scripts/**
+- tasks/**
+- .github/**
+- migrations/**
+- spec/contracts/**
+- spec/invariants/**
+- spec/state-machines/**
+- ai/packets/TASK-058-IMPLEMENTATION-v1.md
+- ai/handoffs/TASK-058-IMPLEMENTATION-v1.yaml
+- pyproject.toml
+- poetry.lock
+- poetry.toml
+codex_only_paths:
+- ai/packets/TASK-058-IMPLEMENTATION-v2.md
+- ai/handoffs/TASK-058-IMPLEMENTATION-v2.yaml
+verification:
+  commands:
+  - poetry run python scripts/validate_specs.py
+  - poetry run pytest tests/spec tests/contract
+  - poetry run pytest tests/unit/contracts
+  required_lanes:
+  - lane: portable
+    capability: portable
+    minimum_records: 1
+    commands:
+    - poetry run python scripts/validate_specs.py
+    - poetry run pytest tests/spec tests/contract
+    - poetry run pytest tests/unit/contracts
+  prohibited_lanes:
+  - windows_miniqmt
+required_lanes:
+- lane: portable
+  capability: portable
+  minimum_records: 1
+  commands:
+  - poetry run python scripts/validate_specs.py
+  - poetry run pytest tests/spec tests/contract
+  - poetry run pytest tests/unit/contracts
+prohibited_lanes:
+- windows_miniqmt
+github_authority:
+  api_origin: https://api.github.com
+  repository: qifuxiao/QuantiQmt
+  pull_request_number: 121
+  base_branch: main
+  head_branch: codex/task-058-implementation-v2
+  authorized_human_logins:
+  - qifuxiao
+  assignment_comment:
+    id: 5657641090
+    url: https://github.com/qifuxiao/QuantiQmt/pull/121#issuecomment-5657641090
+    api_url: https://api.github.com/repos/qifuxiao/QuantiQmt/issues/comments/5657641090
+    issue_url: https://api.github.com/repos/qifuxiao/QuantiQmt/issues/121
+    author_login: qifuxiao
+    created_at: '2026-09-14T01:08:46Z'
+    updated_at: '2026-09-14T01:08:46Z'
+    body_sha256: 1cf26c621adc45a77b029d91bc7e16fb9b28c39c057a89ed818761bf9404b139
+    sentinel: QUANTIQMT_GITHUB_AUTHORITY_V1
+    schema_version: 1
+  authorized_producers:
+  - agent_id: task-058-specification-v2-codex-windows-1
+    github_login: qfxyyy
+    role: Implementation Agent
+    tool: Codex
+    os: Windows
+    lanes:
+    - portable
+  - agent_id: task-058-environment-verification-v2-codex-windows-1
+    github_login: qifuxiao
+    role: Environment Verification Agent
+    tool: Codex
+    os: Windows
+    lanes:
+    - portable
+repair_context:
+  superseded_head_sha: 6ab80d812e07def8370e6cb31eb6c66c9f922df4
+  stage: plan_v2_packet_only_human_assignment_frozen
+  packet_identity: TASK-058-IMPLEMENTATION-v2
+  packet_path: ai/packets/TASK-058-IMPLEMENTATION-v2.md
+  packet_blob_sha: f5c0cfb89649972ae34bf0e77f98ac306385caf1
+  task_path: tasks/active/TASK-058-risk-finalization-boundary.md
+  implementation_pr_number: 121
+  implementation_pr_url: https://github.com/qifuxiao/QuantiQmt/pull/121
+  packet_only_head_sha: 6ab80d812e07def8370e6cb31eb6c66c9f922df4
+  note: The existing superseded_head_sha field freezes the Packet-only Starting Head; it does not assert
+    a prior v2 Repair. The assigned writer must first merge this independent Coordinator Handoff commit
+    with --no-ff, preserving its direct Base parent and exact blob, then pass complete formal Handoff
+    validation at the actual synchronization Head before specification or test edits.
+execution_constraints:
+  handoff_branch: codex/task-058-implementation-v2-handoff
+  coordinator_add_only_path: ai/handoffs/TASK-058-IMPLEMENTATION-v2.yaml
+  handoff_introduction_direct_parent_sha: 4fb7ad1ecb5d726fff7f54d107de69fbabe69688
+  assigned_writer_first_history_change: non-rewriting --no-ff merge of the exact Coordinator Handoff commit
+  full_handoff_validation: required at actual synchronization Head before specification or test edits
+  writer_paths:
+  - spec/interfaces/risk-ports.md
+  - spec/nfr/performance.yaml
+  - spec/nfr/observability.yaml
+  - spec/workflows/submit-order.yaml
+  - spec/manifest.yaml
+  - tests/spec/test_order_registration_binding_contracts.py
+  - tests/spec/test_risk_runtime_schema_contract.py
+  - tests/unit/contracts/test_schema_bundle.py
+  coordinator_sync_on_behalf_of_writer: forbidden
+  coordinator_push_to_implementation_branch: forbidden
+  push_to_main: forbidden
+  replacement_pr: forbidden
+  rewrite_packet_task_handoff_or_validator: forbidden
+  rebase_or_force_push: forbidden
+  approval_merge_closeout: Human only; not authorized by this Handoff
+  environment_verifier_implementation_write: forbidden
+  task_005: remain blocked
+  miniqmt_account_market_order_real_money_deployment_release: forbidden
+  preserve_v1: 'Preserve PR #119, assignment, Packet/Handoff and local-only sync in the original repository;
+    do not reconstruct, push or introduce the old sync into v2 ancestry.'
+  failure_mode: PLAN_BLOCKED on authority, identity, blob, event, topology, concurrency, scope or validation
+    drift; no permission repair or topology exemption
