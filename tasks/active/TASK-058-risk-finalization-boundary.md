@@ -13,8 +13,8 @@ allowed_paths:
   - tests/spec/test_order_registration_binding_contracts.py
   - tests/spec/test_risk_runtime_schema_contract.py
   - tests/unit/contracts/test_schema_bundle.py
-  - ai/packets/TASK-058-IMPLEMENTATION-v2.md
-  - ai/handoffs/TASK-058-IMPLEMENTATION-v2.yaml
+  - ai/packets/TASK-058-IMPLEMENTATION-v3.md
+  - ai/handoffs/TASK-058-IMPLEMENTATION-v3.yaml
 forbidden_paths:
   - src/**
   - tests/contract/**
@@ -29,6 +29,8 @@ forbidden_paths:
   - spec/state-machines/**
   - ai/packets/TASK-058-IMPLEMENTATION-v1.md
   - ai/handoffs/TASK-058-IMPLEMENTATION-v1.yaml
+  - ai/packets/TASK-058-IMPLEMENTATION-v2.md
+  - ai/handoffs/TASK-058-IMPLEMENTATION-v2.yaml
   - pyproject.toml
   - poetry.lock
   - poetry.toml
@@ -64,16 +66,19 @@ delivery:
 
 ## Plan and activation
 
-- Plan version: `TASK-058-PLAN-v2`
-- Planning Base: `3bee8766ab3bc5a14ea9e1367f7f973c3f9cc6eb`
+- Plan version: `TASK-058-PLAN-v3`
+- Planning Base: `4fb7ad1ecb5d726fff7f54d107de69fbabe69688`
+- Historical v2 Planning Base: `3bee8766ab3bc5a14ea9e1367f7f973c3f9cc6eb`
 - Historical v1 Planning Base: `b9b313d2af1071281bc62c0919ee4caceae85825`
 - Prior implementation: https://github.com/qifuxiao/QuantiQmt/pull/117
 - Supersession authority: https://github.com/qifuxiao/QuantiQmt/pull/117#issuecomment-5628617915
 - Canonical STOP: https://github.com/qifuxiao/QuantiQmt/pull/117#issuecomment-5629435266
 - Preserved STOP Head: `88d217661f6d6c127758fc245336a9f806788ab9`
 
-Human 本次单独授权从上述实时 main 创建 v2 范围准备 PR；TASK-058 保持唯一 active，
+Human 本次单独授权从上述实时 main 创建 v3 衔接与 CI 构建前置准备 PR；TASK-058 保持唯一 active，
 TASK-005 保持 blocked。此次 Coordinator / Codex / Windows 准备权限仅限：
+
+- `.github/workflows/ci.yml`
 
 - `tasks/active/TASK-058-risk-finalization-boundary.md`
 - `tasks/active/README.md`
@@ -82,9 +87,12 @@ TASK-005 保持 blocked。此次 Coordinator / Codex / Windows 准备权限仅�
 - `tests/spec/test_validate_agent_environment.py`
 
 该一次性准备权限不得继承给后续规范 writer。准备阶段不修改五份规范或三份实施测试，
-不创建 v2 Packet/Handoff，不修改业务、依赖、CI 或正式 Handoff validator。
+不创建 v3 Packet/Handoff，不修改业务、依赖或正式 Handoff validator。
+CI 仅在 quality 的现有 Test 前增加 `poetry build`；其他 jobs、触发条件、
+Python 版本、依赖和原测试命令均不变，不增加 JUnit 或零 skip 自动门禁。
+environment validator 仅增加精确 v3 身份支持，保留历史身份及全部拒绝检查。
 未来 writer 仅有 front matter 的精确 allowed_paths；不在清单中的测试同样禁止写入。
-v2 Packet/Handoff 仅供另行授权的 Coordinator bootstrap，冻结后 writer 不得改写。
+v3 Packet/Handoff 仅供另行授权的 Coordinator bootstrap，冻结后 writer 不得改写。
 候选方案中的遥测下界计数、固定资源上限、诊断接口及失败出口仅是待正式评审的
 设计方向，不是已接受规范，不追认 PR #117 的实现或历史 Review。
 
@@ -106,6 +114,33 @@ STOP 的 ASSIGN→STOP 序列结束于零 active writer；它不是继续实施�
 本地同步提交未推送，不是远端 STOP Head，不删除、改写或自动推送。
 旧 Packet/Handoff byte-for-byte 保留；旧 assignment 不覆盖 v2 路径、Base 或 writer。
 本准备 PR 不关闭、合并或继续写入 PR #119。
+
+### Preserved v2 authority and implementation source
+
+- PR: https://github.com/qifuxiao/QuantiQmt/pull/121
+- Assignment: https://github.com/qifuxiao/QuantiQmt/pull/121#issuecomment-5657641090
+- Canonical STOP: https://github.com/qifuxiao/QuantiQmt/pull/121#issuecomment-5673301389
+- STOP remote Head: `a3b15fdf9ca5e7783a7d0218450dd3933b034379`
+- STOP author: `qifuxiao`; created_at = updated_at = `2026-09-15T01:31:35Z`
+- STOP raw-body SHA-256: `533e17a150ce86e64242f8b0e9732fe9b66f1b7105f9ee898a29b9038eee3d49`
+- v2 Base: `4fb7ad1ecb5d726fff7f54d107de69fbabe69688`
+- Packet-only Head: `6ab80d812e07def8370e6cb31eb6c66c9f922df4`
+- Handoff commit: `9f5d2881a971bd3655a57046be0c25b14602e016`
+- Frozen v2 Packet blob: `f5c0cfb89649972ae34bf0e77f98ac306385caf1`
+- Frozen v2 Handoff blob: `06d5419c5288ba7fde0bd1178eebf8620fd10aa5`
+- Frozen v2 task blob: `3457ffe90f48aedc5cf2f5fddcbdb107f4d1cd83`
+- Implementation parent: `2322b4359d8949745d785bd693dfc4903f4f1b8f`
+
+该 STOP 保留原 ASSIGN 并追加 sequence 2，结束于零 active writer；不是继续实施的
+assignment，也不授权旧 writer 恢复。PR #121 的分支、全部提交、评论及 v1/v2
+Packet/Handoff 保留，不关闭、改写或推送旧实现分支。不推进 CI skip 例外或通用 waiver。
+旧 Head 的 CI 两个 wheel skip 保持如实披露，不能把 SUCCESS 视为零 skip。
+
+后续仅转移上述 Implementation parent 到 STOP remote Head 之间八个授权文件的差异，
+并逐一校验结果 blob 与该 exact Head 相同；五份规范与三个实施测试不重新设计。
+不引入旧 Packet/Handoff、旧 task 或旧同步拓扑；不合并旧实现分支的祖先历史。
+转移发生在新 assignment、新 Handoff 同步和正式 validation exit 0 后，本准备阶段不执行。
+若新 Base 导致八文件无法保持准确内容或历史来源不可验证，停止报告，不自行重写。
 
 依赖 TASK-003、TASK-015、TASK-029 必须维持可信 completed。本任务不依赖暂停的
 TASK-005，不建立循环；TASK-005 的恢复另行授权。
@@ -170,18 +205,23 @@ blob 为 `1a72adc78638dc223fb263df8beb69a7e2586bb3`。读取需验证精确来�
 ## Execution and handoff sequence
 
 准备 PR 独立 Review → Human Approval/merge → 实时冻结新的 exact main Base
-→ 新的 v2 packet-only TASK-058 PR → 新 Human canonical assignment → Coordinator add-only Handoff
+→ 新的 v3 packet-only TASK-058 PR → 新 Human canonical assignment → Coordinator add-only Handoff
 → assigned writer 首次无改写 merge 同步 → 正式 Handoff validation
-→ 五份规范变更与兼容性审查 → portable evidence/CI → 独立 Review
+→ 八文件精确转移与兼容性审查 → 新 exact Head CI/完整测试
+→ 独立 Environment Verification Agent 的同 Head evidence → 独立 Review
 → Human merge → 独立 closeout → Human 另行授权 TASK-005 重规划/激活。
 
 准备合并后的 Base 同时用于新 packet-only PR 和独立 add-only Handoff 的 parent；
 task blob 在该 Base 与 Implementation Head 相同。Packet identity 和 Handoff
-filename stem 均为 `TASK-058-IMPLEMENTATION-v2`，不修改 validator 的标准拓扑。
+filename stem 均为 `TASK-058-IMPLEMENTATION-v3`，不修改 validator 的标准拓扑。
 沿用既有 `repair_context.superseded_head_sha` 字段冻结 packet-only Starting Head，
 不虚构 Repair 历史。不在本任务文档中猜测未来 Base、PR number、writer 或 evidence。
-新的 v2 Packet、Handoff、assignment 尚不存在；旧 v1 对象不能替代。
-新 PR 明确 supersedes #119，旧 PR 的处置由 Human 决定，不能当作 TASK-058 完成。
+新的 v3 Packet、Handoff、assignment 尚不存在；旧 v1/v2 对象不能替代。
+新 Base 改变后旧 v2 Handoff 不能作为新实施权威；旧对象仅用于历史审计。
+新 Packet-only Head 只增加 v3 Packet；Handoff introduction 必须是新 Base 的直接
+单 parent、add-only 提交，writer 首次 no-ff merge 保留两 parent，按实际同步 Head
+执行完整正式 Handoff validation。不得依赖旧 Head 重跑来取得新 workflow。
+新 PR 明确 supersedes #121，旧 PR 的处置由 Human 决定，不能当作 TASK-058 完成。
 本准备 PR 不产生正式实施环境证据，不增加任何拓扑豁免。
 
 ## Verification and expected demonstration
@@ -197,7 +237,7 @@ exit code、passed/failed/skipped、源码绑定和未验证范围。构建不�
 `tests/unit/contracts` 覆盖 TASK-029 Risk wheel。全部 required tests 零失败、零 skip。
 
 本次准备阶段还必须执行 `poetry run mypy src scripts`、`poetry run ruff check .`、
-`poetry run ruff format --check .` 和 `git diff --check`，审计精确五路径、冻结对象、
+`poetry run ruff format --check .` 和 `git diff --check`，审计精确六路径、冻结对象、
 唯一 active、依赖、TASK-005 blocked、源码绑定、dist 归因及两个 wheel 实际执行。
 验证通过后提交、推送独立准备 PR，等待 exact-Head CI 后停止交给独立 Reviewer；
 不自行 Approval/merge/closeout。

@@ -141,8 +141,8 @@ def test_tasks_029_054_055_056_057_completed_task005_paused_only_task058_active(
         "tests/spec/test_order_registration_binding_contracts.py",
         "tests/spec/test_risk_runtime_schema_contract.py",
         "tests/unit/contracts/test_schema_bundle.py",
-        "ai/packets/TASK-058-IMPLEMENTATION-v2.md",
-        "ai/handoffs/TASK-058-IMPLEMENTATION-v2.yaml",
+        "ai/packets/TASK-058-IMPLEMENTATION-v3.md",
+        "ai/handoffs/TASK-058-IMPLEMENTATION-v3.yaml",
     ]
     verification = task_058["verification"]
     assert verification["commands"] == [
@@ -164,9 +164,12 @@ def test_tasks_029_054_055_056_057_completed_task005_paused_only_task058_active(
         assert frozen in paused_text
     assert "TASK-058" in paused_text
     task_text = active[0].read_text(encoding="utf-8")
-    assert "- Plan version: `TASK-058-PLAN-v2`" in task_text
+    assert "- Plan version: `TASK-058-PLAN-v3`" in task_text
     assert "5646729029" in task_text
     assert "02fc1857a2fa885ba59477de37a7e20ca965fc3f" in task_text
+    assert "5673301389" in task_text
+    assert "a3b15fdf9ca5e7783a7d0218450dd3933b034379" in task_text
+    assert "2322b4359d8949745d785bd693dfc4903f4f1b8f" in task_text
     assert "poetry build" in task_text
     assert task_058["forbidden_paths"] == [
         "src/**",
@@ -182,6 +185,8 @@ def test_tasks_029_054_055_056_057_completed_task005_paused_only_task058_active(
         "spec/state-machines/**",
         "ai/packets/TASK-058-IMPLEMENTATION-v1.md",
         "ai/handoffs/TASK-058-IMPLEMENTATION-v1.yaml",
+        "ai/packets/TASK-058-IMPLEMENTATION-v2.md",
+        "ai/handoffs/TASK-058-IMPLEMENTATION-v2.yaml",
         "pyproject.toml",
         "poetry.lock",
         "poetry.toml",
