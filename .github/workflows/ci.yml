@@ -32,6 +32,8 @@ jobs:
         run: poetry run ruff format --check .
       - name: Type check
         run: poetry run mypy src scripts
+      - name: Build distribution
+        run: poetry build
       - name: Test
         run: poetry run pytest tests/unit tests/property tests/spec tests/contract --cov --cov-report=term-missing
   persistence-postgresql:

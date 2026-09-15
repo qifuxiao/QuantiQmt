@@ -127,7 +127,7 @@ def _initial_authority(task_id: str, revision: int = 1) -> tuple[dict[str, Any],
             "poetry run python scripts/validate_specs.py",
             "poetry run pytest tests/spec tests/contract",
         ]
-        if revision == 2:
+        if revision in (2, 3):
             commands.append("poetry run pytest tests/unit/contracts")
         task["verification"]["commands"] = commands
         task["verification"]["required_lanes"][0]["commands"] = commands.copy()
@@ -139,7 +139,7 @@ def _initial_authority(task_id: str, revision: int = 1) -> tuple[dict[str, Any],
 
 
 @pytest.mark.parametrize(
-    ("task_id", "revision"), [("TASK-005", 1), ("TASK-058", 1), ("TASK-058", 2)]
+    ("task_id", "revision"), [("TASK-005", 1), ("TASK-058", 1), ("TASK-058", 2), ("TASK-058", 3)]
 )
 def test_initial_identity_and_lanes_are_supported(task_id: str, revision: int) -> None:
     task, handoff = _initial_authority(task_id, revision)
@@ -153,7 +153,7 @@ def test_initial_identity_and_lanes_are_supported(task_id: str, revision: int) -
 
 
 @pytest.mark.parametrize(
-    ("task_id", "revision"), [("TASK-005", 1), ("TASK-058", 1), ("TASK-058", 2)]
+    ("task_id", "revision"), [("TASK-005", 1), ("TASK-058", 1), ("TASK-058", 2), ("TASK-058", 3)]
 )
 def test_initial_git_loader_binds_exact_task_blob(
     tmp_path: Path, task_id: str, revision: int
@@ -236,7 +236,7 @@ def test_initial_git_loader_binds_exact_task_blob(
     ],
 )
 @pytest.mark.parametrize(
-    ("task_id", "revision"), [("TASK-005", 1), ("TASK-058", 1), ("TASK-058", 2)]
+    ("task_id", "revision"), [("TASK-005", 1), ("TASK-058", 1), ("TASK-058", 2), ("TASK-058", 3)]
 )
 def test_initial_authority_mismatches_fail_closed(case: str, task_id: str, revision: int) -> None:
     task, handoff = _initial_authority(task_id, revision)
@@ -244,7 +244,7 @@ def test_initial_authority_mismatches_fail_closed(case: str, task_id: str, revis
     if case == "task":
         handoff["task_id"] = "TASK-029"
     elif case == "plan":
-        handoff["plan_version"] = f"{task_id}-PLAN-v{3 - revision}"
+        handoff["plan_version"] = f"{task_id}-PLAN-v{2 if revision == 1 else 1}"
     elif case == "packet":
         handoff["packet_version"] = "TASK-029-IMPLEMENTATION-v1"
     elif case == "filename":
@@ -262,9 +262,9 @@ def test_initial_authority_mismatches_fail_closed(case: str, task_id: str, revis
     elif case == "inactive":
         task["status"] = "blocked"
     elif case == "mixed_packet":
-        handoff["packet_version"] = f"{task_id}-IMPLEMENTATION-v{3 - revision}"
+        handoff["packet_version"] = f"{task_id}-IMPLEMENTATION-v{2 if revision == 1 else 1}"
     elif case == "mixed_filename":
-        path = Path(f"ai/handoffs/{task_id}-IMPLEMENTATION-v{3 - revision}.yaml")
+        path = Path(f"ai/handoffs/{task_id}-IMPLEMENTATION-v{2 if revision == 1 else 1}.yaml")
     else:
         task["id"] = handoff["task_id"] = "TASK-059"
         handoff["plan_version"] = "TASK-059-PLAN-v1"
