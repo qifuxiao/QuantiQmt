@@ -188,11 +188,156 @@ side、`position_effect=CLOSE`、策略 tag 或负号均不能证明减仓。只
 
 ## Timeout 与审计输出
 
-Runner 在每个确定性规则边界前后读取 monotonic_ns，使用整数向上换算 `latency_us = ceil(delta_ns/1000)`；总耗时同样计算，且必须大于等于已记录逐规则耗时之和。不得使用 wall clock 计算 latency。`evaluated_at` 由外层 Clock 在结束后注入，仅用于审计，不参与 Decision hash。
+Runner 在每个确定性规则边界前后读取注入的 monotonic_ns，使用无溢出非负整数
+`latency_us = (delta_ns + 999) // 1000` 向上换算，禁止 float 或 wall clock。
+`start_ns` MUST 在本次 admission、worker/candidate 构造及聚合之前采样；
+原始绝对 deadline 为 `start_ns + evaluation_timeout_us * 1000`，不得在阶段切换时重置。
+规则、聚合、最终构造、Schema、semantics、deep freeze 和 caller handback 全部在预算内。
+任一检查点 `ceil((now_ns-start_ns)/1000) >= evaluation_timeout_us` 即失去正常交付资格；
+整数向上取整可能早于绝对 deadline 触发：3,999,001ns 在 4000us 预算下得到 4000us，MUST NOT PASS。
+仅以原始纳秒差小于 4,000,000ns 放行不符合此契约。
 
-elapsed 达到 `evaluation_timeout_us`（`total_latency_us >= evaluation_timeout_us`）时，即使当前 `next()` 尚未返回，Runner 也 MUST 停止等待并产生 `decision_origin=TIMEOUT_GUARD` 的 REJECT，追加 `RISK.SYSTEM.EVALUATION_TIMEOUT` 结果，error=`QQ-RISK-4005`，保留已完成结果，丢弃未完成结果。执行必须位于有界 cancellable worker；若底层不能证明已取消，attempt fencing 仍必须永久丢弃其 late output，且不能让超时 worker 无界堆积。相同 input_version 不得重评，重试必须重建含新 evaluation_time 的 RiskInput，因此产生新 input_version/decision_id。
+audit 的 `sample_ns` 是聚合与 `evaluated_at` 获取完成后、最终 primitive candidate 构造之前的
+一次采样；`evaluated_at` 由外层 Clock 注入 UTC business time，不参与 Decision hash。
+`timeout_floor` 在 TIMEOUT_GUARD 时为 `evaluation_timeout_us`，其他 origin 为 0。
+`total_latency_us = max(ceil((sample_ns-start_ns)/1000), sum(rule_timings[*].latency_us), timeout_floor)`。
+逐规则独立 ceil 的和可能大于整体 ceil；该字段是带规则下界及 timeout floor 的采样审计值，
+不是完整完成耗时，也不得宣称每个增量都来自原始测量。合成 timeout guard 自身仍有一条实际
+构造边界的非负整数 timing。若正常 candidate 的 total 已达到预算，MUST 转入 timeout 选择，
+不得为了维持 EVALUATOR/PASS 而 clamp、删 timing 或改变下界。
 
-Runner MUST 产生 `CONTRACT-RISK-AUDIT-OUTPUT-V1`：`decision` 是完整 RiskDecision；`evaluation_timeout_us` 等于本次 RuleSet 值。RiskRuleResult 是确定性 Decision 的组成部分且不含 latency；RuleTiming 是 Runner 测量值。NFR 所需的逐规则审计视图是二者按复合 key 一对一 join 的结果，不得把 `latency_us` 写回 RiskRuleResult 或语义 hash。
+最终 candidate 固定后 MUST NOT 修改任何字段，包括 `evaluated_at`、timings 和 total。
+正常与 timeout 输出都 MUST 完整经过 `primitive candidate → Draft 2020-12 Schema validation →
+PORTS-RISK semantic validation → deep freeze`。禁止先验证后换时间/复制未验证字段，
+禁止 validate/update-time/revalidate 循环。候选构造、最终验证及冻结的成本由独立完成测量覆盖。
+`terminal_ns` 在 caller 选定唯一终态并作最终 handback 检查时采样；
+`completion_latency_us = ceil((terminal_ns-start_ns)/1000)` 包含 admission、等待、聚合、构造、
+全部最终验证、冻结以及失败 cleanup。`risk_evaluation_latency_us` MUST 等于有效 audit 的 total；
+新增 `risk_completion_latency_us` 记录完整完成测量。两者不得混用，完整完成的 p99 目标仍为 4ms。
+handback 检查之后不得再同步执行 observer、阻塞清理或输出构造；函数返回/raise 的固定路径仍
+属于交付成本，未来运行时验收 MUST 测量调用方实际返回延迟，不能把 Python 调度开销排除以证明 NFR。
+
+elapsed 达到预算时，即使当前 `next()`、聚合或最终验证尚未返回，caller MUST 停止等待正常
+worker，撤销其交付资格并 fence late output。最多一次独立有界 cleanup 尝试构造
+`decision_origin=TIMEOUT_GUARD` 的 REJECT，追加 `RISK.SYSTEM.EVALUATION_TIMEOUT`，
+error=`QQ-RISK-4005`，保留截止选择时可验证的已完成 immutable prefix，丢弃未完成结果。
+仅当完整验证链成功且 cleanup handback 未到其等待上限，才返回 timeout audit；否则按下述
+无有效 audit 失败出口结束。cleanup 不延长正常 PASS 的原始绝对 deadline。
+相同 input_version 不得重评，重试必须由 Application 明确决定并重建含新 evaluation_time 的
+RiskInput，因此产生新 input_version/decision_id；异常本身不授权重试。
+
+Runner 的成功返回 MUST 是有效的 `CONTRACT-RISK-AUDIT-OUTPUT-V1`：`decision` 是完整
+RiskDecision；`evaluation_timeout_us` 等于本次 RuleSet 值。无有效 audit 时 MUST 抛出本地失败，
+不保证每次调用都有 audit。RiskRuleResult 是确定性 Decision 的组成部分且不含 latency；
+RuleTiming 是 Runner 测量值。逐规则审计视图是二者按复合 key 一对一 join 的结果，
+不得把 `latency_us` 写回 RiskRuleResult 或语义 hash。
+
+### 有限 worker、permit 与唯一终态
+
+每个 Runner MUST 在启动时固定正整数 `max_in_flight` 个 normal worker，另有恰好一个
+cleanup worker，独立 permit、零等待 backlog。normal 容量不足时只允许一次 cleanup admission，
+不得为 normal pool 排队。cleanup 等待绝对上限为选择 cleanup 的 `selection_ns + 4_000_000`，
+即最多 4000us；admission、candidate、验证、freeze 和 handback 均消耗此上限，进度不能续期。
+这是失败收尾资源上限，不是新的 PASS 预算，亦不提高完整完成的 4ms NFR。
+cleanup 容量不足、等待到期或已关闭立即返回本地失败，不排队、不重试、不递归 cleanup。
+
+caller 独占一次调用的终态选择；normal/cleanup worker 仅提供带 attempt identity 的候选或异常。
+在最终正常交付之前 MUST 再检查原始 deadline；在 cleanup 交付之前 MUST 检查 cleanup deadline。
+同一时刻的预算到期优先于正常结果；一旦选择 timeout/failure，late PASS、late REJECT 或 late
+exception 均不能改变 caller 结果或产生审计/OMS/Execution 副作用。已选定最终验证失败也不能
+被随后 timeout 或 cleanup 替换。deadline 前发现的业务 REJECT 仍须经过完整验证链。
+
+从 admission 到实际 worker 结束，permit MUST 始终归该 worker 所有；caller timeout、取消、
+close 或 fence 不能释放正在运行的 worker permit。只有实际完成（含异常退出），或证明任务
+尚未开始且已取消，才允许恰好一次释放。已 fence worker 仍计入容量，禁止 replacement；
+不得利用新建 Runner、重建 executor 或隐藏队列规避阻塞 worker 上限。
+完成规则的 immutable prefix 发布和读取必须有界、非等待；不可获得一致 prefix 时走
+`RESULT_UNAVAILABLE` 本地失败，不拼接在运行对象。8192 条结果已满而需追加 timeout guard 时，
+不得截断已完成结果或越过 Schema maxItems；cleanup 验证失败即走无有效 audit 出口。
+
+宿主 MUST 固定正整数 Runner 总数和同时调用上限、零等待 backlog；计数包含已 retired/closed
+但仍有活 worker 的 Runner。超限在入口 fail closed，不启动更多 worker。
+shutdown 关闭 admission、fence 输出；有界 join 只允许在宿主控制路径，交易路径禁止 join。
+未退出 worker 的资源和许可仍被宿主持有；宿主必须停止接收更多工作并由运维处理，不能循环
+重建。CPython 调度、GIL 及任意扩展/observer 行为不提供硬实时或同进程强隔离保证；本规范的
+容量与等待设计不能充当这些保证，后续 TASK-005 必须提供实际 deadline/阻塞边界证据。
+
+### 无有效 audit 的本地失败接口
+
+`RiskRunFailure` 是本地 Port 异常接口，不是新业务 DTO、Event、错误码或 Order 状态。
+其只读属性为 `kind`、`original_exception`、`cleanup_exception`；无异常对象时为 None。
+kind 的有限集合为 `ORIGINAL_FAILURE`、`RESULT_UNAVAILABLE`、`CLEANUP_CAPACITY`、
+`CLEANUP_WAIT_EXHAUSTED`、`CLEANUP_WORKER_EXCEPTION`、`CLOSED`。
+`original_exception` MUST 保留原异常对象及其 cause，不按异常名称/文本归类；包装的
+`__cause__` 指向该原异常（若存在）。最终 Schema/semantics/freeze 异常被 caller 选中时，
+kind 为 ORIGINAL_FAILURE，原样保留 first failure，禁止 repair/retry/fallback 或 timeout audit
+替代；没有第二次 cleanup 验证机会。
+
+cleanup 仅处理预算/normal admission 失败的 timeout 构造，不挽救已选中的输出验证异常。
+cleanup 无 permit 为 CLEANUP_CAPACITY；caller 等待上限到期为 CLEANUP_WAIT_EXHAUSTED；
+cleanup worker 实际抛出的任何异常，包括 builtin TimeoutError，均为 CLEANUP_WORKER_EXCEPTION，
+并保存在 `cleanup_exception` 及其原 cause 中，不能混淆为 caller wait timeout。
+若存在此前选定的原异常 MUST 同时保留，cleanup 故障不得覆盖它；没有原异常时不得伪造。
+close 先于终态选择则为 CLOSED；终态选择后 close 不改结果。
+本地故障不得映射到输入无效 `QQ-RISK-4008`；`QQ-RISK-4005` 仅用于有效 TIMEOUT_GUARD audit。
+
+无有效 audit 时，OrderApplication MUST 保留已注册订单 identity/state 并显式处理故障；
+MUST NOT 伪造 RiskDecision、自动迁移 OMS REJECTED、生成 v1 projection、持久化/发布 v1/v2、
+应用 approved OMS transition 或进入 Execution。记录受控失败诊断，不能以虚假 risk event 填补。
+不得由 builtin exception name/text 推断是否重试；本地 kind 也不构成自动重试权限。
+权威 audit/Outbox 故障始终 fail closed，不受以下可丢遥测许可影响。
+
+### 非等待遥测与下界诊断
+
+`RiskTelemetry` 位于 observer adapter 边界。单个实例固定一个 consumer worker、一个 pending
+slot、两个预分配 512KiB buffer；最多 8192 个 rule histogram 样本和四个 summary 样本
+（evaluation histogram、completion histogram、decision counter、fail-closed counter）。
+无有效 audit 时只允许 completion 和本地 fail-closed 样本，不能伪造 decision/rule 样本。
+数值仅允许固定 8 byte unsigned uint64，metric/label 编码为固定 enum id；只有无高基数 label
+的 latency、有限 decision/origin/error/reason 标签，禁止 rule_id 或任意字符串。
+enum 表启动时冻结，decision/origin/error 使用现有契约枚举，local fail-closed reason 仅使用
+上述 kind；禁止运行时注册标签。独立 loss counters 不占用/递归生成遥测样本。
+
+producer MUST 先 try-only 取得空闲 buffer 与 pending reservation，再构造 batch；禁止先复制
+audit、创建样本列表或编码无界整数/字符串。构造只写预留 buffer、有限索引和固定数量元数据，
+每个 audit 最多一次入队，不保留 audit 引用，不在交易线程调用 observer。超出数值、条数或
+encoded bytes 上限时整批 FULL drop；不得 clamp 权威审计值。normal worker/调用并发不能增加
+buffer 数；正在构造、pending、consumer processing 都占用相应 reservation/buffer。
+
+所有入口锁都是非嵌套、非等待的单次 try-lock，禁止 spin、retry 或递归 metrics。
+无法取得 admission 锁为 CONTENDED；已关闭为 CLOSED；无 buffer/slot 或 oversize 为 FULL。
+consumer 对已取走 batch 至多按编码顺序投递一次；observer 抛异常为 OBSERVER_EXCEPTION，
+允许已有 prefix 样本发生副作用，丢弃其余样本，禁止重播整批或把已发送 prefix 撤销。
+observer 阻塞时一直持有 consumer worker 和其 buffer，不新建替代 worker；最多再有一个
+pending batch，其后 FULL。任意同进程 observer 可阻塞 GIL/耗尽自身资源，容量声明仅约束
+adapter 所有的 worker/buffer，不能声称隔离任意 callback 的全部进程副作用。
+
+每种 drop reason 有一个 uint64 饱和计数器：它计的是成功观察到的 batch loss 事件下界，
+不是准确丢失样本数。更新仅尝试一次共享控制锁，必须在释放 admission/buffer 操作的锁后进行；
+admission、closed 状态、计数及诊断快照共享该控制锁，每个操作单独取得且绝不重入或嵌套。
+竞争时允许漏计且不再补记/重试，饱和于 `2**64-1` 并置对应 saturated 标志。
+因此标识为 LOWER_BOUND；零下界不能证明零丢失，也不能证明 NFR 合规。
+observer 异常可能只丢后缀，不能按整批样本数计作准确丢失；BUSY 与饱和都不能伪装成完整计数。
+
+本地只读 `try_diagnostics()` 返回固定大小 immutable snapshot：`state=AVAILABLE` 时含
+`semantics=LOWER_BOUND`、四个 `lower_bounds`、四个 `saturated` 与 `closed`；控制锁忙时只返回
+`state=BUSY`，其余值缺失，禁止以零或旧值冒充新快照。AVAILABLE 仅保证本地已计入值的一致快照，
+不保证未漏计。`closed` 表示 close 已完成，不是 observer 已退出；close 与统计 snapshot 在
+同一控制锁下各自有界提交，无法取得锁时返回 BUSY，不能报告已关闭。
+
+`close()` 是幂等 try-only 本地控制接口，返回 AVAILABLE（关闭完成）或 BUSY（未完成、无
+关闭状态变更）；不得在方法内重试。其线性化点关闭 admission 并 fence 未提交 producer，
+丢弃 pending batch（尝试一次 CLOSED 下界计数），不释放正在构造或 processing 的 buffer。
+这些所有者实际结束时归还 buffer，已 fence producer 不得发布并尝试记录 CLOSED；已进入
+observer 的样本副作用不可撤回，in-flight consumer 不开始剩余样本。控制方仅可在预先固定的
+宿主 shutdown 期限内有界再次调用 BUSY 的 close，禁止交易路径等待或 join。
+统计计数更新与关闭状态快照提交不得嵌套其他锁；close 只尝试一次控制锁，取得后完成固定大小
+状态转移，BUSY 无部分关闭，不能通过阻塞锁获得该保证。关闭/异常也不允许销毁仍被 worker
+使用的 buffer。
+
+遥测降级 MUST NOT 改变已选终态或授权丢失权威 audit/Outbox；审计可用性、fail-closed 和
+transaction 约束保持不变。新诊断/失败接口要求调用方适配和独立规范 Review；文本测试和
+旧 bundle 测试不是未来 Runner、故障调度覆盖或性能验收。
 
 ### RiskAuditSemanticValidator
 

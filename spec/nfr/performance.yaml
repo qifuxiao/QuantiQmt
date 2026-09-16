@@ -47,13 +47,42 @@ nfr:
     - weaken_audit_or_risk_for_performance
   risk_measurement:
     clock: monotonic_ns
-    total_latency_us: ceil_integer_delta_ns_div_1000
+    total_latency_us: "max(ceil((sample_ns-start_ns)/1000),sum(rule_timings),timeout_floor)"
+    completion_latency_us: "ceil((terminal_ns-start_ns)/1000)"
+    sample_boundary: before_final_primitive_candidate_construction
+    terminal_boundary: caller_owned_final_handback_or_failure_after_validation_and_freeze
+    timeout_floor: evaluation_timeout_us_for_timeout_origin_otherwise_zero
+    integer_conversion: nonnegative_delta_add_999_then_integer_divide_1000_without_float
+    deadline_start: before_admission_and_construction
+    deadline_ns: "start_ns + evaluation_timeout_us * 1000"
+    expiry: "ceil((now_ns-start_ns)/1000) >= evaluation_timeout_us"
+    rounding_boundary: {elapsed_ns: 3999001, elapsed_us: 4000, budget_us: 4000, pass_eligible: false}
+    deadline_covers: [admission, rules, aggregation, candidate, schema, semantics, freeze, handback]
+    finalization_chain: [primitive_candidate, draft_2020_12_schema, PORTS_RISK_semantics, deep_freeze]
+    post_validation_mutation: forbidden
+    validation_time_update_loop: forbidden
     per_rule_latency_us: "measure each deterministic rule boundary outside the pure evaluator"
     timeout_source: rule_set.evaluation_timeout_us
-    timeout_result: "QQ-RISK-4005 TIMEOUT_GUARD REJECT"
+    timeout_result: "validated QQ-RISK-4005 TIMEOUT_GUARD REJECT or local no-valid-audit failure"
     late_pass_replacement: forbidden
     worker_pool: "bounded max_in_flight with zero unbounded queue growth"
-    saturation_result: "QQ-RISK-4005 TIMEOUT_GUARD REJECT"
+    saturation_result: "one independent bounded cleanup attempt; valid timeout audit or local failure"
+    completion_nfr: full_completion_including_failed_calls_and_cleanup_retains_4ms_p99_target
+    performance_acceptance: requires_future_runtime_load_and_failure_measurements_not_spec_text_tests
+  risk_resources:
+    normal_workers: fixed_positive_max_in_flight
+    cleanup_workers: 1
+    cleanup_attempts_per_call: 1
+    waiting_backlog: 0
+    cleanup_wait_us: 4000
+    cleanup_deadline: selection_ns_plus_4000000_no_reset_on_admission_or_progress
+    permit_release: actual_worker_completion_or_proven_prestart_cancellation
+    blocked_worker_replacement: forbidden
+    host_runner_limit: fixed_positive_including_retired_runners_with_live_workers
+    host_invocation_limit: fixed_positive_with_zero_waiting_backlog
+    terminal_owner: caller_exactly_once_with_attempt_fencing
+    shutdown: close_admission_fence_outputs_bounded_supervisor_join_retain_live_worker_ownership
+    cpython_hard_realtime_or_arbitrary_same_process_isolation: not_guaranteed
   backtest:
     scheduler_queue_capacity: finite_versioned_policy
     historical_page_max_items: 10000

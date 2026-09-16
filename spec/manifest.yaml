@@ -1,8 +1,8 @@
 specification:
   name: quantiqmt
-  version: 0.15.0
+  version: 0.16.0
   status: accepted
-  updated: 2026-09-05
+  updated: 2026-09-14
   normative_root: spec
   explanatory_root: docs
 
@@ -212,36 +212,44 @@ catalogs:
       path: reviews/IMPLEMENTATION-READINESS-0.7.md
 
 change:
-  id: SPEC-0.15.0-RISK-RUNTIME-SCHEMA-BUNDLE
-  compatibility: additive_internal_Risk_output_schema_identities_and_runtime_bundle_validation; public_MessageEnvelope_Event_DTO_error_reason_rule_order_timeout_reduce_only_metric_and_state_semantics_unchanged
-  previous_version: 0.14.0
+  id: SPEC-0.16.0-RISK-FINALIZATION-BOUNDARY
+  compatibility: published_wire_Schema_Event_DTO_error_and_Order_state_unchanged; audit_sampling_and_integer_lower_bounds_clarified; new_local_failure_and_diagnostic_interfaces_require_caller_adaptation_and_independent_normative_review
+  previous_version: 0.15.0
   public_message_schema_changes: none
   storage_schema_changes: none
   error_catalog_change: none
-  runtime_code_change: package_resource_only_checksum_verified_Risk_schema_graph_and_shared_schema_semantic_freeze_boundary
-  review_change: requires_independent_Review_of_exact_TASK_029_Head_before_TASK_005_may_be_separately_activated
-  contract_change: adds_formal_RuleResult_and_RuleTiming_fragment_identities_and_routes_existing_Decision_Audit_and_v2_through_one_graph
-  semantic_validation_change: preserves_PORTS_RISK_first_failure_order_and_requires_schema_before_semantics_before_deep_freeze
-  internal_contracts_added: [CONTRACT-RISK-RULE-RESULT-V1, CONTRACT-RISK-RULE-TIMING-V1]
+  runtime_code_change: none
+  runtime_bundle_version: 0.15.0
+  runtime_bundle_source: 3bee8766ab3bc5a14ea9e1367f7f973c3f9cc6eb
+  runtime_bundle_manifest_blob: 1a72adc78638dc223fb263df8beb69a7e2586bb3
+  runtime_bundle_compatibility: identical_current_contract_index_file_set_and_bytes_required; old_builder_rejects_0_16_0_manifest; installed_0_15_0_bundle_is_not_a_new_Runner_implementation
+  review_change: candidate_boundaries_require_independent_exact_Head_normative_Review_and_Human_acceptance_before_runtime_adoption
+  contract_change: sampled_audit_latency_is_not_full_completion_latency; bounded_cleanup_may_return_no_valid_audit; telemetry_drops_are_possibly_missed_lower_bounds
+  semantic_validation_change: none_to_published_first_failure_order_or_Schema; final_candidate_fixed_before_Schema_then_semantics_then_deep_freeze
+  new_local_interfaces: [RiskRunFailure, RiskTelemetry.try_diagnostics, RiskTelemetry.close]
+  measurement_clarification: sampled_total_uses_integer_ceiling_rule_sum_lower_bound_and_timeout_floor; separate_completion_metric_includes_final_validation_freeze_and_handback
+  affected_consumers: [OrderApplication, RiskEvaluationRunner, output_factories, telemetry_adapters, diagnostics_operators, performance_acceptance_harness]
+  internal_contracts_added: []
   public_contracts_added: []
-  task_queue_change: TASK_029_remains_active_and_TASK_005_remains_blocked_pending_exact_Head_Review_and_separate_Human_authorization
-  affected_tasks: [TASK-005, TASK-029]
+  task_queue_change: TASK_058_remains_active_and_TASK_005_remains_blocked_pending_separate_Human_replan_and_activation
+  affected_tasks: [TASK-005, TASK-058]
   deployment_order:
-    - build_and_verify_the_versioned_package_resource
-    - deploy_the_verified_reader_and_validator_before_enabling_any_Risk_output_consumer
-    - keep_Risk_and_trading_gates_closed_on_bundle_or_validation_failure
-    - independently_review_the_exact_TASK_029_Head
-    - keep_TASK_005_blocked_until_separate_Human_authority
+    - independent_normative_review_and_human_acceptance
+    - adapt_callers_to_no_valid_audit_failure_and_lower_bound_diagnostics
+    - separate_TASK_005_replan_activation_and_runtime_implementation
+    - verify_runtime_deadline_resource_failure_and_performance_boundaries
+    - enable_new_runner_only_after_all_consumers_are_compatible
   migration:
-    runtime_data: replace_the_installed_package_bundle_atomically_without_data_backfill_or_source_spec_lookup
+    runtime_data: no_rewrite_of_historical_audits_or_0_15_0_package_bundle_no_source_fallback
     public_messages: unchanged
     storage: none
-    task_queue: TASK_029_active_and_TASK_005_blocked
+    task_queue: TASK_058_active_and_TASK_005_blocked
     destructive_backfill: forbidden
   rollback:
-    runtime_data: stop_Risk_output_consumers_and_install_a_previous_accepted_package_bundle_without_source_fallback
+    runtime_data: stop_new_Runner_and_restore_previous_accepted_compatible_consumers_and_runtime_without_source_fallback_or_audit_rewrite
+    trading_gates: closed_until_compatible_consumers_and_runner_are_verified
     public_messages: unchanged
-    task_queue: keep_TASK_005_blocked_if_TASK_029_evidence_is_invalidated
+    task_queue: keep_TASK_005_blocked_until_separate_Human_authority
     contracts: retain_published_Event_DTO_error_reason_and_state_semantics
     storage: none
     release: prohibited
